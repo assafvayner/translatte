@@ -4,6 +4,8 @@
 #
 # Usage: scripts/ios/test-sim.sh [models-dir] [image] [from] [to]
 # Env: TRANSLATTE_SIM_DEVICE (default "iPhone 18 Pro"), SKIP_RUST_BUILD=1 to reuse the xcframework.
+# TRANSLATTE_THREADS, TRANSLATTE_PERF and TRANSLATTE_PREFIX_CACHE are passed to the app; its stderr is
+# saved to out/ios/<name>.log.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -42,7 +44,11 @@ xcrun simctl install "$UDID" "$APP"
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
 DATA=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data)
 rm -f "$DATA/Documents/autotest.json"
-SIMCTL_CHILD_TRANSLATTE_MODELS_DIR="$MODELS" xcrun simctl launch "$UDID" "$BUNDLE_ID" \
+name="$(basename "${IMAGE%.*}")_${FROM}_${TO}"
+for var in TRANSLATTE_THREADS TRANSLATTE_PERF TRANSLATTE_PREFIX_CACHE; do
+  if [[ -n "${!var:-}" ]]; then export "SIMCTL_CHILD_$var=${!var}"; fi
+done
+SIMCTL_CHILD_TRANSLATTE_MODELS_DIR="$MODELS" xcrun simctl launch --stderr="$OUT/$name.log" "$UDID" "$BUNDLE_ID" \
   -autotest-image "$IMAGE" -autotest-from "$FROM" -autotest-to "$TO" >/dev/null
 
 for _ in $(seq 1 120); do
@@ -51,8 +57,8 @@ for _ in $(seq 1 120); do
 done
 [[ -f "$DATA/Documents/autotest.json" ]] || { echo "autotest timed out" >&2; exit 1; }
 sleep 1
-name="$(basename "${IMAGE%.*}")_${FROM}_${TO}"
 cp "$DATA/Documents/autotest.json" "$OUT/$name.json"
 xcrun simctl io "$UDID" screenshot "$OUT/$name.png" >/dev/null
 cat "$OUT/$name.json"
 echo "screenshot: $OUT/$name.png"
+echo "log: $OUT/$name.log"
