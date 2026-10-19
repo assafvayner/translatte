@@ -64,23 +64,21 @@ fn split_marker(line: &str) -> Option<(usize, &str)> {
     let rest = t[end..].trim_start_matches('*');
     let mut chars = rest.chars();
     let body = match chars.next()? {
-        // A dot followed by a digit is a decimal ("2.50"), not a list marker.
-        '.' | '．' => {
-            let after = chars.as_str().trim_start_matches('*');
-            after
-                .chars()
-                .next()
-                .and_then(digit)
-                .is_none()
-                .then_some(after)?
-        }
-        ')' | '）' | '、' | ':' | '：' => chars.as_str().trim_start_matches('*'),
+        '.' | '．' | ')' | '）' | '、' | ':' | '：' => chars.as_str().trim_start_matches('*'),
         c if c.is_whitespace() => {
             let after = rest.trim_start().strip_prefix('-')?;
-            starts_with_space_or_empty(after).then_some(after)?
+            if !starts_with_space_or_empty(after) {
+                return None;
+            }
+            after.trim_start()
         }
         _ => return None,
     };
+    // A separator followed by a digit is a decimal, time or range ("2.50", "2:30", "2 - 5"),
+    // not a list marker.
+    if body.chars().next().and_then(digit).is_some() {
+        return None;
+    }
     Some((num, body.trim()))
 }
 
@@ -247,6 +245,21 @@ mod tests {
     fn paren_comma_and_colon_markers_accept_any_following_char() {
         assert_eq!(parse_numbered("1)A\n2:B", 2), ab());
         assert_eq!(parse_numbered("1、A\n2: B", 2), ab());
+    }
+
+    #[test]
+    fn markers_followed_by_digits_are_text_for_all_separators() {
+        assert_eq!(
+            parse_numbered("1. Open\n2:30 pm\n2. Closed", 2),
+            Some(vec!["Open 2:30 pm".into(), "Closed".into()])
+        );
+        assert_eq!(
+            parse_numbered("1) A\n2)5 B\n2）３ C\n2、4\n2：1\n2 - 5 people\n2) D", 2),
+            Some(vec![
+                "A 2)5 B 2）３ C 2、4 2：1 2 - 5 people".into(),
+                "D".into()
+            ])
+        );
     }
 
     #[test]
