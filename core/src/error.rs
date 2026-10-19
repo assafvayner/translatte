@@ -28,6 +28,10 @@ pub enum TranslatteError {
     Translate(String),
     #[error("image error: {0}")]
     Image(String),
+    #[error("download error: {0}")]
+    Download(String),
+    #[error("download cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, TranslatteError>;
