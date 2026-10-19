@@ -55,7 +55,7 @@ push "$IMAGE" "$DEV/in.$EXT"
 
 mkdir -p "$OUT"
 if [[ "$TO" == "-" ]]; then LANG_ARGS="--no-translate"; else LANG_ARGS="--to '$TO'"; fi
-adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV /system/bin/time -v ./translatte run 'in.$EXT' \
+adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV TRANSLATTE_PERF=1 ${TRANSLATTE_THREADS:+TRANSLATTE_THREADS=$TRANSLATTE_THREADS} /system/bin/time -v ${TASKSET:+taskset $TASKSET} timeout ${RUN_TIMEOUT:-60} ./translatte run 'in.$EXT' \
   --from '$FROM' $LANG_ARGS --models models --manifest manifest.json -o out/out.png --json out/out.json" \
   2>&1 | tee "$OUT/$NAME.log"
 

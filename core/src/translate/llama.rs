@@ -45,9 +45,16 @@ impl LlamaGenerator {
         let backend = backend()?;
         let model =
             LlamaModel::load_from_file(backend, path, &LlamaModelParams::default()).map_err(err)?;
-        let threads = std::thread::available_parallelism()
-            .map(|n| n.get().min(8) as i32)
-            .unwrap_or(4);
+        let threads = std::env::var("TRANSLATTE_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| {
+                // On big.LITTLE phones extra threads land on little cores and stall the rest.
+                let cap = if cfg!(target_os = "android") { 5 } else { 8 };
+                std::thread::available_parallelism()
+                    .map(|n| n.get().min(cap) as i32)
+                    .unwrap_or(4)
+            });
         Ok(Self {
             model,
             backend,
@@ -87,15 +94,20 @@ impl TextGenerator for LlamaGenerator {
         for (i, t) in (0_i32..).zip(tokens) {
             batch.add(t, i, &[0], i == last).map_err(err)?;
         }
+        let t0 = std::time::Instant::now();
+        let n_prompt = batch.n_tokens();
         ctx.decode(&mut batch).map_err(err)?;
+        let prefill = t0.elapsed();
 
         let mut sampler = LlamaSampler::greedy();
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut out = String::new();
         let mut truncated = true;
         let start = batch.n_tokens();
+        let mut n_gen = 0;
         for pos in (start..).take(budget) {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+            n_gen += 1;
             sampler.accept(token);
             if vocab.is_eog(token) {
                 truncated = false;
@@ -118,6 +130,17 @@ impl TextGenerator for LlamaGenerator {
         }
         out.reserve(decoder.max_utf8_buffer_length(0).unwrap_or(4));
         let _ = decoder.decode_to_string(&[], &mut out, true);
+        if std::env::var_os("TRANSLATTE_PERF").is_some() {
+            let decode = t0.elapsed() - prefill;
+            eprintln!(
+                "llama: threads={} prefill {n_prompt} tok in {:.2}s ({:.1} tok/s), decode {n_gen} tok in {:.2}s ({:.1} tok/s)",
+                self.threads,
+                prefill.as_secs_f64(),
+                n_prompt as f64 / prefill.as_secs_f64(),
+                decode.as_secs_f64(),
+                n_gen as f64 / decode.as_secs_f64(),
+            );
+        }
         Ok(Generation {
             text: out,
             truncated,

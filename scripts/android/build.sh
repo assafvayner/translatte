@@ -44,10 +44,18 @@ if [[ ! -f "$ORT_DIR/lib/libonnxruntime.so" ]]; then
 fi
 export ORT_LIB_LOCATION="$ORT_DIR/lib" ORT_PREFER_DYNAMIC_LINK=1
 
+# llama-cpp-sys defaults Android to plain armv8-a, which lacks the int8 dot-product/matmul kernels Q4_K needs.
+# The Pixel 8 (Tensor G3) and other armv8.6+ phones support both. Repacking copies the weights into anonymous
+# memory on top of the mmap, which pushed a Pixel 8 into swap and made decode ~2x slower.
+# Changing either needs a clean llama-cpp-sys-2 build (cargo only reruns its build script for vars it saw set).
+export GGML_CPU_ARM_ARCH="${GGML_CPU_ARM_ARCH:-armv8.6-a+dotprod+i8mm}"
+export GGML_CPU_REPACK="${GGML_CPU_REPACK:-OFF}"
+
 cd "$ROOT"
-# OpenSSL-backed TLS: the default rustls verifier needs JNI, which a bare `adb shell` binary lacks.
-# Test-only; the app keeps rustls (see README "Android"). OpenSSL is built from source (perl, make).
-cargo build -p translatte-cli --release --target "$TARGET" --no-default-features --features tls-native "$@"
+# TLS=native (default here): OpenSSL-backed, test-only, since the rustls verifier needs JNI, which a bare
+# `adb shell` binary lacks, so `fetch` panics under TLS=rustls. The app keeps rustls (see README "Android").
+TLS="${TLS:-native}"
+cargo build -p translatte-cli --release --target "$TARGET" --no-default-features --features "tls-$TLS" "$@"
 
 OUT="$ROOT/target/$TARGET/release"
 cp "$ORT_DIR/lib/libonnxruntime.so" "$OUT/"
