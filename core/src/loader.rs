@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::manifest::{Language, DETECTOR_ID, TRANSLATOR_ID};
 use crate::model_store::{InstallState, ModelStore};
 use crate::ocr::detector::Detector;
@@ -22,12 +24,22 @@ pub fn load_pipeline(
     src: &Language,
     translate: bool,
 ) -> Result<LoadedPipeline> {
+    load_pipeline_with(store, src, translate, None)
+}
+
+/// Like [`load_pipeline`], but `translator_gguf` replaces the installed translator model.
+pub fn load_pipeline_with(
+    store: &ModelStore,
+    src: &Language,
+    translate: bool,
+    translator_gguf: Option<&Path>,
+) -> Result<LoadedPipeline> {
     let Some(pack) = &src.script_pack else {
         return Err(TranslatteError::NoScriptPack(src.code.clone()));
     };
     require_installed(store, DETECTOR_ID)?;
     require_installed(store, pack)?;
-    if translate {
+    if translate && translator_gguf.is_none() {
         require_installed(store, TRANSLATOR_ID)?;
     }
     let detector = Detector::load(&store.model_file(DETECTOR_ID, "inference.onnx")?)?;
@@ -36,9 +48,11 @@ pub fn load_pipeline(
         &store.model_file(pack, "dict.txt")?,
     )?;
     let translator = if translate {
-        Some(BatchTranslator::new(LlamaGenerator::load(
-            &store.model_file(TRANSLATOR_ID, "model.gguf")?,
-        )?))
+        let path = match translator_gguf {
+            Some(p) => p.to_path_buf(),
+            None => store.model_file(TRANSLATOR_ID, "model.gguf")?,
+        };
+        Some(BatchTranslator::new(LlamaGenerator::load(&path)?))
     } else {
         None
     };

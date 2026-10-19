@@ -70,6 +70,9 @@ enum Command {
         /// OCR only; skip loading the LLM and outline the detected text boxes instead.
         #[arg(long)]
         no_translate: bool,
+        /// Translator GGUF to use instead of the installed one (e.g. to compare quantizations).
+        #[arg(long, conflicts_with = "no_translate")]
+        translator_gguf: Option<PathBuf>,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -132,6 +135,7 @@ fn real_main() -> Result<i32> {
             output,
             json,
             no_translate,
+            translator_gguf,
             models,
         } => {
             if to.is_none() && !no_translate {
@@ -147,8 +151,14 @@ fn real_main() -> Result<i32> {
                 None => src,
             };
             let t0 = Instant::now();
-            let mut pipeline = setup::build_pipeline(&store, src, !no_translate)?;
+            let mut pipeline =
+                setup::build_pipeline(&store, src, !no_translate, translator_gguf.as_deref())?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());
+            if !no_translate {
+                let t = Instant::now();
+                pipeline.warm(src, tgt)?;
+                eprintln!("warmed translator prefix in {:.2?}", t.elapsed());
+            }
             let t1 = Instant::now();
             let mut last = "";
             let output_data = pipeline.run(&img, src, tgt, &mut |s: Stage| {
