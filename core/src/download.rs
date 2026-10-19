@@ -406,7 +406,8 @@ struct Reporter<'p> {
 impl Reporter<'_> {
     fn report(&mut self, f: &ModelFile, bytes_done: u64, force: bool) {
         let now = Instant::now();
-        if !force && self.last.is_some_and(|t| now - t < self.interval) {
+        // The final update for a file is always sent forced, once the file is committed.
+        if !force && (bytes_done >= f.size || self.last.is_some_and(|t| now - t < self.interval)) {
             return;
         }
         self.last = Some(now);
@@ -877,6 +878,11 @@ PostProcess:
         assert!(events
             .windows(2)
             .all(|w| w[0].model_bytes_done <= w[1].model_bytes_done));
+        let done: Vec<_> = events
+            .iter()
+            .filter(|e| e.bytes_done == e.bytes_total)
+            .collect();
+        assert_eq!(done.len(), 1);
         let last = events.last().unwrap();
         assert_eq!(last.bytes_done, BIG as u64);
         assert_eq!(last.model_bytes_total, BIG as u64);
