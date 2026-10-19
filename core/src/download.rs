@@ -611,6 +611,8 @@ PostProcess:
         hang_open: Option<Option<Arc<AtomicBool>>>,
         /// Streams wait this long before their first chunk, or forever when `Duration::MAX`.
         first_chunk_delay: Option<Duration>,
+        /// Streams hang after their first chunk.
+        stall_after_first_chunk: bool,
         requests: Mutex<Vec<(String, Option<Range<u64>>)>>,
     }
 
@@ -671,9 +673,11 @@ PostProcess:
             }
             let len = Some(data.len() as u64);
             let delay = self.first_chunk_delay;
+            let stall = self.stall_after_first_chunk;
             Box::pin(async move {
                 let items = futures::stream::iter(items);
                 let stream: ByteStream = match delay {
+                    None if stall => Box::pin(items.take(1).chain(futures::stream::pending())),
                     None => Box::pin(items),
                     Some(d) if d == Duration::MAX => Box::pin(futures::stream::pending()),
                     Some(d) => Box::pin(
@@ -996,6 +1000,23 @@ PostProcess:
             fx.store.state("translator").unwrap(),
             InstallState::Installed
         );
+    }
+
+    #[test]
+    fn stall_after_first_chunk_times_out_at_idle_timeout() {
+        let mut fx = fixture();
+        fx.fake.stall_after_first_chunk = true;
+        let d = Downloader::with_source(&fx.store, &fx.fake);
+        let rt = paused_runtime();
+        let start = rt.block_on(async { tokio::time::Instant::now() });
+        rt.block_on(d.download_model("translator", &AtomicBool::new(false), |_| {}))
+            .unwrap();
+        // One chunk per request, each followed by an idle timeout, until the file is complete.
+        let n = requests(&fx).len() as u32;
+        assert_eq!(n as usize, BIG / fx.fake.chunk);
+        let waited = rt.block_on(async move { start.elapsed() });
+        assert!(waited >= IDLE_TIMEOUT * (n - 1), "{waited:?}");
+        assert!(waited < (IDLE_TIMEOUT + RETRY_DELAY) * n, "{waited:?}");
     }
 
     #[test]
