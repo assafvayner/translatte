@@ -25,13 +25,14 @@ DEPS="$ROOT/target/ios-deps"
 export IPHONEOS_DEPLOYMENT_TARGET=17.0
 for target in "${TARGETS[@]}"; do
   lib_dir=$([[ $target == *-sim ]] && echo "$DEPS/lib-sim" || echo "$DEPS/lib-ios")
-  ORT_LIB_LOCATION="$lib_dir" cargo build -p translatte-ffi --lib $PROFILE_FLAG --target "$target"
+  ORT_LIB_LOCATION="$lib_dir" cargo build --locked -p translatte-ffi --lib $PROFILE_FLAG --target "$target"
 done
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 
 GEN="$ROOT/target/ios-gen"
 rm -rf "$GEN" && mkdir -p "$GEN/headers"
-cargo run -q -p translatte-ffi --bin uniffi-bindgen -- generate \
-  --library "$ROOT/target/${TARGETS[0]}/$PROFILE/libtranslatte_ffi.a" \
+cargo run -q --locked -p translatte-ffi --bin uniffi-bindgen -- generate \
+  --library "$TARGET_DIR/${TARGETS[0]}/$PROFILE/libtranslatte_ffi.a" \
   --language swift --out-dir "$GEN"
 mv "$GEN"/*.h "$GEN/headers/"
 mv "$GEN/translatte_ffiFFI.modulemap" "$GEN/headers/module.modulemap"
@@ -42,7 +43,7 @@ XCF="$ROOT/ios/Frameworks/TranslatteFFI.xcframework"
 rm -rf "$XCF"
 args=()
 for target in "${TARGETS[@]}"; do
-  args+=(-library "$ROOT/target/$target/$PROFILE/libtranslatte_ffi.a" -headers "$GEN/headers")
+  args+=(-library "$TARGET_DIR/$target/$PROFILE/libtranslatte_ffi.a" -headers "$GEN/headers")
 done
 xcodebuild -create-xcframework "${args[@]}" -output "$XCF" >/dev/null
 echo "built $XCF"

@@ -72,6 +72,8 @@ struct ContentView: View {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self), let picked = UIImage(data: data) {
                     await model.translate(picked)
+                } else {
+                    model.photoFailedToLoad()
                 }
                 pickerItem = nil
             }

@@ -83,11 +83,12 @@ translator defaults to 2 threads (the efficiency cores stall llama.cpp's thread 
 ## Tests
 
 ```bash
-cargo test --workspace                                                    # unit tests
+cargo test --workspace                                                    # unit tests (core, cli, ffi)
 TRANSLATTE_MODELS=$PWD/models-cache cargo test --workspace --release \
   --features translatte-core/llama                                        # + real-model tests
 TRANSLATTE_NETWORK_TESTS=1 TRANSLATTE_MODELS=$PWD/models-cache \
   cargo test -p translatte-core --features download,tls-rustls --test download_network  # downloads from the Hub
+scripts/ios/test-sim.sh                                                   # ffi through the Swift bindings
 ```
 
 ## Android (emulator) smoke test

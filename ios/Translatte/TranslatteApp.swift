@@ -14,7 +14,7 @@ struct TranslatteApp: App {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: model.releaseModels()
-            case .active: model.prepare()
+            case .active: model.reload()
             default: break
             }
         }

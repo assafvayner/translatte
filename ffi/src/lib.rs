@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest};
@@ -178,12 +178,14 @@ impl Engine {
         let manifest = self.store.manifest();
         let src = manifest.language(&source)?;
         let tgt = manifest.language(&target)?;
-        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cached = self.lock_cached();
         Ok(self.pipeline(&mut cached, src, true)?.warm(src, tgt)?)
     }
 
     /// Decodes a PNG or JPEG, runs OCR for `source` and, when `translate` is set, translates into
-    /// `target`. Blocking; call it off the main thread.
+    /// `target`. Blocking; call it off the main thread. The cache holds one pipeline, so a call with
+    /// `translate` unset replaces a cached translating pipeline with an OCR-only one, and the next
+    /// translating call (or `prepare`) reloads the translator.
     pub fn translate_image(
         &self,
         image: Vec<u8>,
@@ -197,7 +199,7 @@ impl Engine {
         let tgt = manifest.language(&target)?;
         let img = image::load_from_memory(&image)?.to_rgb8();
 
-        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cached = self.lock_cached();
         let pipeline = self.pipeline(&mut cached, src, translate)?;
         let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
         Ok(TranslationResult::from_output(
@@ -209,11 +211,22 @@ impl Engine {
 
     /// Frees loaded models (e.g. when the app is backgrounded).
     pub fn unload(&self) {
-        *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.lock_cached() = None;
     }
 }
 
 impl Engine {
+    /// A panic mid-run can leave the cached pipeline in a bad state (e.g. llama.cpp's KV cache
+    /// half-updated), so a poisoned lock drops it rather than reusing it.
+    fn lock_cached(&self) -> MutexGuard<'_, Option<Cached>> {
+        self.cached.lock().unwrap_or_else(|poisoned| {
+            let mut cached = poisoned.into_inner();
+            *cached = None;
+            self.cached.clear_poison();
+            cached
+        })
+    }
+
     fn pipeline<'a>(
         &self,
         cached: &'a mut Option<Cached>,
@@ -310,6 +323,19 @@ mod tests {
         assert!(err.to_string().contains("unknown language"), "{err}");
         assert!(engine.prepare("fr".into(), "en".into()).is_err());
         assert!(Engine::new("/tmp".into(), "{}".into()).is_err());
+    }
+
+    #[test]
+    fn poisoned_lock_drops_the_cached_pipeline() {
+        let dir = tempfile_dir();
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _cached = engine.cached.lock().unwrap();
+            panic!("panicked mid-run");
+        }));
+        assert!(engine.cached.is_poisoned());
+        assert!(engine.lock_cached().is_none());
+        assert!(!engine.cached.is_poisoned());
     }
 
     fn tempfile_dir() -> PathBuf {
