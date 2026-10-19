@@ -1,3 +1,4 @@
+mod draw;
 mod setup;
 
 use std::path::PathBuf;
@@ -95,10 +96,21 @@ fn main() -> Result<()> {
             eprintln!("[{:>8.2?}] done: {} regions", t1.elapsed(), regions.len());
             let json_text = serde_json::to_string_pretty(&regions)?;
             match json {
-                Some(p) => std::fs::write(p, json_text)?,
+                Some(p) => {
+                    if let Some(dir) = p.parent() {
+                        std::fs::create_dir_all(dir)?;
+                    }
+                    std::fs::write(p, json_text)?
+                }
                 None => println!("{json_text}"),
             }
-            let _ = output;
+            let mut rendered = img.clone();
+            draw::Renderer::new().draw_regions(&mut rendered, &regions);
+            if let Some(dir) = output.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            rendered.save(&output)?;
+            eprintln!("wrote {}", output.display());
         }
     }
     Ok(())
