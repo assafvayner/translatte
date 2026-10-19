@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run the cross-compiled CLI on a connected Android device/emulator (see README "Android (emulator) smoke test").
 # Usage: scripts/android/run.sh <image> <from> <to|-> [name]   ("-" as <to> runs OCR only)
+# TRANSLATOR_GGUF=<local .gguf> pushes that file and runs with it instead of the installed translator.
 set -euo pipefail
 
 [[ $# -ge 3 ]] || { echo "usage: $0 <image> <from> <to|-> [name]" >&2; exit 2; }
@@ -23,7 +24,8 @@ m = json.load(open(sys.argv[1]))
 print(next((l.get("script_pack") or "" for l in m["languages"] if l["code"] == sys.argv[2]), ""))' "$MANIFEST" "$FROM")"
 [[ -n "$PACK" ]] || { echo "unknown source language (or no recognizer pack): $FROM" >&2; exit 1; }
 IDS=(det "$PACK")
-[[ "$TO" == "-" ]] || IDS+=(translator)
+if [[ "$TO" != "-" && -z "${TRANSLATOR_GGUF:-}" ]]; then IDS+=(translator); fi
+[[ -z "${TRANSLATOR_GGUF:-}" || -f "$TRANSLATOR_GGUF" ]] || { echo "translator gguf not found: $TRANSLATOR_GGUF" >&2; exit 1; }
 for id in "${IDS[@]}"; do
   [[ -d "$MODELS/$id" ]] || { echo "model dir missing: $MODELS/$id (run: translatte fetch)" >&2; exit 1; }
 done
@@ -49,13 +51,18 @@ push "$MANIFEST" "$DEV/manifest.json"
 for id in "${IDS[@]}"; do
   for f in "$MODELS/$id"/*; do push_model "$f" "$DEV/models/$id/$(basename "$f")"; done
 done
+ALT_ARGS=""
+if [[ -n "${TRANSLATOR_GGUF:-}" && "$TO" != "-" ]]; then
+  push_model "$TRANSLATOR_GGUF" "$DEV/models/translator-alt/model.gguf"
+  ALT_ARGS="--translator-gguf models/translator-alt/model.gguf"
+fi
 EXT="${IMAGE##*.}"
 adb shell "rm -rf '$DEV/out' && mkdir -p '$DEV/out'"
 push "$IMAGE" "$DEV/in.$EXT"
 
 mkdir -p "$OUT"
-if [[ "$TO" == "-" ]]; then LANG_ARGS="--no-translate"; else LANG_ARGS="--to '$TO'"; fi
-adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV TRANSLATTE_PERF=1 ${TRANSLATTE_THREADS:+TRANSLATTE_THREADS=$TRANSLATTE_THREADS} /system/bin/time -v ${TASKSET:+taskset $TASKSET} timeout ${RUN_TIMEOUT:-60} ./translatte run 'in.$EXT' \
+if [[ "$TO" == "-" ]]; then LANG_ARGS="--no-translate"; else LANG_ARGS="--to '$TO' $ALT_ARGS"; fi
+adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV TRANSLATTE_PERF=1 ${TRANSLATTE_THREADS:+TRANSLATTE_THREADS=$TRANSLATTE_THREADS} ${TRANSLATTE_PREFIX_CACHE:+TRANSLATTE_PREFIX_CACHE=$TRANSLATTE_PREFIX_CACHE} /system/bin/time -v ${TASKSET:+taskset $TASKSET} timeout ${RUN_TIMEOUT:-60} ./translatte run 'in.$EXT' \
   --from '$FROM' $LANG_ARGS --models models --manifest manifest.json -o out/out.png --json out/out.json" \
   2>&1 | tee "$OUT/$NAME.log"
 
