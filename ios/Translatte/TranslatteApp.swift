@@ -12,7 +12,11 @@ struct TranslatteApp: App {
                 .task { await model.runAutotestIfRequested() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { model.releaseModels() }
+            switch phase {
+            case .background: model.releaseModels()
+            case .active: model.prepare()
+            default: break
+            }
         }
     }
 }

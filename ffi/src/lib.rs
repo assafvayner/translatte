@@ -171,6 +171,17 @@ impl Engine {
             .collect()
     }
 
+    /// Loads the models for `source` and prefills the translator's instruction prefix for
+    /// `source` to `target`, so the next `translate_image` for this pair starts translating sooner.
+    /// Call it when the languages are picked or change. Blocking; call it off the main thread.
+    pub fn prepare(&self, source: String, target: String) -> Result<(), FfiError> {
+        let manifest = self.store.manifest();
+        let src = manifest.language(&source)?;
+        let tgt = manifest.language(&target)?;
+        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(self.pipeline(&mut cached, src, true)?.warm(src, tgt)?)
+    }
+
     /// Decodes a PNG or JPEG, runs OCR for `source` and, when `translate` is set, translates into
     /// `target`. Blocking; call it off the main thread.
     pub fn translate_image(
@@ -187,6 +198,28 @@ impl Engine {
         let img = image::load_from_memory(&image)?.to_rgb8();
 
         let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        let pipeline = self.pipeline(&mut cached, src, translate)?;
+        let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
+        Ok(TranslationResult::from_output(
+            out,
+            img.width(),
+            img.height(),
+        ))
+    }
+
+    /// Frees loaded models (e.g. when the app is backgrounded).
+    pub fn unload(&self) {
+        *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+impl Engine {
+    fn pipeline<'a>(
+        &self,
+        cached: &'a mut Option<Cached>,
+        src: &Language,
+        translate: bool,
+    ) -> Result<&'a mut LoadedPipeline, FfiError> {
         let reusable = cached.as_ref().is_some_and(|c| {
             Some(&c.script_pack) == src.script_pack.as_ref() && c.translate == translate
         });
@@ -199,18 +232,7 @@ impl Engine {
                 pipeline,
             });
         }
-        let pipeline = &mut cached.as_mut().expect("pipeline loaded above").pipeline;
-        let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
-        Ok(TranslationResult::from_output(
-            out,
-            img.width(),
-            img.height(),
-        ))
-    }
-
-    /// Frees loaded models (e.g. when the app is backgrounded).
-    pub fn unload(&self) {
-        *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        Ok(&mut cached.as_mut().expect("pipeline loaded above").pipeline)
     }
 }
 
@@ -284,6 +306,9 @@ mod tests {
             .translate_image(vec![], "xx".into(), "en".into(), false, None)
             .unwrap_err();
         assert!(err.to_string().contains("unknown language"), "{err}");
+        let err = engine.prepare("xx".into(), "en".into()).unwrap_err();
+        assert!(err.to_string().contains("unknown language"), "{err}");
+        assert!(engine.prepare("fr".into(), "en".into()).is_err());
         assert!(Engine::new("/tmp".into(), "{}".into()).is_err());
     }
 
@@ -316,6 +341,7 @@ mod tests {
             "/../core/tests/data/hello_world.png"
         ))
         .unwrap();
+        engine.prepare("en".into(), "de".into()).unwrap();
         let recorder = Arc::new(Recorder(Mutex::new(Vec::new())));
         let r = engine
             .translate_image(png, "en".into(), "de".into(), true, Some(recorder.clone()))

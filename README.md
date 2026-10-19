@@ -75,6 +75,11 @@ Rust core links against for iOS. The simulator reads models straight from the ho
 in-app download lands. Device builds need a development team and the `increased-memory-limit` entitlement
 (already in `Translatte.entitlements`) for the 2.5GB translation model.
 
+The app loads the models and prefills the translator's instruction prefix (`Engine::prepare`) on launch and
+whenever the languages change, so a photo goes straight to OCR and translating the text itself. On a device the
+translator defaults to 2 threads (the efficiency cores stall llama.cpp's thread pool); `test-sim.sh` passes
+`TRANSLATTE_THREADS`, `TRANSLATTE_PERF` and `TRANSLATTE_PREFIX_CACHE` to the app and saves its stderr to `out/ios/`.
+
 ## Tests
 
 ```bash

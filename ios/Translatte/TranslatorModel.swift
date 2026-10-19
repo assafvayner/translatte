@@ -16,10 +16,16 @@ final class TranslatorModel: ObservableObject {
     @Published private(set) var modelsReady = false
     @Published private(set) var setupError: String?
     @Published var sourceCode = UserDefaults.standard.string(forKey: "source") ?? "" {
-        didSet { UserDefaults.standard.set(sourceCode, forKey: "source") }
+        didSet {
+            UserDefaults.standard.set(sourceCode, forKey: "source")
+            prepare()
+        }
     }
     @Published var targetCode = UserDefaults.standard.string(forKey: "target") ?? "en" {
-        didSet { UserDefaults.standard.set(targetCode, forKey: "target") }
+        didSet {
+            UserDefaults.standard.set(targetCode, forKey: "target")
+            prepare()
+        }
     }
     @Published private(set) var image: UIImage?
     @Published private(set) var result: TranslationResult?
@@ -59,6 +65,7 @@ final class TranslatorModel: ObservableObject {
                 sourceCode = sourceLanguages.first?.code ?? ""
             }
             setupError = nil
+            prepare()
         } catch {
             setupError = error.localizedDescription
             modelsReady = false
@@ -91,6 +98,20 @@ final class TranslatorModel: ObservableObject {
             phase = output.translationError.map { .failed("Translation failed: \($0)") } ?? .done
         } catch {
             phase = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Loads the models and prefills the translator's prompt prefix for the picked languages on the
+    /// worker queue, so a photo taken next skips that work.
+    func prepare() {
+        guard let engine, modelsReady, !sourceCode.isEmpty else { return }
+        let (source, target) = (sourceCode, targetCode)
+        worker.async {
+            do {
+                try engine.prepare(source: source, target: target)
+            } catch {
+                NSLog("translatte: prepare failed: %@", error.localizedDescription)
+            }
         }
     }
 
