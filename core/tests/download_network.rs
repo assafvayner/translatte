@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 use futures::future::BoxFuture;
-use translatte_core::download::{ByteStream, Downloader, HubSource, Source};
+use translatte_core::download::{Downloader, HubSource, Opened, Source};
 use translatte_core::manifest::{Manifest, ModelFile, ModelSource};
 use translatte_core::model_store::{InstallState, ModelStore};
 use translatte_core::Result;
@@ -48,7 +48,7 @@ impl Source for &Recording {
         source: &'a ModelSource,
         path: &'a str,
         range: Option<Range<u64>>,
-    ) -> BoxFuture<'a, Result<ByteStream>> {
+    ) -> BoxFuture<'a, Result<Opened>> {
         self.requests
             .lock()
             .unwrap()

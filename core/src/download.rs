@@ -5,12 +5,13 @@
 //! Downloaded bytes are untrusted until that check passes.
 
 use std::fs::OpenOptions;
+use std::future::Future;
 use std::io::{self, Write};
 use std::ops::Range;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -23,6 +24,13 @@ use crate::{Result, TranslatteError};
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
 
+pub struct Opened {
+    pub stream: ByteStream,
+    /// Length of the body, when known. For a ranged request, the full file length means the
+    /// server ignored the range and is sending the file from the start.
+    pub len: Option<u64>,
+}
+
 /// Where file bytes come from: [`HubSource`] in production, fakes in tests.
 pub trait Source: Send + Sync {
     /// Streams `path` from the pinned `source` repo, limited to `range` when given.
@@ -31,7 +39,7 @@ pub trait Source: Send + Sync {
         source: &'a ModelSource,
         path: &'a str,
         range: Option<Range<u64>>,
-    ) -> BoxFuture<'a, Result<ByteStream>>;
+    ) -> BoxFuture<'a, Result<Opened>>;
 }
 
 /// Fetches files from the Hugging Face Hub (or a mirror) with `hf-hub`.
@@ -66,10 +74,10 @@ impl Source for HubSource {
         source: &'a ModelSource,
         path: &'a str,
         range: Option<Range<u64>>,
-    ) -> BoxFuture<'a, Result<ByteStream>> {
+    ) -> BoxFuture<'a, Result<Opened>> {
         Box::pin(async move {
             let (owner, name) = hf_hub::split_id(&source.repo);
-            let (_, stream) = self
+            let (len, stream) = self
                 .client
                 .model(owner, name)
                 .download_file_stream()
@@ -79,7 +87,10 @@ impl Source for HubSource {
                 .send()
                 .await
                 .map_err(download_err)?;
-            Ok(Box::pin(stream.map(|r| r.map_err(download_err))) as ByteStream)
+            Ok(Opened {
+                stream: Box::pin(stream.map(|r| r.map_err(download_err))),
+                len,
+            })
         })
     }
 }
@@ -88,6 +99,8 @@ fn download_err(e: impl std::fmt::Display) -> TranslatteError {
     TranslatteError::Download(e.to_string())
 }
 
+/// `bytes_done` (and with it `model_bytes_done`) drops back to 0 when a file restarts from
+/// scratch: after a checksum mismatch, or when the server ignored the resume range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadProgress {
     pub model_id: String,
@@ -187,7 +200,8 @@ impl<'a> Downloader<'a> {
         Ok(())
     }
 
-    /// [`Self::download_model`] on a private current-thread runtime.
+    /// [`Self::download_model`] on a private current-thread runtime. Panics if called from
+    /// inside a tokio runtime; use the async version there.
     pub fn download_model_blocking(
         &self,
         id: &str,
@@ -197,7 +211,8 @@ impl<'a> Downloader<'a> {
         block_on(self.download_model(id, cancel, progress))
     }
 
-    /// [`Self::download_models`] on a private current-thread runtime.
+    /// [`Self::download_models`] on a private current-thread runtime. Panics if called from
+    /// inside a tokio runtime; use the async version there.
     pub fn download_models_blocking(
         &self,
         ids: &[&str],
@@ -222,12 +237,8 @@ impl<'a> Downloader<'a> {
             check_cancel(cancel)?;
             let before = part_len(&part)?;
             let failure = if before < f.size {
-                let stream = self
-                    .source
-                    .open(&entry.source, &f.source_path, Some(before..f.size))
-                    .await?;
                 match self
-                    .append(stream, &part, before, f, cancel, reporter)
+                    .transfer(entry, f, &part, before, cancel, reporter)
                     .await
                 {
                     Ok(()) => None,
@@ -261,41 +272,43 @@ impl<'a> Downloader<'a> {
                     return Err(failure);
                 }
             }
-            self.sleep_cancellable(self.retry_delay * stalled, cancel)
-                .await?;
+            self.backoff(stalled, cancel).await?;
         }
     }
 
-    async fn append(
+    /// Requests `have..size` and appends it to the `.part`, or rewrites the `.part` from the
+    /// start when the server ignores the range.
+    async fn transfer(
         &self,
-        mut stream: ByteStream,
+        entry: &ModelEntry,
+        f: &ModelFile,
         part: &Path,
         mut have: u64,
-        f: &ModelFile,
         cancel: &AtomicBool,
         reporter: &mut Reporter<'_>,
     ) -> Result<()> {
-        let mut out = OpenOptions::new().create(true).append(true).open(part)?;
-        let mut idle = Duration::ZERO;
+        let opened = self
+            .watch(
+                self.source
+                    .open(&entry.source, &f.source_path, Some(have..f.size)),
+                cancel,
+            )
+            .await??;
+        let mut stream = opened.stream;
+        let mut out = if have > 0 && opened.len == Some(f.size) {
+            have = 0;
+            reporter.report(f, 0, true);
+            OpenOptions::new().write(true).truncate(true).open(part)?
+        } else {
+            OpenOptions::new().create(true).append(true).open(part)?
+        };
         while have < f.size {
-            check_cancel(cancel)?;
-            let chunk = match tokio::time::timeout(CANCEL_POLL, stream.next()).await {
-                Err(_) => {
-                    idle += CANCEL_POLL;
-                    if idle >= self.idle_timeout {
-                        return Err(TranslatteError::Download(format!(
-                            "no data received for {}s",
-                            idle.as_secs()
-                        )));
-                    }
-                    continue;
-                }
-                Ok(None) => break,
-                Ok(Some(chunk)) => chunk?,
+            let Some(chunk) = self.watch(stream.next(), cancel).await? else {
+                break;
             };
-            idle = Duration::ZERO;
-            // Bytes past the expected size are never written; the hash check catches a server
-            // that ignored the range.
+            let chunk = chunk?;
+            // Bytes past the expected size are never written; the hash check catches a body that
+            // is not what was asked for.
             let take = chunk
                 .len()
                 .min(usize::try_from(f.size - have).unwrap_or(usize::MAX));
@@ -313,45 +326,115 @@ impl<'a> Downloader<'a> {
         kind: Derive,
         cancel: &AtomicBool,
     ) -> Result<()> {
-        let mut attempt = 0;
+        let part = self.store.part_path(f);
+        let mut stalled = 0;
+        let mut restarted = false;
         loop {
             check_cancel(cancel)?;
-            let stream = self
-                .source
-                .open(&entry.source, &f.source_path, None)
-                .await?;
-            let raw = collect(stream, MAX_DERIVE_SOURCE_BYTES, cancel).await?;
-            let data = match kind {
-                Derive::PaddleDict => {
-                    let text = std::str::from_utf8(&raw).map_err(|_| {
-                        TranslatteError::Download(format!("{} is not UTF-8", f.source_path))
-                    })?;
-                    paddle_dict(text)?
-                }
+            let failure = match self.derive_once(entry, f, kind, cancel).await {
+                Ok(()) => match self.store.commit_download(f) {
+                    Ok(()) => return Ok(()),
+                    Err(TranslatteError::ChecksumMismatch { .. }) if !restarted => {
+                        restarted = true;
+                        continue;
+                    }
+                    Err(TranslatteError::Incomplete { path, have, want }) => {
+                        std::fs::remove_file(&part)?;
+                        TranslatteError::Download(format!(
+                            "derived {path} has {have} bytes, expected {want}"
+                        ))
+                    }
+                    Err(e) => return Err(e),
+                },
+                Err(e @ TranslatteError::Download(_)) => e,
+                Err(e) => return Err(e),
             };
-            std::fs::write(self.store.part_path(f), data)?;
-            match self.store.commit_download(f) {
-                Err(TranslatteError::ChecksumMismatch { .. }) if attempt == 0 => attempt += 1,
-                Err(TranslatteError::Incomplete { path, have, want }) => {
-                    let _ = std::fs::remove_file(self.store.part_path(f));
-                    return Err(TranslatteError::Download(format!(
-                        "derived {path} has {have} bytes, expected {want}"
-                    )));
+            stalled += 1;
+            if stalled >= MAX_STALLED_ATTEMPTS {
+                return Err(failure);
+            }
+            self.backoff(stalled, cancel).await?;
+        }
+    }
+
+    async fn derive_once(
+        &self,
+        entry: &ModelEntry,
+        f: &ModelFile,
+        kind: Derive,
+        cancel: &AtomicBool,
+    ) -> Result<()> {
+        let opened = self
+            .watch(
+                self.source.open(&entry.source, &f.source_path, None),
+                cancel,
+            )
+            .await??;
+        let raw = self
+            .collect(opened.stream, MAX_DERIVE_SOURCE_BYTES, cancel)
+            .await?;
+        let data = match kind {
+            Derive::PaddleDict => {
+                let text = std::str::from_utf8(&raw).map_err(|_| {
+                    TranslatteError::Download(format!("{} is not UTF-8", f.source_path))
+                })?;
+                paddle_dict(text)?
+            }
+        };
+        std::fs::write(self.store.part_path(f), data)?;
+        Ok(())
+    }
+
+    async fn collect(
+        &self,
+        mut stream: ByteStream,
+        limit: usize,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        while let Some(chunk) = self.watch(stream.next(), cancel).await? {
+            let chunk = chunk?;
+            if buf.len() + chunk.len() > limit {
+                return Err(TranslatteError::Download(format!(
+                    "source file exceeds {limit} bytes"
+                )));
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        Ok(buf)
+    }
+
+    /// Awaits `fut`, checking `cancel` every [`CANCEL_POLL`] and failing with a `Download`
+    /// error once it has made no progress for the idle timeout.
+    async fn watch<F: Future>(&self, fut: F, cancel: &AtomicBool) -> Result<F::Output> {
+        let mut fut = std::pin::pin!(fut);
+        let mut idle = Duration::ZERO;
+        loop {
+            check_cancel(cancel)?;
+            match tokio::time::timeout(CANCEL_POLL, fut.as_mut()).await {
+                Ok(out) => return Ok(out),
+                Err(_) => {
+                    idle += CANCEL_POLL;
+                    if idle >= self.idle_timeout {
+                        return Err(TranslatteError::Download(format!(
+                            "no response for {}s",
+                            idle.as_secs()
+                        )));
+                    }
                 }
-                r => return r,
             }
         }
     }
 
-    async fn sleep_cancellable(&self, d: Duration, cancel: &AtomicBool) -> Result<()> {
-        let end = Instant::now() + d;
+    async fn backoff(&self, stalled: u32, cancel: &AtomicBool) -> Result<()> {
+        let end = tokio::time::Instant::now() + self.retry_delay * stalled;
         loop {
             check_cancel(cancel)?;
-            let left = end.saturating_duration_since(Instant::now());
-            if left.is_zero() {
+            let now = tokio::time::Instant::now();
+            if now >= end {
                 return Ok(());
             }
-            tokio::time::sleep(left.min(CANCEL_POLL)).await;
+            tokio::time::sleep((end - now).min(CANCEL_POLL)).await;
         }
     }
 }
@@ -379,33 +462,18 @@ fn part_len(p: &Path) -> Result<u64> {
     }
 }
 
-async fn collect(mut stream: ByteStream, limit: usize, cancel: &AtomicBool) -> Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        check_cancel(cancel)?;
-        let chunk = chunk?;
-        if buf.len() + chunk.len() > limit {
-            return Err(TranslatteError::Download(format!(
-                "source file exceeds {limit} bytes"
-            )));
-        }
-        buf.extend_from_slice(&chunk);
-    }
-    Ok(buf)
-}
-
 struct Reporter<'p> {
     progress: &'p (dyn Fn(DownloadProgress) + Send + Sync),
     model_id: &'p str,
     model_bytes_total: u64,
     model_bytes_before: u64,
     interval: Duration,
-    last: Option<Instant>,
+    last: Option<std::time::Instant>,
 }
 
 impl Reporter<'_> {
     fn report(&mut self, f: &ModelFile, bytes_done: u64, force: bool) {
-        let now = Instant::now();
+        let now = std::time::Instant::now();
         // The final update for a file is always sent forced, once the file is committed.
         if !force && (bytes_done >= f.size || self.last.is_some_and(|t| now - t < self.interval)) {
             return;
@@ -453,7 +521,7 @@ pub fn paddle_dict(yml: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use sha2::{Digest, Sha256};
 
@@ -532,6 +600,10 @@ PostProcess:
         ignore_range: Mutex<Vec<String>>,
         /// Paths whose next request serves this content instead.
         corrupt_once: Mutex<HashMap<String, Vec<u8>>>,
+        /// Number of upcoming requests per path whose `open` fails.
+        open_errors: Mutex<HashMap<String, u32>>,
+        /// Every `open` never resolves, after setting this flag if given.
+        hang_open: Option<Option<Arc<AtomicBool>>>,
         requests: Mutex<Vec<(String, Option<Range<u64>>)>>,
     }
 
@@ -541,13 +613,25 @@ PostProcess:
             source: &'a ModelSource,
             path: &'a str,
             range: Option<Range<u64>>,
-        ) -> BoxFuture<'a, Result<ByteStream>> {
+        ) -> BoxFuture<'a, Result<Opened>> {
             assert_eq!(source.revision, REV);
             let key = format!("{}/{path}", source.repo);
             self.requests
                 .lock()
                 .unwrap()
                 .push((key.clone(), range.clone()));
+            if let Some(flag) = &self.hang_open {
+                if let Some(flag) = flag {
+                    flag.store(true, Ordering::Relaxed);
+                }
+                return Box::pin(futures::future::pending());
+            }
+            if let Some(n) = self.open_errors.lock().unwrap().get_mut(&key) {
+                if *n > 0 {
+                    *n -= 1;
+                    return Box::pin(async { Err(TranslatteError::Download("503".into())) });
+                }
+            }
             let full = match self.corrupt_once.lock().unwrap().remove(&key) {
                 Some(d) => d,
                 None => self.files.get(&key).cloned().unwrap_or_default(),
@@ -581,7 +665,13 @@ PostProcess:
                 sent += c.len();
                 items.push(Ok(Bytes::copy_from_slice(c)));
             }
-            Box::pin(async move { Ok(Box::pin(futures::stream::iter(items)) as ByteStream) })
+            let len = Some(data.len() as u64);
+            Box::pin(async move {
+                Ok(Opened {
+                    stream: Box::pin(futures::stream::iter(items)),
+                    len,
+                })
+            })
         }
     }
 
@@ -679,7 +769,7 @@ PostProcess:
             source: &'a ModelSource,
             path: &'a str,
             range: Option<Range<u64>>,
-        ) -> BoxFuture<'a, Result<ByteStream>> {
+        ) -> BoxFuture<'a, Result<Opened>> {
             (**self).open(source, path, range)
         }
     }
@@ -797,7 +887,7 @@ PostProcess:
     }
 
     #[test]
-    fn server_ignoring_range_is_caught_and_restarted() {
+    fn server_ignoring_range_rewrites_part_from_start() {
         let fx = fixture();
         let f = translator(&fx);
         let full = &fx.fake.files["o/tr/up.gguf"];
@@ -808,10 +898,100 @@ PostProcess:
             .lock()
             .unwrap()
             .push("o/tr/up.gguf".into());
-        run(&fx, "translator").0.unwrap();
+        let (r, events) = run(&fx, "translator");
+        r.unwrap();
         let ranges: Vec<_> = requests(&fx).into_iter().map(|(_, r)| r.unwrap()).collect();
-        assert_eq!(ranges, vec![100..10_000, 0..10_000]);
+        assert_eq!(ranges, vec![100..10_000]);
         assert!(fx.store.verify("translator").unwrap());
+        assert_eq!(events[0].bytes_done, 0);
+    }
+
+    #[test]
+    fn open_errors_are_retried_then_give_up() {
+        let fx = fixture();
+        fx.fake
+            .open_errors
+            .lock()
+            .unwrap()
+            .insert("o/tr/up.gguf".into(), 2);
+        run(&fx, "translator").0.unwrap();
+        assert_eq!(requests(&fx).len(), 3);
+        assert!(fx.store.verify("translator").unwrap());
+
+        fx.fake
+            .open_errors
+            .lock()
+            .unwrap()
+            .insert("o/det/inference.onnx".into(), 100);
+        let (r, _) = run(&fx, "det");
+        assert!(matches!(r, Err(TranslatteError::Download(_))), "{r:?}");
+        assert_eq!(requests(&fx).len(), MAX_STALLED_ATTEMPTS as usize);
+    }
+
+    #[test]
+    fn derive_retries_failed_source_fetch() {
+        let fx = fixture();
+        fx.fake
+            .open_errors
+            .lock()
+            .unwrap()
+            .insert("o/rec/inference.yml".into(), 2);
+        run(&fx, "rec-x").0.unwrap();
+        assert!(fx.store.verify("rec-x").unwrap());
+        let yml = requests(&fx)
+            .into_iter()
+            .filter(|(k, _)| k.ends_with(".yml"))
+            .count();
+        assert_eq!(yml, 3);
+    }
+
+    /// So that a `rec-x` download starts with the derived dict.
+    fn install_rec_onnx(fx: &Fixture) {
+        std::fs::create_dir_all(fx.store.root().join("rec-x")).unwrap();
+        std::fs::write(fx.store.root().join("rec-x/inference.onnx"), "rec").unwrap();
+    }
+
+    fn paused_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn hanging_open_times_out_into_bounded_retries() {
+        for id in ["translator", "rec-x"] {
+            let mut fx = fixture();
+            fx.fake.hang_open = Some(None);
+            install_rec_onnx(&fx);
+            let d = Downloader::with_source(&fx.store, &fx.fake);
+            let rt = paused_runtime();
+            let start = rt.block_on(async { tokio::time::Instant::now() });
+            let r = rt.block_on(d.download_model(id, &AtomicBool::new(false), |_| {}));
+            assert!(matches!(r, Err(TranslatteError::Download(_))), "{r:?}");
+            assert_eq!(requests(&fx).len(), MAX_STALLED_ATTEMPTS as usize);
+            let waited = rt.block_on(async move { start.elapsed() });
+            assert!(waited >= IDLE_TIMEOUT * MAX_STALLED_ATTEMPTS, "{waited:?}");
+        }
+    }
+
+    #[test]
+    fn hanging_open_responds_to_cancel() {
+        for id in ["translator", "rec-x"] {
+            let cancel = Arc::new(AtomicBool::new(false));
+            let mut fx = fixture();
+            fx.fake.hang_open = Some(Some(cancel.clone()));
+            install_rec_onnx(&fx);
+            let d = Downloader::with_source(&fx.store, &fx.fake);
+            let rt = paused_runtime();
+            let start = rt.block_on(async { tokio::time::Instant::now() });
+            let r = rt.block_on(d.download_model(id, &cancel, |_| {}));
+            assert!(matches!(r, Err(TranslatteError::Cancelled)), "{r:?}");
+            assert_eq!(requests(&fx).len(), 1);
+            let waited = rt.block_on(async move { start.elapsed() });
+            assert!(waited <= CANCEL_POLL * 2, "{waited:?}");
+        }
     }
 
     #[test]

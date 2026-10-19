@@ -43,6 +43,7 @@ enum Command {
         /// Script packs to install, e.g. rec-latin,rec-cjk.
         #[arg(long, value_delimiter = ',', conflicts_with = "all_packs")]
         packs: Vec<String>,
+        /// Install every script pack in the manifest.
         #[arg(long)]
         all_packs: bool,
         #[command(flatten)]
