@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -61,7 +62,8 @@ pub struct Manifest {
 
 impl Manifest {
     pub fn from_json(s: &str) -> Result<Self> {
-        let m: Manifest = serde_json::from_str(s)?;
+        let m: Manifest =
+            serde_json::from_str(s).map_err(|e| TranslatteError::Manifest(e.to_string()))?;
         m.validate()?;
         Ok(m)
     }
@@ -88,6 +90,43 @@ impl Manifest {
                 return Err(TranslatteError::Manifest(format!(
                     "duplicate model id {}",
                     m.id
+                )));
+            }
+        }
+        for m in &self.models {
+            if m.files.is_empty() {
+                return Err(TranslatteError::Manifest(format!(
+                    "model {} has no files",
+                    m.id
+                )));
+            }
+            let prefix = format!("{}/", m.id);
+            let mut names = HashSet::new();
+            for f in &m.files {
+                let path = Path::new(&f.path);
+                let safe = !path.is_absolute()
+                    && path.components().all(|c| matches!(c, Component::Normal(_)));
+                if !safe || !f.path.starts_with(&prefix) {
+                    return Err(TranslatteError::Manifest(format!(
+                        "invalid file path {} for model {}",
+                        f.path, m.id
+                    )));
+                }
+                let name = path.file_name().map(|n| n.to_owned());
+                if !names.insert(name) {
+                    return Err(TranslatteError::Manifest(format!(
+                        "duplicate file name in model {}: {}",
+                        m.id, f.path
+                    )));
+                }
+            }
+        }
+        let mut codes = HashSet::new();
+        for l in &self.languages {
+            if !codes.insert(l.code.as_str()) {
+                return Err(TranslatteError::Manifest(format!(
+                    "duplicate language code {}",
+                    l.code
                 )));
             }
         }
@@ -192,5 +231,38 @@ pub(crate) mod tests {
             Manifest::from_json(&bad),
             Err(TranslatteError::Manifest(_))
         ));
+    }
+
+    fn assert_rejected(bad: String) {
+        assert!(matches!(
+            Manifest::from_json(&bad),
+            Err(TranslatteError::Manifest(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_unsafe_or_misplaced_paths() {
+        assert_rejected(SAMPLE.replace("det/inference.onnx", "/det/inference.onnx"));
+        assert_rejected(SAMPLE.replace("det/inference.onnx", "det/../x/inference.onnx"));
+        assert_rejected(SAMPLE.replace("det/inference.onnx", "other/inference.onnx"));
+    }
+
+    #[test]
+    fn rejects_model_without_files() {
+        let bad = SAMPLE.replace(
+            r#""files": [{"path": "det/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]"#,
+            r#""files": []"#,
+        );
+        assert_rejected(bad);
+    }
+
+    #[test]
+    fn rejects_duplicate_file_names_in_model() {
+        assert_rejected(SAMPLE.replace("rec-latin/dict.txt", "rec-latin/inference.onnx"));
+    }
+
+    #[test]
+    fn rejects_duplicate_language_codes() {
+        assert_rejected(SAMPLE.replace(r#""code": "he""#, r#""code": "fr""#));
     }
 }

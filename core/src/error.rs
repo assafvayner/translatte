@@ -28,12 +28,6 @@ impl From<ort::Error> for TranslatteError {
     }
 }
 
-impl From<serde_json::Error> for TranslatteError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Manifest(e.to_string())
-    }
-}
-
 impl From<image::ImageError> for TranslatteError {
     fn from(e: image::ImageError) -> Self {
         Self::Image(e.to_string())

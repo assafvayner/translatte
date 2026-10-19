@@ -69,7 +69,7 @@ impl ModelStore {
             };
             let mut hasher = Sha256::new();
             io::copy(&mut file, &mut hasher)?;
-            if hex::encode(hasher.finalize()) != f.sha256 {
+            if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&f.sha256) {
                 return Ok(false);
             }
         }

@@ -103,6 +103,7 @@ impl Quad {
     }
 
     pub fn clamp(&self, max_x: f32, max_y: f32) -> Quad {
+        let (max_x, max_y) = (max_x.max(0.0), max_y.max(0.0));
         Quad(
             self.0
                 .map(|p| Pt::new(p.x.clamp(0.0, max_x), p.y.clamp(0.0, max_y))),
@@ -123,7 +124,7 @@ impl Quad {
                 sign = cross.signum();
             }
         }
-        true
+        sign != 0.0
     }
 }
 
@@ -171,6 +172,40 @@ mod tests {
         assert!(q.contains(Pt::new(5.0, 5.0)));
         assert!(q.contains(Pt::new(0.0, 0.0)));
         assert!(!q.contains(Pt::new(11.0, 5.0)));
+    }
+
+    #[test]
+    fn degenerate_quad_contains_nothing() {
+        let p = Pt::new(3.0, 3.0);
+        let q = Quad([p, p, p, p]);
+        assert!(!q.contains(p));
+        assert!(!q.contains(Pt::new(100.0, 0.0)));
+    }
+
+    #[test]
+    fn rotated_quad_contains() {
+        let q = Quad([
+            Pt::new(0.0, 0.0),
+            Pt::new(10.0, 10.0),
+            Pt::new(5.0, 15.0),
+            Pt::new(-5.0, 5.0),
+        ]);
+        assert!(q.contains(Pt::new(5.0, 7.5)));
+        assert!(!q.contains(Pt::new(10.0, 0.0)));
+    }
+
+    #[test]
+    fn clamp_with_negative_max_does_not_panic() {
+        let c = rect(1.0, 1.0, 5.0, 5.0).clamp(-1.0, -2.0);
+        assert_eq!(
+            c.bbox(),
+            BBox {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 0.0,
+                y1: 0.0
+            }
+        );
     }
 
     #[test]
