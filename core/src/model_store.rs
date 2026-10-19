@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::manifest::{Language, Manifest, ModelEntry, ModelKind, DETECTOR_ID, TRANSLATOR_ID};
+use crate::manifest::{
+    Language, Manifest, ModelEntry, ModelFile, ModelKind, DETECTOR_ID, TRANSLATOR_ID,
+};
 use crate::{Result, TranslatteError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,19 +63,58 @@ impl ModelStore {
     }
 
     pub fn verify(&self, id: &str) -> Result<bool> {
+        Ok(self.failed_files(id)?.is_empty())
+    }
+
+    /// Checks size, then streams the sha256. A missing file is `Ok(false)`.
+    pub fn verify_file(&self, file: &ModelFile, path: &Path) -> Result<bool> {
+        let mut f = match File::open(path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        if f.metadata()?.len() != file.size {
+            return Ok(false);
+        }
+        let mut hasher = Sha256::new();
+        io::copy(&mut f, &mut hasher)?;
+        Ok(hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256))
+    }
+
+    pub fn failed_files(&self, id: &str) -> Result<Vec<&ModelFile>> {
+        let mut out = Vec::new();
         for f in &self.entry(id)?.files {
-            let mut file = match File::open(self.root.join(&f.path)) {
-                Ok(file) => file,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-                Err(e) => return Err(e.into()),
-            };
-            let mut hasher = Sha256::new();
-            io::copy(&mut file, &mut hasher)?;
-            if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&f.sha256) {
-                return Ok(false);
+            if !self.verify_file(f, &self.root.join(&f.path))? {
+                out.push(f);
             }
         }
-        Ok(true)
+        Ok(out)
+    }
+
+    pub fn part_path(&self, file: &ModelFile) -> PathBuf {
+        let mut p = self.root.join(&file.path).into_os_string();
+        p.push(".part");
+        PathBuf::from(p)
+    }
+
+    /// Verifies `<file>.part` and atomically renames it into place; a corrupt `.part` is deleted.
+    pub fn commit_download(&self, file: &ModelFile) -> Result<()> {
+        let part = self.part_path(file);
+        if !part.exists() {
+            return Err(TranslatteError::ModelNotInstalled(file.path.clone()));
+        }
+        if !self.verify_file(file, &part)? {
+            std::fs::remove_file(&part)?;
+            return Err(TranslatteError::ChecksumMismatch {
+                path: file.path.clone(),
+            });
+        }
+        let dest = self.root.join(&file.path);
+        if let Some(dir) = dest.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::rename(&part, &dest)?;
+        Ok(())
     }
 
     pub fn delete(&self, id: &str) -> Result<()> {
@@ -178,6 +219,87 @@ mod tests {
         assert!(s.verify("rec-latin").unwrap());
         write(&s, "rec-latin/dict.txt", "abd");
         assert!(!s.verify("rec-latin").unwrap());
+    }
+
+    fn file<'a>(s: &'a ModelStore, id: &str, name: &str) -> &'a ModelFile {
+        s.manifest()
+            .model(id)
+            .unwrap()
+            .files
+            .iter()
+            .find(|f| f.path.ends_with(name))
+            .unwrap()
+    }
+
+    #[test]
+    fn verify_file_checks_size_then_hash_and_handles_missing() {
+        let (d, s) = store();
+        let f = file(&s, "rec-latin", "dict.txt");
+        let p = d.path().join("x.bin");
+        assert!(!s.verify_file(f, &p).unwrap());
+        std::fs::write(&p, "abc").unwrap();
+        assert!(s.verify_file(f, &p).unwrap());
+        std::fs::write(&p, "abd").unwrap();
+        assert!(!s.verify_file(f, &p).unwrap());
+        std::fs::write(&p, "abcd").unwrap();
+        assert!(!s.verify_file(f, &p).unwrap());
+    }
+
+    #[test]
+    fn failed_files_lists_missing_and_bad_files() {
+        let (_d, s) = store();
+        assert_eq!(s.failed_files("rec-latin").unwrap().len(), 2);
+        write(&s, "rec-latin/inference.onnx", "abc");
+        write(&s, "rec-latin/dict.txt", "abd");
+        let failed = s.failed_files("rec-latin").unwrap();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].path, "rec-latin/dict.txt");
+        write(&s, "rec-latin/dict.txt", "abc");
+        assert!(s.failed_files("rec-latin").unwrap().is_empty());
+        assert!(s.failed_files("nope").is_err());
+    }
+
+    #[test]
+    fn part_path_appends_part_suffix() {
+        let (_d, s) = store();
+        let f = file(&s, "rec-latin", "dict.txt");
+        assert_eq!(s.part_path(f), s.root().join("rec-latin/dict.txt.part"));
+    }
+
+    #[test]
+    fn commit_download_renames_verified_part() {
+        let (_d, s) = store();
+        let f = file(&s, "rec-latin", "dict.txt");
+        write(&s, "rec-latin/dict.txt.part", "abc");
+        s.commit_download(f).unwrap();
+        assert!(!s.part_path(f).exists());
+        assert_eq!(
+            std::fs::read_to_string(s.root().join("rec-latin/dict.txt")).unwrap(),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn commit_download_deletes_bad_part() {
+        let (_d, s) = store();
+        let f = file(&s, "rec-latin", "dict.txt");
+        write(&s, "rec-latin/dict.txt.part", "abd");
+        assert!(matches!(
+            s.commit_download(f),
+            Err(TranslatteError::ChecksumMismatch { .. })
+        ));
+        assert!(!s.part_path(f).exists());
+        assert!(!s.root().join("rec-latin/dict.txt").exists());
+    }
+
+    #[test]
+    fn commit_download_without_part_is_an_error() {
+        let (_d, s) = store();
+        let f = file(&s, "rec-latin", "dict.txt");
+        assert!(matches!(
+            s.commit_download(f),
+            Err(TranslatteError::ModelNotInstalled(_))
+        ));
     }
 
     #[test]

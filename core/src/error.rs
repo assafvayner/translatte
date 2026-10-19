@@ -12,6 +12,8 @@ pub enum TranslatteError {
     CoreModelDelete(String),
     #[error("unknown language: {0}")]
     UnknownLanguage(String),
+    #[error("checksum mismatch: {path}")]
+    ChecksumMismatch { path: String },
     #[error("inference error: {0}")]
     Inference(String),
     #[error("translation error: {0}")]
