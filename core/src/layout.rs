@@ -15,6 +15,9 @@ const MAX_HEIGHT_RATIO: f32 = 1.5;
 const MIN_ROW_OVERLAP: f32 = 0.5;
 const MAX_ROW_GAP: f32 = 0.5;
 const MAX_STACK_GAP: f32 = 0.5;
+const MAX_CENTERED_STACK_GAP: f32 = 0.75;
+const MAX_STACK_OVERLAP: f32 = 0.5;
+const MIN_FULL_ROW_WIDTH: f32 = 8.0;
 const MAX_ALIGN_OFFSET: f32 = 1.0;
 const MAX_BLOCK_ROWS: usize = 4;
 const MAX_BLOCK_CHARS: usize = 200;
@@ -104,11 +107,20 @@ impl Group {
         let h = hb.min(hr);
         let b = &row.bbox;
         let gap = b.y0 - last.y1;
+        if gap < -MAX_STACK_OVERLAP * h {
+            return None;
+        }
         let tol = MAX_ALIGN_OFFSET * h;
-        let aligned = (b.x0 - last.x0).abs() <= tol
-            || (b.x1 - last.x1).abs() <= tol
-            || ((b.x0 + b.x1) - (last.x0 + last.x1)).abs() / 2.0 <= tol;
-        (gap <= MAX_STACK_GAP * h && aligned).then_some(gap)
+        let centered = ((b.x0 + b.x1) - (last.x0 + last.x1)).abs() / 2.0 <= tol;
+        let edge_aligned = (b.x0 - last.x0).abs() <= tol || (b.x1 - last.x1).abs() <= tol;
+        // Edge alignment alone also matches menu and price columns; only treat it as continuation
+        // when the previous row looks like a wrapped paragraph line.
+        let fits = if centered {
+            gap <= MAX_CENTERED_STACK_GAP * h
+        } else {
+            edge_aligned && last.width() >= MIN_FULL_ROW_WIDTH * h && gap <= MAX_STACK_GAP * h
+        };
+        fits.then_some(gap)
     }
 }
 
@@ -392,6 +404,76 @@ mod tests {
             texts(&group_lines(lines, &lang(false, true))),
             vec!["left", "right"]
         );
+    }
+
+    #[test]
+    fn tightly_spaced_menu_keeps_one_block_per_item_and_price() {
+        let names = [
+            ("Ramen", 60.0),
+            ("Gyoza", 120.0),
+            ("Edamame", 70.0),
+            ("Beer", 140.0),
+        ];
+        let mut lines = Vec::new();
+        for (i, (name, w)) in names.iter().enumerate() {
+            let y = 10.0 + i as f32 * 26.0;
+            lines.push(line(10.0, y, 10.0 + w, y + 20.0, name));
+            let pw = if i % 2 == 0 { 40.0 } else { 90.0 };
+            lines.push(line(460.0 - pw, y, 460.0, y + 20.0, &format!("${i}")));
+        }
+        let blocks = group_lines(lines, &lang(false, true));
+        assert_eq!(blocks.len(), 8, "{:?}", texts(&blocks));
+        assert!(blocks.iter().all(|b| b.lines.len() == 1));
+    }
+
+    #[test]
+    fn centered_sign_with_loose_leading_merges() {
+        let lines = vec![
+            line(80.0, 10.0, 120.0, 30.0, "NO"),
+            line(40.0, 42.0, 160.0, 62.0, "SMOKING"),
+        ];
+        assert_eq!(
+            texts(&group_lines(lines, &lang(false, true))),
+            vec!["NO SMOKING"]
+        );
+    }
+
+    #[test]
+    fn wrapped_paragraph_lines_merge_up_to_four_rows() {
+        let widths = [400.0, 300.0, 380.0, 250.0, 400.0];
+        let lines: Vec<Line> = widths
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let y = 10.0 + i as f32 * 28.0;
+                line(10.0, y, 10.0 + w, y + 20.0, &format!("p{i}"))
+            })
+            .collect();
+        assert_eq!(
+            texts(&group_lines(lines, &lang(false, true))),
+            vec!["p0 p1 p2 p3", "p4"]
+        );
+    }
+
+    #[test]
+    fn heavily_overlapping_rows_do_not_stack() {
+        let row = |y0: f32| {
+            Row::new(Item {
+                line: line(10.0, y0, 200.0, y0 + 20.0, "x"),
+                bbox: BBox {
+                    x0: 10.0,
+                    y0,
+                    x1: 200.0,
+                    y1: y0 + 20.0,
+                },
+            })
+        };
+        let group = Group {
+            rows: vec![row(10.0)],
+            chars: 1,
+        };
+        assert!(group.fit(&row(18.0)).is_none());
+        assert!(group.fit(&row(25.0)).is_some());
     }
 
     #[test]
