@@ -8,4 +8,10 @@ name = "translatte"
 path = "src/main.rs"
 
 [dependencies]
-translatte-core = { path = "../core" }
+translatte-core = { path = "../core", features = ["llama"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+cosmic-text = "=0.12.1"
+image.workspace = true
+serde_json.workspace = true
+strsim = "0.11"
