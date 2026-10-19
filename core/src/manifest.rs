@@ -265,4 +265,16 @@ pub(crate) mod tests {
     fn rejects_duplicate_language_codes() {
         assert_rejected(SAMPLE.replace(r#""code": "he""#, r#""code": "fr""#));
     }
+
+    #[test]
+    fn repo_manifest_is_valid() {
+        let s = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../models/manifest.json"
+        ))
+        .unwrap();
+        let m = Manifest::from_json(&s).unwrap();
+        assert!(m.model("rec-cjk").is_some());
+        assert!(m.language("ja").unwrap().script_pack.is_some());
+    }
 }

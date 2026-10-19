@@ -1,0 +1,537 @@
+{
+  "version": 1,
+  "base_url": "https://huggingface.co/assafvayner/translatte-models/resolve/main",
+  "models": [
+    {
+      "id": "det",
+      "kind": "core",
+      "display_name": "Text detector",
+      "files": [
+        {
+          "path": "det/inference.onnx",
+          "size": 4826518,
+          "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d"
+        }
+      ]
+    },
+    {
+      "id": "translator",
+      "kind": "core",
+      "display_name": "Translator (TranslateGemma 4B)",
+      "files": [
+        {
+          "path": "translator/model.gguf",
+          "size": 2489909760,
+          "sha256": "81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330"
+        }
+      ]
+    },
+    {
+      "id": "rec-cjk",
+      "kind": "script_pack",
+      "display_name": "Chinese / Japanese",
+      "files": [
+        {
+          "path": "rec-cjk/inference.onnx",
+          "size": 16534782,
+          "sha256": "da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092"
+        },
+        {
+          "path": "rec-cjk/dict.txt",
+          "size": 74012,
+          "sha256": "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b"
+        }
+      ]
+    },
+    {
+      "id": "rec-en",
+      "kind": "script_pack",
+      "display_name": "English",
+      "files": [
+        {
+          "path": "rec-en/inference.onnx",
+          "size": 7848423,
+          "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f"
+        },
+        {
+          "path": "rec-en/dict.txt",
+          "size": 1416,
+          "sha256": "e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6"
+        }
+      ]
+    },
+    {
+      "id": "rec-latin",
+      "kind": "script_pack",
+      "display_name": "Latin script",
+      "files": [
+        {
+          "path": "rec-latin/inference.onnx",
+          "size": 8042023,
+          "sha256": "7888113072263cb471b93f66dd5e2ad70548dc526fa1ace760d0d973dd121498"
+        },
+        {
+          "path": "rec-latin/dict.txt",
+          "size": 2616,
+          "sha256": "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff"
+        }
+      ]
+    },
+    {
+      "id": "rec-eslav",
+      "kind": "script_pack",
+      "display_name": "Cyrillic (Russian, Ukrainian, Belarusian)",
+      "files": [
+        {
+          "path": "rec-eslav/inference.onnx",
+          "size": 7887627,
+          "sha256": "b3018ef2b09a0250b6e0c8e871c927098363e5fd4df890cc68e8358eb0aaf1bd"
+        },
+        {
+          "path": "rec-eslav/dict.txt",
+          "size": 1663,
+          "sha256": "3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb"
+        }
+      ]
+    },
+    {
+      "id": "rec-cyrillic",
+      "kind": "script_pack",
+      "display_name": "Cyrillic (other)",
+      "files": [
+        {
+          "path": "rec-cyrillic/inference.onnx",
+          "size": 8048799,
+          "sha256": "5371ee1ddaa7983cc62d0818d99e982b6804638c85e4f960d59a574094e172e5"
+        },
+        {
+          "path": "rec-cyrillic/dict.txt",
+          "size": 2781,
+          "sha256": "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba"
+        }
+      ]
+    },
+    {
+      "id": "rec-korean",
+      "kind": "script_pack",
+      "display_name": "Korean",
+      "files": [
+        {
+          "path": "rec-korean/inference.onnx",
+          "size": 13418787,
+          "sha256": "92f0b7785e64fc9090106a241cf4c1eb97472824558272751b88a2a4476d3a08"
+        },
+        {
+          "path": "rec-korean/dict.txt",
+          "size": 47451,
+          "sha256": "a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7"
+        }
+      ]
+    },
+    {
+      "id": "rec-arabic",
+      "kind": "script_pack",
+      "display_name": "Arabic script",
+      "files": [
+        {
+          "path": "rec-arabic/inference.onnx",
+          "size": 7998947,
+          "sha256": "799113ebf267fbe742deb99eb36e8d42c9ddc5291ceacf92add41b4d52a59110"
+        },
+        {
+          "path": "rec-arabic/dict.txt",
+          "size": 2369,
+          "sha256": "7f92f7dbb9b75a4787a83bfb4f6d14a8ab515525130c9d40a9036f61cf6999e9"
+        }
+      ]
+    },
+    {
+      "id": "rec-devanagari",
+      "kind": "script_pack",
+      "display_name": "Devanagari",
+      "files": [
+        {
+          "path": "rec-devanagari/inference.onnx",
+          "size": 7912311,
+          "sha256": "cb789212ce96c69d3e74728ae4309d179281d68cb3945d0616b67cafab41c986"
+        },
+        {
+          "path": "rec-devanagari/dict.txt",
+          "size": 1943,
+          "sha256": "09c7440bfc5477e5c41052304b6b185aff8c4a5e8b2b4c23c1c706f6fe1ee9fc"
+        }
+      ]
+    },
+    {
+      "id": "rec-th",
+      "kind": "script_pack",
+      "display_name": "Thai",
+      "files": [
+        {
+          "path": "rec-th/inference.onnx",
+          "size": 7891015,
+          "sha256": "27618be66018f8598ac0a526a593f9f1cebf794e7eded93428e8fb016e537f5f"
+        },
+        {
+          "path": "rec-th/dict.txt",
+          "size": 1767,
+          "sha256": "57f5406f94bb6688fb7077f7be65f08bbd71cecf48c01ea26c522cb5c4836b7a"
+        }
+      ]
+    },
+    {
+      "id": "rec-el",
+      "kind": "script_pack",
+      "display_name": "Greek",
+      "files": [
+        {
+          "path": "rec-el/inference.onnx",
+          "size": 7808735,
+          "sha256": "2acf17fcaea2bc81b878e311e6263b8885f48bb03796f75f9f30ed3242bbaa6d"
+        },
+        {
+          "path": "rec-el/dict.txt",
+          "size": 1103,
+          "sha256": "31defc62c0c3ad3674a82da6192226a2ba98ef4ff014a7045cb88d59f9c3de31"
+        }
+      ]
+    },
+    {
+      "id": "rec-ta",
+      "kind": "script_pack",
+      "display_name": "Tamil",
+      "files": [
+        {
+          "path": "rec-ta/inference.onnx",
+          "size": 7885691,
+          "sha256": "c6d2b682d2a0ea4cb1fccdba295976f93fd439964d16cdc666cadef531accbee"
+        },
+        {
+          "path": "rec-ta/dict.txt",
+          "size": 1723,
+          "sha256": "85b541352ae18dc6ba6d47152d8bf8adff6b0266e605d2eef2990c1bf466117b"
+        }
+      ]
+    },
+    {
+      "id": "rec-te",
+      "kind": "script_pack",
+      "display_name": "Telugu",
+      "files": [
+        {
+          "path": "rec-te/inference.onnx",
+          "size": 7898759,
+          "sha256": "8238bfc46d4cffe720ed6706e3842802467343497428693ff2bfb4e6b3caa36b"
+        },
+        {
+          "path": "rec-te/dict.txt",
+          "size": 1831,
+          "sha256": "42f83f5d3fdb50778e4fa5b66c58d99a59ab7792151c5e74f34b8ffd7b61c9d6"
+        }
+      ]
+    }
+  ],
+  "languages": [
+    {
+      "code": "en",
+      "name": "English",
+      "script_pack": "rec-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "fr",
+      "name": "French",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "de",
+      "name": "German",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "es",
+      "name": "Spanish",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "it",
+      "name": "Italian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "pt",
+      "name": "Portuguese",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "nl",
+      "name": "Dutch",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "pl",
+      "name": "Polish",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "cs",
+      "name": "Czech",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "ro",
+      "name": "Romanian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sv",
+      "name": "Swedish",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "da",
+      "name": "Danish",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "no",
+      "name": "Norwegian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "fi",
+      "name": "Finnish",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "hu",
+      "name": "Hungarian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "tr",
+      "name": "Turkish",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "id",
+      "name": "Indonesian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "hr",
+      "name": "Croatian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sk",
+      "name": "Slovak",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sl",
+      "name": "Slovenian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "lt",
+      "name": "Lithuanian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "lv",
+      "name": "Latvian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "et",
+      "name": "Estonian",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "ca",
+      "name": "Catalan",
+      "script_pack": "rec-latin",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "zh",
+      "name": "Chinese",
+      "script_pack": "rec-cjk",
+      "rtl": false,
+      "spaced": false
+    },
+    {
+      "code": "zh-TW",
+      "name": "Chinese (Traditional)",
+      "script_pack": "rec-cjk",
+      "rtl": false,
+      "spaced": false
+    },
+    {
+      "code": "ja",
+      "name": "Japanese",
+      "script_pack": "rec-cjk",
+      "rtl": false,
+      "spaced": false
+    },
+    {
+      "code": "ko",
+      "name": "Korean",
+      "script_pack": "rec-korean",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "ru",
+      "name": "Russian",
+      "script_pack": "rec-eslav",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "uk",
+      "name": "Ukrainian",
+      "script_pack": "rec-eslav",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "bg",
+      "name": "Bulgarian",
+      "script_pack": "rec-cyrillic",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sr",
+      "name": "Serbian",
+      "script_pack": "rec-cyrillic",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "ar",
+      "name": "Arabic",
+      "script_pack": "rec-arabic",
+      "rtl": true,
+      "spaced": true
+    },
+    {
+      "code": "fa",
+      "name": "Persian",
+      "script_pack": "rec-arabic",
+      "rtl": true,
+      "spaced": true
+    },
+    {
+      "code": "ur",
+      "name": "Urdu",
+      "script_pack": "rec-arabic",
+      "rtl": true,
+      "spaced": true
+    },
+    {
+      "code": "hi",
+      "name": "Hindi",
+      "script_pack": "rec-devanagari",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "mr",
+      "name": "Marathi",
+      "script_pack": "rec-devanagari",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "th",
+      "name": "Thai",
+      "script_pack": "rec-th",
+      "rtl": false,
+      "spaced": false
+    },
+    {
+      "code": "el",
+      "name": "Greek",
+      "script_pack": "rec-el",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "ta",
+      "name": "Tamil",
+      "script_pack": "rec-ta",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "te",
+      "name": "Telugu",
+      "script_pack": "rec-te",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "he",
+      "name": "Hebrew",
+      "script_pack": null,
+      "rtl": true,
+      "spaced": true
+    },
+    {
+      "code": "vi",
+      "name": "Vietnamese",
+      "script_pack": null,
+      "rtl": false,
+      "spaced": true
+    }
+  ]
+}
