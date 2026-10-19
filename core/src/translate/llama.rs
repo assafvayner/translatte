@@ -27,8 +27,10 @@ pub struct LlamaGenerator {
 
 impl LlamaGenerator {
     pub fn load(path: &Path) -> Result<Self> {
-        let mut backend = LlamaBackend::init().map_err(err)?;
-        backend.void_logs();
+        llama_cpp_2::send_logs_to_tracing(
+            llama_cpp_2::LogOptions::default().with_logs_enabled(false),
+        );
+        let backend = LlamaBackend::init().map_err(err)?;
         let model = LlamaModel::load_from_file(&backend, path, &LlamaModelParams::default())
             .map_err(err)?;
         let threads = std::thread::available_parallelism()
