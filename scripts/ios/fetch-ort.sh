@@ -22,7 +22,8 @@ rm -rf "$DEPS/ort" "$DEPS/lib-ios" "$DEPS/lib-sim"
 unzip -q "$ZIP" -d "$DEPS/ort"
 XCF="$DEPS/ort/onnxruntime.xcframework"
 mkdir -p "$DEPS/lib-ios" "$DEPS/lib-sim"
-cp "$XCF/ios-arm64/onnxruntime.framework/onnxruntime" "$DEPS/lib-ios/libonnxruntime.a"
+# Both slices ship as universal binaries, which rustc can't bundle into a staticlib; thin them.
+lipo "$XCF/ios-arm64/onnxruntime.framework/onnxruntime" -thin arm64 -output "$DEPS/lib-ios/libonnxruntime.a"
 lipo "$XCF/ios-arm64_x86_64-simulator/onnxruntime.framework/onnxruntime" -thin arm64 \
   -output "$DEPS/lib-sim/libonnxruntime.a"
 echo "ONNX Runtime $ORT_VERSION static libs in $DEPS/lib-{ios,sim}"
