@@ -25,15 +25,3 @@ pub trait TextDetector {
 pub trait TextRecognizer {
     fn recognize(&mut self, img: &RgbImage, quad: &Quad) -> Result<Line>;
 }
-
-/// Releases ONNX Runtime's process-global environment so its static destructors don't run
-/// against a live env at exit (bionic aborts with "pthread_mutex_lock called on a destroyed mutex").
-///
-/// # Safety
-/// Every ort session must already be dropped, and none may be created afterwards.
-pub unsafe fn release_ort_environment() {
-    use ort::AsPointer;
-    if let Ok(env) = ort::environment::get_environment() {
-        (ort::api().ReleaseEnv)(env.ptr().cast_mut());
-    }
-}
