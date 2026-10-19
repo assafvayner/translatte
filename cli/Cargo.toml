@@ -7,6 +7,12 @@ edition = "2021"
 name = "translatte"
 path = "src/main.rs"
 
+[features]
+default = ["tls-rustls"]
+tls-rustls = ["translatte-core/tls-rustls"]
+# Test-only (see README "Android"): `--no-default-features --features tls-native`.
+tls-native = ["translatte-core/tls-native"]
+
 [dependencies]
 translatte-core = { path = "../core", features = ["llama", "download"] }
 anyhow = "1"

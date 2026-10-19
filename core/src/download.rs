@@ -22,6 +22,11 @@ use crate::manifest::{Derive, ModelEntry, ModelFile, ModelSource};
 use crate::model_store::ModelStore;
 use crate::{Result, TranslatteError};
 
+#[cfg(not(any(feature = "tls-rustls", feature = "tls-native")))]
+compile_error!("`download` needs a TLS backend: enable `tls-rustls` or `tls-native`");
+#[cfg(all(feature = "tls-rustls", feature = "tls-native"))]
+compile_error!("`tls-rustls` and `tls-native` are mutually exclusive");
+
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
 
 pub struct Opened {

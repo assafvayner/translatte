@@ -7,6 +7,12 @@ edition = "2021"
 default = []
 llama = ["dep:llama-cpp-2", "dep:encoding_rs"]
 download = ["dep:hf-hub", "dep:tokio", "dep:serde_yaml_ng", "dep:futures", "dep:bytes"]
+# TLS backend for `download`; enable exactly one. rustls is the production backend (on Android
+# it verifies through rustls-platform-verifier, which the app initializes via JNI).
+tls-rustls = ["hf-hub?/rustls-tls"]
+# Test-only: OpenSSL-based TLS for running without JNI (the CLI over `adb shell`). On Android,
+# native-tls trusts the system CAs by reading /system/etc/security/cacerts itself.
+tls-native = ["hf-hub?/native-tls", "dep:openssl"]
 
 [dependencies]
 image.workspace = true
@@ -20,11 +26,15 @@ hex = "0.4"
 thiserror.workspace = true
 llama-cpp-2 = { version = "0.1", optional = true }
 encoding_rs = { version = "0.8", optional = true }
-hf-hub = { git = "https://github.com/huggingface/hf-hub", branch = "main", optional = true }
+hf-hub = { git = "https://github.com/huggingface/hf-hub", branch = "main", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 serde_yaml_ng = { version = "0.10", optional = true }
 futures = { version = "0.3", optional = true }
 bytes = { version = "1", optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# NDK binaries can't link the platform's private OpenSSL (BoringSSL); build one for `tls-native`.
+openssl = { version = "0.10", features = ["vendored"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
