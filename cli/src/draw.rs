@@ -43,14 +43,14 @@ impl Renderer {
     }
 
     pub fn draw_regions(&mut self, img: &mut RgbImage, regions: &[TranslatedRegion]) {
+        if img.width() == 0 || img.height() == 0 {
+            return;
+        }
         for r in regions {
             let Some(text) = &r.translated_text else {
                 continue;
             };
             let b = r.quad.bbox();
-            if img.width() == 0 || img.height() == 0 {
-                continue;
-            }
             let (x0, y0) = (
                 (b.x0.max(0.0) as u32).min(img.width() - 1),
                 (b.y0.max(0.0) as u32).min(img.height() - 1),
@@ -158,6 +158,13 @@ mod tests {
         assert_eq!(*img.get_pixel(0, 0), Rgb([255, 255, 0]));
         assert_eq!(*img.get_pixel(99, 49), Rgb([255, 255, 0]));
         assert_eq!(*img.get_pixel(60, 10), Rgb([0, 0, 255]));
+    }
+
+    #[test]
+    fn zero_size_image_is_a_no_op() {
+        let mut img = RgbImage::new(0, 10);
+        Renderer::new().draw_regions(&mut img, &[region(Some("x"))]);
+        assert_eq!(img.dimensions(), (0, 10));
     }
 
     #[test]
