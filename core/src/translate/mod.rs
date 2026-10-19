@@ -1,3 +1,4 @@
+pub mod batch;
 pub mod prompt;
 
 use crate::manifest::Language;
