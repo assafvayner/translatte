@@ -15,39 +15,48 @@ DEV=/data/local/tmp/translatte
 OUT="$ROOT/out/android"
 
 [[ -x "$REL/translatte" ]] || { echo "build first: scripts/android/build.sh" >&2; exit 1; }
+[[ -f "$IMAGE" ]] || { echo "image not found: $IMAGE" >&2; exit 1; }
 adb get-state >/dev/null
 
-# Pushes $1 to $2 unless a file of the same size is already there.
+PACK="$(python3 -c 'import json,sys
+m = json.load(open(sys.argv[1]))
+print(next((l.get("script_pack") or "" for l in m["languages"] if l["code"] == sys.argv[2]), ""))' "$MANIFEST" "$FROM")"
+[[ -n "$PACK" ]] || { echo "unknown source language (or no recognizer pack): $FROM" >&2; exit 1; }
+IDS=(det "$PACK")
+[[ "$TO" == "-" ]] || IDS+=(translator)
+for id in "${IDS[@]}"; do
+  [[ -d "$MODELS/$id" ]] || { echo "model dir missing: $MODELS/$id (run scripts/fetch_models.py)" >&2; exit 1; }
+done
+
 push() {
+  adb shell "mkdir -p '$(dirname "$2")'"
+  adb push "$1" "$2" >/dev/null 2>&1
+}
+
+# Pushes model file $1 to $2 unless a file of the same size is already there.
+push_model() {
   local want have
-  want="$(stat -f %z "$1" 2>/dev/null || stat -c %s "$1")"
+  want="$(stat -c %s "$1" 2>/dev/null || stat -f %z "$1")"
   have="$(adb shell "stat -c %s '$2' 2>/dev/null" | tr -d '\r' || true)"
   if [[ "$want" != "$have" ]]; then
-    adb shell "mkdir -p '$(dirname "$2")'"
-    adb push "$1" "$2" >/dev/null 2>&1
+    push "$1" "$2"
     echo "pushed $(basename "$1") ($want bytes)"
   fi
 }
 
-PACK="$(python3 -c 'import json,sys
-m = json.load(open(sys.argv[1]))
-print(next(l["script_pack"] for l in m["languages"] if l["code"] == sys.argv[2]))' "$MANIFEST" "$FROM")"
-IDS=(det "$PACK")
-[[ "$TO" == "-" ]] || IDS+=(translator)
-
 for f in translatte libonnxruntime.so libc++_shared.so; do push "$REL/$f" "$DEV/$f"; done
 push "$MANIFEST" "$DEV/manifest.json"
 for id in "${IDS[@]}"; do
-  for f in "$MODELS/$id"/*; do push "$f" "$DEV/models/$id/$(basename "$f")"; done
+  for f in "$MODELS/$id"/*; do push_model "$f" "$DEV/models/$id/$(basename "$f")"; done
 done
 EXT="${IMAGE##*.}"
 adb shell "rm -rf '$DEV/out' && mkdir -p '$DEV/out'"
-adb push "$IMAGE" "$DEV/in.$EXT" >/dev/null 2>&1
+push "$IMAGE" "$DEV/in.$EXT"
 
 mkdir -p "$OUT"
-if [[ "$TO" == "-" ]]; then LANG_ARGS="--no-translate"; else LANG_ARGS="--to $TO"; fi
-adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV /system/bin/time -v ./translatte run in.$EXT \
-  --from $FROM $LANG_ARGS --models models --manifest manifest.json -o out/out.png --json out/out.json" \
+if [[ "$TO" == "-" ]]; then LANG_ARGS="--no-translate"; else LANG_ARGS="--to '$TO'"; fi
+adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV /system/bin/time -v ./translatte run 'in.$EXT' \
+  --from '$FROM' $LANG_ARGS --models models --manifest manifest.json -o out/out.png --json out/out.json" \
   2>&1 | tee "$OUT/$NAME.log"
 
 adb pull "$DEV/out/out.png" "$OUT/$NAME.png" >/dev/null 2>&1
