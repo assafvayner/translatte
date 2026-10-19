@@ -1,0 +1,24 @@
+[package]
+name = "translatte-core"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+llama = ["dep:llama-cpp-2", "dep:encoding_rs"]
+
+[dependencies]
+image.workspace = true
+imageproc.workspace = true
+ndarray.workspace = true
+ort = "=2.0.0-rc.10"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+hex = "0.4"
+thiserror.workspace = true
+llama-cpp-2 = { version = "0.1", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
