@@ -1,16 +1,20 @@
 {
   "version": 1,
-  "base_url": "https://huggingface.co/assafvayner/translatte-models/resolve/main",
   "models": [
     {
       "id": "det",
       "kind": "core",
       "display_name": "Text detector",
+      "source": {
+        "repo": "PaddlePaddle/PP-OCRv5_mobile_det_onnx",
+        "revision": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d"
+      },
       "files": [
         {
           "path": "det/inference.onnx",
           "size": 4826518,
-          "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d"
+          "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+          "source_path": "inference.onnx"
         }
       ]
     },
@@ -18,11 +22,16 @@
       "id": "translator",
       "kind": "core",
       "display_name": "Translator (TranslateGemma 4B)",
+      "source": {
+        "repo": "mradermacher/translategemma-4b-it-GGUF",
+        "revision": "d37868f759d2f817a43d28dd80cf9f982ffa62fd"
+      },
       "files": [
         {
           "path": "translator/model.gguf",
           "size": 2489909760,
-          "sha256": "81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330"
+          "sha256": "81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330",
+          "source_path": "translategemma-4b-it.Q4_K_M.gguf"
         }
       ]
     },
@@ -30,16 +39,23 @@
       "id": "rec-cjk",
       "kind": "script_pack",
       "display_name": "Chinese / Japanese",
+      "source": {
+        "repo": "PaddlePaddle/PP-OCRv5_mobile_rec_onnx",
+        "revision": "ed152b8b495f84de93cda5709d768548a9127622"
+      },
       "files": [
         {
           "path": "rec-cjk/inference.onnx",
           "size": 16534782,
-          "sha256": "da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092"
+          "sha256": "da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-cjk/dict.txt",
           "size": 74012,
-          "sha256": "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b"
+          "sha256": "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -47,16 +63,23 @@
       "id": "rec-en",
       "kind": "script_pack",
       "display_name": "English",
+      "source": {
+        "repo": "PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx",
+        "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b"
+      },
       "files": [
         {
           "path": "rec-en/inference.onnx",
           "size": 7848423,
-          "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f"
+          "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-en/dict.txt",
           "size": 1416,
-          "sha256": "e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6"
+          "sha256": "e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -64,16 +87,23 @@
       "id": "rec-latin",
       "kind": "script_pack",
       "display_name": "Latin script",
+      "source": {
+        "repo": "PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx",
+        "revision": "89d3a50e2c27e2e7cceeab0e944c25c807d5db4f"
+      },
       "files": [
         {
           "path": "rec-latin/inference.onnx",
           "size": 8042023,
-          "sha256": "7888113072263cb471b93f66dd5e2ad70548dc526fa1ace760d0d973dd121498"
+          "sha256": "7888113072263cb471b93f66dd5e2ad70548dc526fa1ace760d0d973dd121498",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-latin/dict.txt",
           "size": 2616,
-          "sha256": "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff"
+          "sha256": "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -81,16 +111,23 @@
       "id": "rec-eslav",
       "kind": "script_pack",
       "display_name": "Cyrillic (Russian, Ukrainian, Belarusian)",
+      "source": {
+        "repo": "PaddlePaddle/eslav_PP-OCRv5_mobile_rec_onnx",
+        "revision": "9a32171fc5718746875e1a261818884517975013"
+      },
       "files": [
         {
           "path": "rec-eslav/inference.onnx",
           "size": 7887627,
-          "sha256": "b3018ef2b09a0250b6e0c8e871c927098363e5fd4df890cc68e8358eb0aaf1bd"
+          "sha256": "b3018ef2b09a0250b6e0c8e871c927098363e5fd4df890cc68e8358eb0aaf1bd",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-eslav/dict.txt",
           "size": 1663,
-          "sha256": "3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb"
+          "sha256": "3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -98,16 +135,23 @@
       "id": "rec-cyrillic",
       "kind": "script_pack",
       "display_name": "Cyrillic (other)",
+      "source": {
+        "repo": "PaddlePaddle/cyrillic_PP-OCRv5_mobile_rec_onnx",
+        "revision": "2cef88145434beb8afa9dd82d77d799eb1ad7b29"
+      },
       "files": [
         {
           "path": "rec-cyrillic/inference.onnx",
           "size": 8048799,
-          "sha256": "5371ee1ddaa7983cc62d0818d99e982b6804638c85e4f960d59a574094e172e5"
+          "sha256": "5371ee1ddaa7983cc62d0818d99e982b6804638c85e4f960d59a574094e172e5",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-cyrillic/dict.txt",
           "size": 2781,
-          "sha256": "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba"
+          "sha256": "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -115,16 +159,23 @@
       "id": "rec-korean",
       "kind": "script_pack",
       "display_name": "Korean",
+      "source": {
+        "repo": "PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx",
+        "revision": "5c6f574b8e2230adf4287b33e736d71b9fabd28e"
+      },
       "files": [
         {
           "path": "rec-korean/inference.onnx",
           "size": 13418787,
-          "sha256": "92f0b7785e64fc9090106a241cf4c1eb97472824558272751b88a2a4476d3a08"
+          "sha256": "92f0b7785e64fc9090106a241cf4c1eb97472824558272751b88a2a4476d3a08",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-korean/dict.txt",
           "size": 47451,
-          "sha256": "a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7"
+          "sha256": "a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -132,16 +183,23 @@
       "id": "rec-arabic",
       "kind": "script_pack",
       "display_name": "Arabic script",
+      "source": {
+        "repo": "PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx",
+        "revision": "14aaedcd75825982689ecf5cd64ab33ee083215a"
+      },
       "files": [
         {
           "path": "rec-arabic/inference.onnx",
           "size": 7998947,
-          "sha256": "799113ebf267fbe742deb99eb36e8d42c9ddc5291ceacf92add41b4d52a59110"
+          "sha256": "799113ebf267fbe742deb99eb36e8d42c9ddc5291ceacf92add41b4d52a59110",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-arabic/dict.txt",
           "size": 2369,
-          "sha256": "7f92f7dbb9b75a4787a83bfb4f6d14a8ab515525130c9d40a9036f61cf6999e9"
+          "sha256": "7f92f7dbb9b75a4787a83bfb4f6d14a8ab515525130c9d40a9036f61cf6999e9",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -149,16 +207,23 @@
       "id": "rec-devanagari",
       "kind": "script_pack",
       "display_name": "Devanagari",
+      "source": {
+        "repo": "PaddlePaddle/devanagari_PP-OCRv5_mobile_rec_onnx",
+        "revision": "251aec19e36739540d35e2cc943f6aa7503b98e5"
+      },
       "files": [
         {
           "path": "rec-devanagari/inference.onnx",
           "size": 7912311,
-          "sha256": "cb789212ce96c69d3e74728ae4309d179281d68cb3945d0616b67cafab41c986"
+          "sha256": "cb789212ce96c69d3e74728ae4309d179281d68cb3945d0616b67cafab41c986",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-devanagari/dict.txt",
           "size": 1943,
-          "sha256": "09c7440bfc5477e5c41052304b6b185aff8c4a5e8b2b4c23c1c706f6fe1ee9fc"
+          "sha256": "09c7440bfc5477e5c41052304b6b185aff8c4a5e8b2b4c23c1c706f6fe1ee9fc",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -166,16 +231,23 @@
       "id": "rec-th",
       "kind": "script_pack",
       "display_name": "Thai",
+      "source": {
+        "repo": "PaddlePaddle/th_PP-OCRv5_mobile_rec_onnx",
+        "revision": "1d4adbbafb1034a2fd6618498575b81ea7b69f69"
+      },
       "files": [
         {
           "path": "rec-th/inference.onnx",
           "size": 7891015,
-          "sha256": "27618be66018f8598ac0a526a593f9f1cebf794e7eded93428e8fb016e537f5f"
+          "sha256": "27618be66018f8598ac0a526a593f9f1cebf794e7eded93428e8fb016e537f5f",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-th/dict.txt",
           "size": 1767,
-          "sha256": "57f5406f94bb6688fb7077f7be65f08bbd71cecf48c01ea26c522cb5c4836b7a"
+          "sha256": "57f5406f94bb6688fb7077f7be65f08bbd71cecf48c01ea26c522cb5c4836b7a",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -183,16 +255,23 @@
       "id": "rec-el",
       "kind": "script_pack",
       "display_name": "Greek",
+      "source": {
+        "repo": "PaddlePaddle/el_PP-OCRv5_mobile_rec_onnx",
+        "revision": "8152b89d2ee0e1d4c92decab75fe75e5e3d836b6"
+      },
       "files": [
         {
           "path": "rec-el/inference.onnx",
           "size": 7808735,
-          "sha256": "2acf17fcaea2bc81b878e311e6263b8885f48bb03796f75f9f30ed3242bbaa6d"
+          "sha256": "2acf17fcaea2bc81b878e311e6263b8885f48bb03796f75f9f30ed3242bbaa6d",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-el/dict.txt",
           "size": 1103,
-          "sha256": "31defc62c0c3ad3674a82da6192226a2ba98ef4ff014a7045cb88d59f9c3de31"
+          "sha256": "31defc62c0c3ad3674a82da6192226a2ba98ef4ff014a7045cb88d59f9c3de31",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -200,16 +279,23 @@
       "id": "rec-ta",
       "kind": "script_pack",
       "display_name": "Tamil",
+      "source": {
+        "repo": "PaddlePaddle/ta_PP-OCRv5_mobile_rec_onnx",
+        "revision": "0db89798af0d5218fad9ea7ace0557526e9077f1"
+      },
       "files": [
         {
           "path": "rec-ta/inference.onnx",
           "size": 7885691,
-          "sha256": "c6d2b682d2a0ea4cb1fccdba295976f93fd439964d16cdc666cadef531accbee"
+          "sha256": "c6d2b682d2a0ea4cb1fccdba295976f93fd439964d16cdc666cadef531accbee",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-ta/dict.txt",
           "size": 1723,
-          "sha256": "85b541352ae18dc6ba6d47152d8bf8adff6b0266e605d2eef2990c1bf466117b"
+          "sha256": "85b541352ae18dc6ba6d47152d8bf8adff6b0266e605d2eef2990c1bf466117b",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     },
@@ -217,16 +303,23 @@
       "id": "rec-te",
       "kind": "script_pack",
       "display_name": "Telugu",
+      "source": {
+        "repo": "PaddlePaddle/te_PP-OCRv5_mobile_rec_onnx",
+        "revision": "f1197c83430241c58c64b0952b3a80366d04eeba"
+      },
       "files": [
         {
           "path": "rec-te/inference.onnx",
           "size": 7898759,
-          "sha256": "8238bfc46d4cffe720ed6706e3842802467343497428693ff2bfb4e6b3caa36b"
+          "sha256": "8238bfc46d4cffe720ed6706e3842802467343497428693ff2bfb4e6b3caa36b",
+          "source_path": "inference.onnx"
         },
         {
           "path": "rec-te/dict.txt",
           "size": 1831,
-          "sha256": "42f83f5d3fdb50778e4fa5b66c58d99a59ab7792151c5e74f34b8ffd7b61c9d6"
+          "sha256": "42f83f5d3fdb50778e4fa5b66c58d99a59ab7792151c5e74f34b8ffd7b61c9d6",
+          "source_path": "inference.yml",
+          "derive": "paddle_dict"
         }
       ]
     }

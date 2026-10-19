@@ -2,17 +2,16 @@
 # requires-python = ">=3.10"
 # dependencies = ["huggingface_hub>=0.25", "pyyaml>=6"]
 # ///
-"""Download upstream model files into a local models dir and write models/manifest.json.
+"""Generate models/manifest.json from the pinned upstream repos in REVISIONS.
 
-The output dir layout is exactly what gets mirrored to the translatte-models HF repo (M2),
-so manifest paths are valid both locally and remotely.
+Sizes and sha256 of upstream files come from Hub metadata; derived files (rec-*/dict.txt) are
+computed from the pinned inference.yml. Models are downloaded by `translatte fetch`, which reads
+`source`/`source_path`/`derive` from the manifest and fetches straight from these repos.
 """
 
 import argparse
 import hashlib
 import json
-import os
-import shutil
 from pathlib import Path
 
 import yaml
@@ -21,7 +20,6 @@ from huggingface_hub import HfApi, hf_hub_download
 DET_REPO = "PaddlePaddle/PP-OCRv5_mobile_det_onnx"
 TRANSLATOR_REPO = "mradermacher/translategemma-4b-it-GGUF"
 TRANSLATOR_FILE = "translategemma-4b-it.Q4_K_M.gguf"
-DEFAULT_BASE_URL = "https://huggingface.co/assafvayner/translatte-models/resolve/main"
 
 SCRIPT_PACKS = {
     "rec-cjk": ("PaddlePaddle/PP-OCRv5_mobile_rec_onnx", "Chinese / Japanese"),
@@ -93,75 +91,58 @@ LANGUAGES = (
 )
 
 
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def source(repo: str) -> dict:
+    return {"repo": repo, "revision": REVISIONS[repo]}
 
 
-def file_entry(out_dir: Path, rel: str) -> dict:
-    p = out_dir / rel
-    return {"path": rel, "size": p.stat().st_size, "sha256": sha256_file(p)}
-
-
-def fetch(repo: str, filename: str, dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
+def upstream_entry(repo: str, filename: str, rel: str) -> dict:
+    """Size and sha256 of an upstream file, from LFS metadata or by hashing its contents."""
     rev = REVISIONS[repo]
-    if dest.exists():
-        expected = HfApi().get_paths_info(repo, [filename], revision=rev)[0].size
-        if dest.stat().st_size == expected:
-            return
-    src = hf_hub_download(repo, filename, revision=rev)
-    part = dest.with_name(dest.name + ".part")
-    shutil.copyfile(src, part)
-    os.replace(part, dest)
+    info = HfApi().get_paths_info(repo, [filename], expand=True, revision=rev)[0]
+    if info.lfs is not None:
+        size, sha = info.lfs.size, info.lfs.sha256
+    else:
+        data = Path(hf_hub_download(repo, filename, revision=rev)).read_bytes()
+        size, sha = len(data), hashlib.sha256(data).hexdigest()
+    return {"path": rel, "size": size, "sha256": sha, "source_path": filename}
 
 
-def write_dict(yml_path: Path, dest: Path) -> None:
-    cfg = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+def paddle_dict(yml_text: str) -> bytes:
+    """Must stay byte-identical to translatte_core::download::paddle_dict."""
+    cfg = yaml.safe_load(yml_text)
     chars = cfg["PostProcess"]["character_dict"]
     assert all(isinstance(c, str) and "\n" not in c for c in chars), "unexpected dict entry"
-    dest.write_text("\n".join(chars) + "\n", encoding="utf-8")
+    return ("\n".join(chars) + "\n").encode("utf-8")
+
+
+def dict_entry(repo: str, rel: str) -> dict:
+    yml = Path(hf_hub_download(repo, "inference.yml", revision=REVISIONS[repo]))
+    data = paddle_dict(yml.read_text(encoding="utf-8"))
+    return {"path": rel, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+            "source_path": "inference.yml", "derive": "paddle_dict"}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out-dir", type=Path, default=Path("models-cache"))
     ap.add_argument("--manifest", type=Path, default=Path("models/manifest.json"))
-    ap.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    ap.add_argument("--skip-translator", action="store_true", help="don't download the 2.5GB GGUF; manifest uses HF metadata")
     args = ap.parse_args()
-    out: Path = args.out_dir
 
-    models = []
-
-    fetch(DET_REPO, "inference.onnx", out / "det/inference.onnx")
-    models.append({"id": "det", "kind": "core", "display_name": "Text detector",
-                   "files": [file_entry(out, "det/inference.onnx")]})
-
-    translator_rel = "translator/model.gguf"
-    if args.skip_translator:
-        info = HfApi().get_paths_info(TRANSLATOR_REPO, [TRANSLATOR_FILE], expand=True, revision=REVISIONS[TRANSLATOR_REPO])[0]
-        translator_file = {"path": translator_rel, "size": info.size, "sha256": info.lfs.sha256}
-    else:
-        fetch(TRANSLATOR_REPO, TRANSLATOR_FILE, out / translator_rel)
-        translator_file = file_entry(out, translator_rel)
-    models.append({"id": "translator", "kind": "core", "display_name": "Translator (TranslateGemma 4B)",
-                   "files": [translator_file]})
-
+    models = [
+        {"id": "det", "kind": "core", "display_name": "Text detector", "source": source(DET_REPO),
+         "files": [upstream_entry(DET_REPO, "inference.onnx", "det/inference.onnx")]},
+        {"id": "translator", "kind": "core", "display_name": "Translator (TranslateGemma 4B)",
+         "source": source(TRANSLATOR_REPO),
+         "files": [upstream_entry(TRANSLATOR_REPO, TRANSLATOR_FILE, "translator/model.gguf")]},
+    ]
     for pack, (repo, display) in SCRIPT_PACKS.items():
-        fetch(repo, "inference.onnx", out / pack / "inference.onnx")
-        yml = Path(hf_hub_download(repo, "inference.yml", revision=REVISIONS[repo]))
-        write_dict(yml, out / pack / "dict.txt")
-        models.append({"id": pack, "kind": "script_pack", "display_name": display,
-                       "files": [file_entry(out, f"{pack}/inference.onnx"), file_entry(out, f"{pack}/dict.txt")]})
+        models.append({"id": pack, "kind": "script_pack", "display_name": display, "source": source(repo),
+                       "files": [upstream_entry(repo, "inference.onnx", f"{pack}/inference.onnx"),
+                                 dict_entry(repo, f"{pack}/dict.txt")]})
 
     languages = [{"code": c, "name": n, "script_pack": p, "rtl": rtl, "spaced": sp}
                  | ({"prompt_name": PROMPT_NAMES[c]} if c in PROMPT_NAMES else {})
                  for c, n, p, rtl, sp in LANGUAGES]
-    manifest = {"version": 1, "base_url": args.base_url, "models": models, "languages": languages}
+    manifest = {"version": 1, "models": models, "languages": languages}
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"wrote {args.manifest} ({len(models)} models, {len(languages)} languages)")

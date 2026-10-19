@@ -15,11 +15,30 @@ pub enum ModelKind {
     ScriptPack,
 }
 
+/// How a local file is produced from its upstream `source_path` when it is not a verbatim copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Derive {
+    /// `PostProcess.character_dict` of a PaddleOCR `inference.yml`, one entry per line.
+    PaddleDict,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelFile {
     pub path: String,
     pub size: u64,
     pub sha256: String,
+    /// File name in the upstream repo (`ModelEntry::source`).
+    pub source_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derive: Option<Derive>,
+}
+
+/// Upstream Hugging Face model repo pinned to a commit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelSource {
+    pub repo: String,
+    pub revision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +46,7 @@ pub struct ModelEntry {
     pub id: String,
     pub kind: ModelKind,
     pub display_name: String,
+    pub source: ModelSource,
     pub files: Vec<ModelFile>,
 }
 
@@ -58,7 +78,6 @@ pub struct Language {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: u32,
-    pub base_url: String,
     pub models: Vec<ModelEntry>,
     pub languages: Vec<Language>,
 }
@@ -82,10 +101,6 @@ impl Manifest {
             .ok_or_else(|| TranslatteError::UnknownLanguage(code.to_string()))
     }
 
-    pub fn url_for(&self, file: &ModelFile) -> String {
-        format!("{}/{}", self.base_url.trim_end_matches('/'), file.path)
-    }
-
     fn validate(&self) -> Result<()> {
         let mut ids = HashSet::new();
         for m in &self.models {
@@ -97,6 +112,7 @@ impl Manifest {
             }
         }
         for m in &self.models {
+            validate_source(m)?;
             if m.files.is_empty() {
                 return Err(TranslatteError::Manifest(format!(
                     "model {} has no files",
@@ -113,6 +129,12 @@ impl Manifest {
                     return Err(TranslatteError::Manifest(format!(
                         "invalid file path {} for model {}",
                         f.path, m.id
+                    )));
+                }
+                if !is_safe_repo_path(&f.source_path) {
+                    return Err(TranslatteError::Manifest(format!(
+                        "invalid source path {} for {}",
+                        f.source_path, f.path
                     )));
                 }
                 let name = path.file_name().map(|n| n.to_owned());
@@ -160,22 +182,65 @@ impl Manifest {
     }
 }
 
+fn is_safe_repo_path(p: &str) -> bool {
+    !p.is_empty()
+        && !p.starts_with('/')
+        && p.split('/')
+            .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
+}
+
+fn validate_source(m: &ModelEntry) -> Result<()> {
+    let ModelSource { repo, revision } = &m.source;
+    let repo_ok = match repo.split_once('/') {
+        Some((owner, name)) => {
+            let ok = |s: &str| {
+                !s.is_empty()
+                    && s != "."
+                    && s != ".."
+                    && s.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            };
+            ok(owner) && ok(name)
+        }
+        None => false,
+    };
+    if !repo_ok {
+        return Err(TranslatteError::Manifest(format!(
+            "invalid source repo {repo:?} for model {}",
+            m.id
+        )));
+    }
+    let rev_ok = revision.len() == 40
+        && revision
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if !rev_ok {
+        return Err(TranslatteError::Manifest(format!(
+            "source revision for model {} must be a 40-hex commit sha, got {revision:?}",
+            m.id
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
 
     pub(crate) const SAMPLE: &str = r#"{
       "version": 1,
-      "base_url": "https://example.com/repo/resolve/abc/",
       "models": [
         {"id": "det", "kind": "core", "display_name": "Text detector",
-         "files": [{"path": "det/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]},
+         "source": {"repo": "acme/det", "revision": "0123456789abcdef0123456789abcdef01234567"},
+         "files": [{"path": "det/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.onnx"}]},
         {"id": "translator", "kind": "core", "display_name": "Translator",
-         "files": [{"path": "translator/model.gguf", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]},
+         "source": {"repo": "acme/translator-GGUF", "revision": "0123456789abcdef0123456789abcdef01234567"},
+         "files": [{"path": "translator/model.gguf", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "translator.Q4_K_M.gguf"}]},
         {"id": "rec-latin", "kind": "script_pack", "display_name": "Latin script",
+         "source": {"repo": "acme/latin_rec", "revision": "0123456789abcdef0123456789abcdef01234567"},
          "files": [
-           {"path": "rec-latin/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
-           {"path": "rec-latin/dict.txt", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}
+           {"path": "rec-latin/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.onnx"},
+           {"path": "rec-latin/dict.txt", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.yml", "derive": "paddle_dict"}
          ]}
       ],
       "languages": [
@@ -198,13 +263,53 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn url_for_joins_base_and_path() {
+    fn parses_sources_and_derive() {
         let m = Manifest::from_json(SAMPLE).unwrap();
-        let f = &m.model("det").unwrap().files[0];
-        assert_eq!(
-            m.url_for(f),
-            "https://example.com/repo/resolve/abc/det/inference.onnx"
+        let latin = m.model("rec-latin").unwrap();
+        assert_eq!(latin.source.repo, "acme/latin_rec");
+        assert_eq!(latin.files[0].source_path, "inference.onnx");
+        assert_eq!(latin.files[0].derive, None);
+        assert_eq!(latin.files[1].source_path, "inference.yml");
+        assert_eq!(latin.files[1].derive, Some(Derive::PaddleDict));
+    }
+
+    #[test]
+    fn rejects_missing_or_invalid_source() {
+        assert_rejected(SAMPLE.replace(
+            r#""source": {"repo": "acme/det", "revision": "0123456789abcdef0123456789abcdef01234567"},"#,
+            "",
+        ));
+        assert_rejected(SAMPLE.replace("acme/det", "acme"));
+        assert_rejected(SAMPLE.replace("acme/det", "acme/det/x"));
+        assert_rejected(SAMPLE.replace("acme/det", "../det"));
+        assert_rejected(SAMPLE.replacen("0123456789abcdef0123456789abcdef01234567", "main", 1));
+        assert_rejected(SAMPLE.replacen(
+            "0123456789abcdef0123456789abcdef01234567",
+            "0123456789ABCDEF0123456789ABCDEF01234567",
+            1,
+        ));
+        assert_rejected(SAMPLE.replacen(
+            "0123456789abcdef0123456789abcdef01234567",
+            "0123456789abcdef0123456789abcdef0123456",
+            1,
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_or_unsafe_source_path() {
+        assert_rejected(SAMPLE.replace(r#", "source_path": "inference.onnx"}]}"#, "}]}"));
+        assert_rejected(SAMPLE.replace(
+            r#""source_path": "inference.yml""#,
+            r#""source_path": "../x.yml""#,
+        ));
+        assert_rejected(SAMPLE.replace(
+            r#""source_path": "inference.yml""#,
+            r#""source_path": "/x.yml""#,
+        ));
+        assert_rejected(
+            SAMPLE.replace(r#""source_path": "inference.yml""#, r#""source_path": """#),
         );
+        assert_rejected(SAMPLE.replace(r#""derive": "paddle_dict""#, r#""derive": "nope""#));
     }
 
     #[test]
@@ -254,7 +359,7 @@ pub(crate) mod tests {
     #[test]
     fn rejects_model_without_files() {
         let bad = SAMPLE.replace(
-            r#""files": [{"path": "det/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]"#,
+            r#""files": [{"path": "det/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.onnx"}]"#,
             r#""files": []"#,
         );
         assert_rejected(bad);
@@ -285,5 +390,16 @@ pub(crate) mod tests {
             Some("Chinese")
         );
         assert_eq!(m.language("ja").unwrap().prompt_name, None);
+        let gguf = &m.model("translator").unwrap().files[0];
+        assert_eq!(gguf.source_path, "translategemma-4b-it.Q4_K_M.gguf");
+        for model in m.models.iter().filter(|m| m.kind == ModelKind::ScriptPack) {
+            let dict = model
+                .files
+                .iter()
+                .find(|f| f.path.ends_with("/dict.txt"))
+                .unwrap();
+            assert_eq!(dict.derive, Some(Derive::PaddleDict), "{}", model.id);
+            assert_eq!(dict.source_path, "inference.yml");
+        }
     }
 }
