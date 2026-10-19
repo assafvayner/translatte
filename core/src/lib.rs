@@ -5,5 +5,6 @@ pub mod manifest;
 pub mod model_store;
 pub mod ocr;
 pub mod render;
+pub mod translate;
 
 pub use error::{Result, TranslatteError};
