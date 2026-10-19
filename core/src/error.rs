@@ -14,6 +14,8 @@ pub enum TranslatteError {
     UnknownLanguage(String),
     #[error("checksum mismatch: {path}")]
     ChecksumMismatch { path: String },
+    #[error("{0} has no OCR script pack and can only be a target language")]
+    NoScriptPack(String),
     #[error("inference error: {0}")]
     Inference(String),
     #[error("translation error: {0}")]
