@@ -2,8 +2,6 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
-
 use crate::manifest::{
     Language, Manifest, ModelEntry, ModelFile, ModelKind, DETECTOR_ID, TRANSLATOR_ID,
 };
@@ -62,33 +60,13 @@ impl ModelStore {
         })
     }
 
-    pub fn verify(&self, id: &str) -> Result<bool> {
-        Ok(self.failed_files(id)?.is_empty())
-    }
-
-    /// Checks size, then streams the sha256. A missing file is `Ok(false)`.
-    pub fn verify_file(&self, file: &ModelFile, path: &Path) -> Result<bool> {
-        let mut f = match File::open(path) {
-            Ok(f) => f,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(e) => return Err(e.into()),
-        };
-        if f.metadata()?.len() != file.size {
-            return Ok(false);
+    /// True when `file` exists in the store with the expected size.
+    pub fn is_file_installed(&self, file: &ModelFile) -> Result<bool> {
+        match std::fs::metadata(self.root.join(&file.path)) {
+            Ok(m) => Ok(m.len() == file.size),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e.into()),
         }
-        let mut hasher = Sha256::new();
-        io::copy(&mut f, &mut hasher)?;
-        Ok(hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256))
-    }
-
-    pub fn failed_files(&self, id: &str) -> Result<Vec<&ModelFile>> {
-        let mut out = Vec::new();
-        for f in &self.entry(id)?.files {
-            if !self.verify_file(f, &self.root.join(&f.path))? {
-                out.push(f);
-            }
-        }
-        Ok(out)
     }
 
     pub fn part_path(&self, file: &ModelFile) -> PathBuf {
@@ -97,10 +75,10 @@ impl ModelStore {
         PathBuf::from(p)
     }
 
-    /// Verifies `<file>.part` and atomically renames it into place.
+    /// Checks the size of `<file>.part` and atomically renames it into place.
     ///
-    /// A `.part` shorter than expected is kept (`Incomplete`) so the download can resume; a
-    /// full-size or oversize `.part` that fails the hash is deleted. Assumes a single writer per
+    /// A `.part` shorter than expected is kept (`Incomplete`) so the download can resume; an
+    /// oversize `.part` is deleted (`SizeMismatch`). Assumes a single writer per
     /// file (one download job per model); concurrent commits of the same file are not supported.
     pub fn commit_download(&self, file: &ModelFile) -> Result<()> {
         let part = self.part_path(file);
@@ -120,10 +98,12 @@ impl ModelStore {
                 want: file.size,
             });
         }
-        if !self.verify_file(file, &part)? {
+        if have > file.size {
             std::fs::remove_file(&part)?;
-            return Err(TranslatteError::ChecksumMismatch {
+            return Err(TranslatteError::SizeMismatch {
                 path: file.path.clone(),
+                have,
+                want: file.size,
             });
         }
         let dest = self.root.join(&file.path);
@@ -236,16 +216,6 @@ mod tests {
         assert_eq!(s.state("rec-latin").unwrap(), InstallState::Installed);
     }
 
-    #[test]
-    fn verify_checks_sha256() {
-        let (_d, s) = store();
-        write(&s, "rec-latin/inference.onnx", "abc");
-        write(&s, "rec-latin/dict.txt", "abc");
-        assert!(s.verify("rec-latin").unwrap());
-        write(&s, "rec-latin/dict.txt", "abd");
-        assert!(!s.verify("rec-latin").unwrap());
-    }
-
     fn file<'a>(s: &'a ModelStore, id: &str, name: &str) -> &'a ModelFile {
         s.manifest()
             .model(id)
@@ -257,31 +227,14 @@ mod tests {
     }
 
     #[test]
-    fn verify_file_checks_size_then_hash_and_handles_missing() {
-        let (d, s) = store();
-        let f = file(&s, "rec-latin", "dict.txt");
-        let p = d.path().join("x.bin");
-        assert!(!s.verify_file(f, &p).unwrap());
-        std::fs::write(&p, "abc").unwrap();
-        assert!(s.verify_file(f, &p).unwrap());
-        std::fs::write(&p, "abd").unwrap();
-        assert!(!s.verify_file(f, &p).unwrap());
-        std::fs::write(&p, "abcd").unwrap();
-        assert!(!s.verify_file(f, &p).unwrap());
-    }
-
-    #[test]
-    fn failed_files_lists_missing_and_bad_files() {
+    fn is_file_installed_checks_size_and_handles_missing() {
         let (_d, s) = store();
-        assert_eq!(s.failed_files("rec-latin").unwrap().len(), 2);
-        write(&s, "rec-latin/inference.onnx", "abc");
-        write(&s, "rec-latin/dict.txt", "abd");
-        let failed = s.failed_files("rec-latin").unwrap();
-        assert_eq!(failed.len(), 1);
-        assert_eq!(failed[0].path, "rec-latin/dict.txt");
+        let f = file(&s, "rec-latin", "dict.txt");
+        assert!(!s.is_file_installed(f).unwrap());
         write(&s, "rec-latin/dict.txt", "abc");
-        assert!(s.failed_files("rec-latin").unwrap().is_empty());
-        assert!(s.failed_files("nope").is_err());
+        assert!(s.is_file_installed(f).unwrap());
+        write(&s, "rec-latin/dict.txt", "abcd");
+        assert!(!s.is_file_installed(f).unwrap());
     }
 
     #[test]
@@ -292,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_download_renames_verified_part() {
+    fn commit_download_renames_full_size_part() {
         let (_d, s) = store();
         let f = file(&s, "rec-latin", "dict.txt");
         write(&s, "rec-latin/dict.txt.part", "abc");
@@ -302,19 +255,6 @@ mod tests {
             std::fs::read_to_string(s.root().join("rec-latin/dict.txt")).unwrap(),
             "abc"
         );
-    }
-
-    #[test]
-    fn commit_download_deletes_bad_part() {
-        let (_d, s) = store();
-        let f = file(&s, "rec-latin", "dict.txt");
-        write(&s, "rec-latin/dict.txt.part", "abd");
-        assert!(matches!(
-            s.commit_download(f),
-            Err(TranslatteError::ChecksumMismatch { .. })
-        ));
-        assert!(!s.part_path(f).exists());
-        assert!(!s.root().join("rec-latin/dict.txt").exists());
     }
 
     #[test]
@@ -350,7 +290,11 @@ mod tests {
         write(&s, "rec-latin/dict.txt.part", "abcd");
         assert!(matches!(
             s.commit_download(f),
-            Err(TranslatteError::ChecksumMismatch { .. })
+            Err(TranslatteError::SizeMismatch {
+                have: 4,
+                want: 3,
+                ..
+            })
         ));
         assert!(!s.part_path(f).exists());
     }

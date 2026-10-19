@@ -12,8 +12,8 @@ pub enum TranslatteError {
     CoreModelDelete(String),
     #[error("unknown language: {0}")]
     UnknownLanguage(String),
-    #[error("checksum mismatch: {path}")]
-    ChecksumMismatch { path: String },
+    #[error("size mismatch for {path}: have {have} bytes, expected {want}")]
+    SizeMismatch { path: String, have: u64, want: u64 },
     #[error("{0} has no OCR script pack and can only be a target language")]
     NoScriptPack(String),
     #[error("pipeline is loaded for script pack {pipeline}, not the pack of language {language}")]
