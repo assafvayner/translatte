@@ -12,7 +12,7 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 
 ## Setup
 
-Requires Rust (stable + nightly for fmt), `uv`, and `cmake` (llama.cpp builds from source).
+Requires Rust (stable + nightly for fmt), `uv`, `cmake`, `ninja` and `sccache` (`brew install cmake ninja sccache`). llama.cpp builds from source through CMake; `.cargo/config.toml` routes it through Ninja and sccache.
 
 ```bash
 uv run scripts/fetch_models.py            # ~2.6GB into models-cache/
