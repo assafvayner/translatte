@@ -14,10 +14,6 @@ impl<G: TextGenerator> BatchTranslator<G> {
         Self { generator }
     }
 
-    pub fn generator(&self) -> &G {
-        &self.generator
-    }
-
     /// Cleaned completion, or `None` if generation hit the token limit.
     fn complete(&mut self, prompt: &Prompt, max_tokens: usize) -> Result<Option<String>> {
         let g = self.generator.generate(prompt, max_tokens)?;

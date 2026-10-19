@@ -1,5 +1,6 @@
 use std::num::NonZeroU32;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -18,21 +19,32 @@ fn err(e: impl std::fmt::Display) -> TranslatteError {
     TranslatteError::Translate(e.to_string())
 }
 
-// Field order matters: the model must be dropped before the backend it was loaded with.
+static BACKEND: OnceLock<std::result::Result<LlamaBackend, String>> = OnceLock::new();
+
+/// The llama.cpp backend is process-global and can only be initialized once; it lives for the process.
+fn backend() -> Result<&'static LlamaBackend> {
+    BACKEND
+        .get_or_init(|| {
+            llama_cpp_2::send_logs_to_tracing(
+                llama_cpp_2::LogOptions::default().with_logs_enabled(false),
+            );
+            LlamaBackend::init().map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(err)
+}
+
 pub struct LlamaGenerator {
     model: LlamaModel,
-    backend: LlamaBackend,
+    backend: &'static LlamaBackend,
     threads: i32,
 }
 
 impl LlamaGenerator {
     pub fn load(path: &Path) -> Result<Self> {
-        llama_cpp_2::send_logs_to_tracing(
-            llama_cpp_2::LogOptions::default().with_logs_enabled(false),
-        );
-        let backend = LlamaBackend::init().map_err(err)?;
-        let model = LlamaModel::load_from_file(&backend, path, &LlamaModelParams::default())
-            .map_err(err)?;
+        let backend = backend()?;
+        let model =
+            LlamaModel::load_from_file(backend, path, &LlamaModelParams::default()).map_err(err)?;
         let threads = std::thread::available_parallelism()
             .map(|n| n.get().min(8) as i32)
             .unwrap_or(4);
@@ -67,7 +79,7 @@ impl TextGenerator for LlamaGenerator {
             .with_n_threads_batch(self.threads);
         let mut ctx = self
             .model
-            .new_context(&self.backend, ctx_params)
+            .new_context(self.backend, ctx_params)
             .map_err(err)?;
 
         let mut batch = LlamaBatch::new(N_CTX as usize, 1);

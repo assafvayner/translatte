@@ -12,6 +12,16 @@ pub enum TranslatteError {
     CoreModelDelete(String),
     #[error("unknown language: {0}")]
     UnknownLanguage(String),
+    #[error("checksum mismatch: {path}")]
+    ChecksumMismatch { path: String },
+    #[error("{0} has no OCR script pack and can only be a target language")]
+    NoScriptPack(String),
+    #[error("pipeline is loaded for script pack {pipeline}, not the pack of language {language}")]
+    ScriptPackMismatch { pipeline: String, language: String },
+    #[error("incomplete download of {path}: have {have} of {want} bytes")]
+    Incomplete { path: String, have: u64, want: u64 },
+    #[error("no partial download for {path}")]
+    PartMissing { path: String },
     #[error("inference error: {0}")]
     Inference(String),
     #[error("translation error: {0}")]

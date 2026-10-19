@@ -107,6 +107,7 @@ pub fn parse_numbered_items(output: &str, n: usize) -> Option<Vec<String>> {
     (items.len() == n).then_some(items)
 }
 
+#[cfg(test)]
 pub fn parse_numbered(output: &str, n: usize) -> Option<Vec<String>> {
     parse_numbered_items(output, n).filter(|items| items.iter().all(|i| !i.is_empty()))
 }

@@ -1,6 +1,8 @@
 pub mod error;
 pub mod geometry;
 pub mod layout;
+#[cfg(feature = "llama")]
+pub mod loader;
 pub mod manifest;
 pub mod model_store;
 pub mod ocr;

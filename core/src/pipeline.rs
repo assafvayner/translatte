@@ -7,7 +7,7 @@ use crate::manifest::Language;
 use crate::ocr::{Line, TextDetector, TextRecognizer};
 use crate::render::style_hints;
 use crate::translate::{chunk_ranges, Translator};
-use crate::Result;
+use crate::{Result, TranslatteError};
 
 const MIN_LINE_CONFIDENCE: f32 = 0.5;
 
@@ -48,6 +48,7 @@ pub struct Pipeline<D, R, T> {
     detector: D,
     recognizer: R,
     translator: Option<T>,
+    script_pack: Option<String>,
 }
 
 impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
@@ -56,10 +57,35 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             detector,
             recognizer,
             translator,
+            script_pack: None,
         }
     }
 
-    pub fn ocr(&mut self, img: &RgbImage, on_stage: &mut dyn FnMut(Stage)) -> Result<Vec<Line>> {
+    /// Restricts the pipeline to source languages using this script pack.
+    pub fn with_script_pack(mut self, id: impl Into<String>) -> Self {
+        self.script_pack = Some(id.into());
+        self
+    }
+
+    fn check_source(&self, src: &Language) -> Result<()> {
+        match (&self.script_pack, &src.script_pack) {
+            (Some(own), got) if got.as_ref() != Some(own) => {
+                Err(TranslatteError::ScriptPackMismatch {
+                    pipeline: own.clone(),
+                    language: src.code.clone(),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn ocr(
+        &mut self,
+        img: &RgbImage,
+        src: &Language,
+        on_stage: &mut dyn FnMut(Stage),
+    ) -> Result<Vec<Line>> {
+        self.check_source(src)?;
         on_stage(Stage::Detecting);
         let quads = self.detector.detect(img)?;
         let mut lines = Vec::new();
@@ -83,7 +109,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         tgt: &Language,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<PipelineOutput> {
-        let mut blocks = group_lines(self.ocr(img, on_stage)?, src);
+        let mut blocks = group_lines(self.ocr(img, src, on_stage)?, src);
         blocks.retain(|b| !b.text.trim().is_empty());
         let texts: Vec<String> = blocks.iter().map(|b| b.text.clone()).collect();
         let mut translation_error = None;
@@ -238,6 +264,30 @@ mod tests {
         );
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap().regions;
         assert_eq!(out[0].translated_text, None);
+    }
+
+    #[test]
+    fn rejects_source_language_from_another_script_pack() {
+        let img = RgbImage::from_pixel(200, 100, Rgb([255, 255, 255]));
+        let mut p: Pipeline<_, _, Upper> = Pipeline::new(
+            FakeDet(vec![quad(10.0)]),
+            FakeRec(vec![("sortie", 0.9)], 0),
+            None,
+        )
+        .with_script_pack("rec-latin");
+        let mut other = lang();
+        other.script_pack = Some("rec-cjk".into());
+        assert!(matches!(
+            p.run(&img, &other, &lang(), &mut |_| {}),
+            Err(TranslatteError::ScriptPackMismatch { .. })
+        ));
+        assert!(matches!(
+            p.ocr(&img, &lang(), &mut |_| {}),
+            Err(TranslatteError::ScriptPackMismatch { .. })
+        ));
+        let mut latin = lang();
+        latin.script_pack = Some("rec-latin".into());
+        assert_eq!(p.ocr(&img, &latin, &mut |_| {}).unwrap().len(), 1);
     }
 
     struct FailAfter(usize);

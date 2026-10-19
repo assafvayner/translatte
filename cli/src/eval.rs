@@ -4,7 +4,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::setup::{self, CliPipeline};
+use translatte_core::loader::LoadedPipeline;
+
+use crate::setup;
 
 fn normalize(s: &str) -> Vec<char> {
     s.chars()
@@ -43,7 +45,7 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
         .collect();
     fixtures.sort();
-    let mut pipelines: HashMap<String, CliPipeline> = HashMap::new();
+    let mut pipelines: HashMap<String, LoadedPipeline> = HashMap::new();
     let mut scores = Vec::new();
     for json_path in fixtures {
         let text = std::fs::read_to_string(&json_path)
@@ -75,7 +77,7 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
             .with_context(|| format!("opening {}", image_path.display()))?
             .to_rgb8();
         let got: Vec<String> = pipeline
-            .ocr(&img, &mut |_| {})?
+            .ocr(&img, src, &mut |_| {})?
             .into_iter()
             .map(|l| l.text)
             .collect();

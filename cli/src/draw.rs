@@ -5,6 +5,36 @@ use translatte_core::pipeline::TranslatedRegion;
 pub const MIN_FONT_SIZE: f32 = 8.0;
 const LINE_HEIGHT: f32 = 1.15;
 
+const OUTLINE_RGB: image::Rgb<u8> = image::Rgb([255, 0, 0]);
+const OUTLINE_THICKNESS: i32 = 2;
+
+/// Marks where OCR found text: draws each region's quad edges in a visible color.
+pub fn draw_outlines(img: &mut RgbImage, regions: &[TranslatedRegion]) {
+    let (w, h) = (img.width() as i32, img.height() as i32);
+    let mut put = |x: i32, y: i32| {
+        if (0..w).contains(&x) && (0..h).contains(&y) {
+            img.put_pixel(x as u32, y as u32, OUTLINE_RGB);
+        }
+    };
+    for r in regions {
+        let pts = r.quad.0;
+        for i in 0..4 {
+            let (a, b) = (pts[i], pts[(i + 1) % 4]);
+            let steps = (b.x - a.x).abs().max((b.y - a.y).abs()).ceil().max(1.0) as i32;
+            for s in 0..=steps {
+                let t = s as f32 / steps as f32;
+                let x = (a.x + (b.x - a.x) * t).round() as i32;
+                let y = (a.y + (b.y - a.y) * t).round() as i32;
+                for dy in 0..OUTLINE_THICKNESS {
+                    for dx in 0..OUTLINE_THICKNESS {
+                        put(x + dx, y + dy);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Dev-only renderer: axis-aligned boxes, no rotation. The Android app does the real overlay.
 pub struct Renderer {
     fonts: FontSystem,
@@ -43,14 +73,14 @@ impl Renderer {
     }
 
     pub fn draw_regions(&mut self, img: &mut RgbImage, regions: &[TranslatedRegion]) {
+        if img.width() == 0 || img.height() == 0 {
+            return;
+        }
         for r in regions {
             let Some(text) = &r.translated_text else {
                 continue;
             };
             let b = r.quad.bbox();
-            if img.width() == 0 || img.height() == 0 {
-                continue;
-            }
             let (x0, y0) = (
                 (b.x0.max(0.0) as u32).min(img.width() - 1),
                 (b.y0.max(0.0) as u32).min(img.height() - 1),
@@ -158,6 +188,37 @@ mod tests {
         assert_eq!(*img.get_pixel(0, 0), Rgb([255, 255, 0]));
         assert_eq!(*img.get_pixel(99, 49), Rgb([255, 255, 0]));
         assert_eq!(*img.get_pixel(60, 10), Rgb([0, 0, 255]));
+    }
+
+    #[test]
+    fn outlines_trace_quad_edges_only() {
+        let mut img = RgbImage::from_pixel(200, 60, Rgb([0, 0, 255]));
+        draw_outlines(&mut img, &[region(None)]);
+        assert_eq!(*img.get_pixel(100, 10), OUTLINE_RGB);
+        assert_eq!(*img.get_pixel(10, 30), OUTLINE_RGB);
+        assert_eq!(*img.get_pixel(100, 30), Rgb([0, 0, 255]));
+        assert_eq!(*img.get_pixel(5, 5), Rgb([0, 0, 255]));
+    }
+
+    #[test]
+    fn outlines_clip_to_the_image() {
+        let mut img = RgbImage::from_pixel(50, 50, Rgb([0, 0, 255]));
+        let mut r = region(None);
+        r.quad = Quad::from_bbox(BBox {
+            x0: -20.0,
+            y0: -20.0,
+            x1: 400.0,
+            y1: 30.0,
+        });
+        draw_outlines(&mut img, &[r]);
+        assert_eq!(*img.get_pixel(25, 30), OUTLINE_RGB);
+    }
+
+    #[test]
+    fn zero_size_image_is_a_no_op() {
+        let mut img = RgbImage::new(0, 10);
+        Renderer::new().draw_regions(&mut img, &[region(Some("x"))]);
+        assert_eq!(img.dimensions(), (0, 10));
     }
 
     #[test]
