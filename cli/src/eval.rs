@@ -1,0 +1,105 @@
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use serde_json::Value;
+
+use crate::setup;
+
+fn normalize(s: &str) -> Vec<char> {
+    s.chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Character error rate of `got` against `expected`, ignoring whitespace and case. Capped at 1.0.
+pub fn cer(expected: &str, got: &str) -> f64 {
+    let (e, g) = (normalize(expected), normalize(got));
+    if e.is_empty() {
+        return if g.is_empty() { 0.0 } else { 1.0 };
+    }
+    let dist = strsim::generic_levenshtein(&e, &g);
+    (dist as f64 / e.len() as f64).min(1.0)
+}
+
+/// Mean over expected lines of the CER against the best-matching recognized line (order-independent).
+pub fn fixture_cer(expected: &[String], got: &[String]) -> f64 {
+    if expected.is_empty() {
+        return 0.0;
+    }
+    let total: f64 = expected
+        .iter()
+        .map(|e| got.iter().map(|g| cer(e, g)).fold(1.0, f64::min))
+        .sum();
+    total / expected.len() as f64
+}
+
+pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>) -> Result<bool> {
+    let store = setup::load_store(manifest, models)?;
+    let mut fixtures: Vec<_> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    fixtures.sort();
+    let mut scores = Vec::new();
+    for json_path in fixtures {
+        let spec: Value = serde_json::from_str(&std::fs::read_to_string(&json_path)?)?;
+        let lang_code = spec["lang"].as_str().context("fixture missing \"lang\"")?;
+        let image_name = spec["image"]
+            .as_str()
+            .context("fixture missing \"image\"")?;
+        let expected: Vec<String> = spec["lines"]
+            .as_array()
+            .context("fixture missing \"lines\"")?
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        let src = store.manifest().language(lang_code)?;
+        let mut pipeline = setup::build_pipeline(&store, src, false)?;
+        let img = image::open(dir.join(image_name))?.to_rgb8();
+        let got: Vec<String> = pipeline
+            .ocr(&img, &mut |_| {})?
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        let score = fixture_cer(&expected, &got);
+        println!("{:<40} {lang_code:<6} CER {:.3}", image_name, score);
+        scores.push(score);
+    }
+    let mean = if scores.is_empty() {
+        0.0
+    } else {
+        scores.iter().sum::<f64>() / scores.len() as f64
+    };
+    println!("{} fixtures, mean CER {:.3}", scores.len(), mean);
+    Ok(max_cer.is_none_or(|m| mean <= m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cer_ignores_whitespace_and_case() {
+        assert_eq!(cer("Hello World", "helloworld"), 0.0);
+        assert!((cer("abcd", "abxd") - 0.25).abs() < 1e-6);
+        assert_eq!(cer("", ""), 0.0);
+    }
+
+    #[test]
+    fn line_cer_uses_best_matching_recognized_line() {
+        let expected = vec!["EXIT".to_string(), "NO SMOKING".to_string()];
+        let got = vec![
+            "NO SMOKlNG".to_string(),
+            "EXIT".to_string(),
+            "noise".to_string(),
+        ];
+        let score = fixture_cer(&expected, &got);
+        assert!((score - (0.0 + 1.0 / 9.0) / 2.0).abs() < 1e-6, "{score}");
+    }
+
+    #[test]
+    fn missing_lines_score_one() {
+        assert_eq!(fixture_cer(&["EXIT".to_string()], &[]), 1.0);
+    }
+}

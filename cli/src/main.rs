@@ -1,4 +1,5 @@
 mod draw;
+mod eval;
 mod setup;
 
 use std::path::PathBuf;
@@ -25,6 +26,16 @@ struct ModelArgs {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Measure OCR character error rate over a fixtures dir (see fixtures/README.md).
+    Eval {
+        #[arg(default_value = "fixtures")]
+        dir: PathBuf,
+        /// Exit non-zero if mean CER exceeds this.
+        #[arg(long)]
+        max_cer: Option<f64>,
+        #[command(flatten)]
+        models: ModelArgs,
+    },
     /// List languages available as source (installed packs) and target.
     Langs {
         #[command(flatten)]
@@ -51,6 +62,15 @@ enum Command {
 
 fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::Eval {
+            dir,
+            max_cer,
+            models,
+        } => {
+            if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer)? {
+                std::process::exit(1);
+            }
+        }
         Command::Langs { models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
             let codes = |ls: Vec<&translatte_core::manifest::Language>| {
