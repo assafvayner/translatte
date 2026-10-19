@@ -12,7 +12,7 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 
 ## Setup
 
-Requires Rust (stable + nightly for fmt) and `cmake` (llama.cpp builds from source); `uv` for the scripts.
+Requires Rust (stable + nightly for fmt), `cmake`, `ninja` and `sccache` (`brew install cmake ninja sccache`); `uv` for the scripts. llama.cpp builds from source through CMake; `.cargo/config.toml` routes it through Ninja and sccache.
 
 ```bash
 cargo run -p translatte-cli --release -- fetch --all-packs   # ~2.6GB into models-cache/
