@@ -64,3 +64,18 @@ TRANSLATTE_MODELS=$PWD/models-cache cargo test --workspace --release \
 TRANSLATTE_NETWORK_TESTS=1 TRANSLATTE_MODELS=$PWD/models-cache \
   cargo test -p translatte-core --features download --test download_network  # downloads from the Hub
 ```
+
+## Android (emulator) smoke test
+
+Cross-compiles the CLI for `aarch64-linux-android` (API 31) and runs the full pipeline on a device or emulator over `adb`. Requires the Android NDK (found under `$ANDROID_HOME/ndk/`, or set `ANDROID_NDK_HOME`), `rustup target add aarch64-linux-android`, `cmake`, `ninja`, `sccache`, and `adb`.
+
+```bash
+scripts/android/build.sh      # -> target/aarch64-linux-android/release/{translatte,libonnxruntime.so,libc++_shared.so}
+emulator -avd pixel8 -memory 8192 -cores 6 -no-snapshot-save -no-boot-anim &   # needs >2GB RAM for the GGUF
+scripts/android/run.sh core/tests/data/hello_world.png en fr     # <image> <from> <to|-> [name]; "-" = OCR only
+```
+
+- ONNX Runtime: `ort`'s prebuilt binaries don't cover Android, so `build.sh` downloads the official `com.microsoft.onnxruntime:onnxruntime-android` 1.22.0 AAR from Maven Central (checked against a pinned sha256, cached in `target/android-deps/`) and links its `libonnxruntime.so` dynamically. Desktop builds are unchanged.
+- llama.cpp builds CPU-only via the NDK CMake toolchain (llama-cpp-sys-2 turns OpenMP off on Android), using Ninja and sccache from `.cargo/config.toml` like the desktop build.
+- `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and the translator unless OCR-only; models whose size is unchanged are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
+- On Android the CLI loads fonts from `/system/fonts` and exits via `_exit` after flushing stdout/stderr, skipping C++ static destructors (bionic otherwise aborts in ONNX Runtime's).

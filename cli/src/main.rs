@@ -3,6 +3,7 @@ mod eval;
 mod fetch;
 mod setup;
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -74,7 +75,27 @@ enum Command {
     },
 }
 
-fn main() -> Result<()> {
+fn main() {
+    let code = match real_main() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("Error: {e:?}");
+            1
+        }
+    };
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    // Bionic aborts in ONNX Runtime's C++ static destructors at exit; skip them on Android.
+    #[cfg(target_os = "android")]
+    unsafe {
+        libc::_exit(code)
+    };
+    #[cfg(not(target_os = "android"))]
+    std::process::exit(code);
+}
+
+/// Returns the process exit code.
+fn real_main() -> Result<i32> {
     match Cli::parse().command {
         Command::Eval {
             dir,
@@ -82,7 +103,7 @@ fn main() -> Result<()> {
             models,
         } => {
             if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer)? {
-                std::process::exit(1);
+                return Ok(1);
             }
         }
         Command::Fetch {
@@ -168,5 +189,5 @@ fn main() -> Result<()> {
             eprintln!("wrote {}", output.display());
         }
     }
-    Ok(())
+    Ok(0)
 }
