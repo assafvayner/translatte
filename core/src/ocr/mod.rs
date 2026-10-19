@@ -1,5 +1,6 @@
 pub mod charset;
 pub mod ctc;
+pub mod preprocess;
 
 use image::RgbImage;
 use serde::Serialize;
