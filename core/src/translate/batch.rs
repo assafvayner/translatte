@@ -18,17 +18,21 @@ impl<G: TextGenerator> BatchTranslator<G> {
         &self.generator
     }
 
-    /// Completion text, or `None` if generation failed or hit the token limit.
-    fn complete(&mut self, prompt: &Prompt, max_tokens: usize) -> Option<String> {
-        match self.generator.generate(prompt, max_tokens) {
-            Ok(g) if !g.truncated => Some(clean_output(&g.text)),
-            _ => None,
-        }
+    /// Cleaned completion, or `None` if generation hit the token limit.
+    fn complete(&mut self, prompt: &Prompt, max_tokens: usize) -> Result<Option<String>> {
+        let g = self.generator.generate(prompt, max_tokens)?;
+        Ok((!g.truncated).then(|| clean_output(&g.text)))
     }
 
-    fn translate_one(&mut self, text: &str, src: &Language, tgt: &Language) -> Option<String> {
-        self.complete(&build_prompt(src, tgt, text), max_tokens_for(&[text]))
-            .filter(|out| !out.is_empty())
+    fn translate_one(
+        &mut self,
+        text: &str,
+        src: &Language,
+        tgt: &Language,
+    ) -> Result<Option<String>> {
+        Ok(self
+            .complete(&build_prompt(src, tgt, text), max_tokens_for(&[text]))?
+            .filter(|out| !out.is_empty()))
     }
 }
 
@@ -46,27 +50,38 @@ impl<G: TextGenerator> Translator for BatchTranslator<G> {
         tgt: &Language,
     ) -> Result<Vec<Option<String>>> {
         let n = blocks.len();
+        let mut batch_failed = false;
         let items = match n {
             0 => return Ok(Vec::new()),
             1 => vec![String::new()],
             _ => {
                 let prompt = build_prompt(src, tgt, &format_numbered(blocks));
-                self.complete(&prompt, max_tokens_for(blocks))
-                    .and_then(|out| parse_numbered_items(&out, n))
-                    .unwrap_or_else(|| vec![String::new(); n])
+                let parsed = match self.complete(&prompt, max_tokens_for(blocks)) {
+                    Ok(out) => out.and_then(|out| parse_numbered_items(&out, n)),
+                    Err(_) => {
+                        batch_failed = true;
+                        None
+                    }
+                };
+                parsed.unwrap_or_else(|| vec![String::new(); n])
             }
         };
-        Ok(items
-            .into_iter()
-            .zip(blocks)
-            .map(|(item, block)| {
-                if item.is_empty() {
-                    self.translate_one(block, src, tgt)
-                } else {
-                    Some(item)
-                }
-            })
-            .collect())
+        let mut out = Vec::with_capacity(n);
+        for (item, block) in items.into_iter().zip(blocks) {
+            if !item.is_empty() {
+                out.push(Some(item));
+                continue;
+            }
+            match self.translate_one(block, src, tgt) {
+                // Batch and first retry both failing points at the backend itself (e.g. context
+                // allocation), not at the input, so surface it instead of returning all-None.
+                Err(e) if batch_failed => return Err(e),
+                Err(_) => out.push(None),
+                Ok(t) => out.push(t),
+            }
+            batch_failed = false;
+        }
+        Ok(out)
     }
 }
 
@@ -196,6 +211,24 @@ mod tests {
             &["Bonjour", "Sortie"],
         );
         assert_eq!(out, some(&["Hello", "Exit"]));
+    }
+
+    #[test]
+    fn systemic_failure_is_propagated() {
+        let mut t = BatchTranslator::new(FakeGen::new(vec![Fail, Fail, Fail]));
+        let res = t.translate(
+            &blocks(&["Bonjour", "Sortie", "Eau"]),
+            &lang("fr"),
+            &lang("en"),
+        );
+        assert!(res.is_err());
+        assert_eq!(t.generator.prompts.len(), 2);
+    }
+
+    #[test]
+    fn later_per_block_errors_after_batch_error_become_none() {
+        let (out, _) = run(vec![Fail, Done("Hello"), Fail], &["Bonjour", "Sortie"]);
+        assert_eq!(out, vec![Some("Hello".into()), None]);
     }
 
     #[test]
