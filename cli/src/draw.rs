@@ -48,11 +48,26 @@ impl Renderer {
                 continue;
             };
             let b = r.quad.bbox();
-            let (x0, y0) = (b.x0.max(0.0) as u32, b.y0.max(0.0) as u32);
-            let (x1, y1) = (
-                (b.x1 as u32).min(img.width() - 1),
-                (b.y1 as u32).min(img.height() - 1),
+            if img.width() == 0 || img.height() == 0 {
+                continue;
+            }
+            let (x0, y0) = (
+                (b.x0.max(0.0) as u32).min(img.width() - 1),
+                (b.y0.max(0.0) as u32).min(img.height() - 1),
             );
+            let (x1, y1) = (
+                (b.x1.max(0.0) as u32).min(img.width() - 1),
+                (b.y1.max(0.0) as u32).min(img.height() - 1),
+            );
+            if x0 > x1
+                || y0 > y1
+                || b.x1 < 0.0
+                || b.y1 < 0.0
+                || b.x0 >= img.width() as f32
+                || b.y0 >= img.height() as f32
+            {
+                continue;
+            }
             for y in y0..=y1 {
                 for x in x0..=x1 {
                     img.put_pixel(x, y, image::Rgb(r.bg_rgb));
@@ -62,7 +77,6 @@ impl Renderer {
             let size = self.fit_font_size(text, w, h);
             let buffer = self.layout(text, size, w);
             let [fr, fg, fb] = r.fg_rgb;
-            let (img_w, img_h) = (img.width() as i32, img.height() as i32);
             buffer.draw(
                 &mut self.fonts,
                 &mut self.cache,
@@ -75,7 +89,8 @@ impl Renderer {
                     for dy in 0..gh as i32 {
                         for dx in 0..gw as i32 {
                             let (px, py) = (x0 as i32 + gx + dx, y0 as i32 + gy + dy);
-                            if px < 0 || py < 0 || px >= img_w || py >= img_h || py > y1 as i32 {
+                            if px < x0 as i32 || py < y0 as i32 || px > x1 as i32 || py > y1 as i32
+                            {
                                 continue;
                             }
                             let p = img.get_pixel_mut(px as u32, py as u32);
@@ -121,6 +136,28 @@ mod tests {
         assert_eq!(*img.get_pixel(5, 5), Rgb([0, 0, 255]));
         let dark = img.pixels().filter(|p| p.0 == [0, 0, 0]).count();
         assert!(dark > 20, "expected glyph pixels, got {dark}");
+    }
+
+    #[test]
+    fn regions_outside_or_straddling_the_image_do_not_panic() {
+        let mut img = RgbImage::from_pixel(100, 50, Rgb([0, 0, 255]));
+        let at = |x0: f32, y0: f32, x1: f32, y1: f32| {
+            let mut r = region(Some("Emergency exit"));
+            r.quad = Quad::from_bbox(BBox { x0, y0, x1, y1 });
+            r
+        };
+        Renderer::new().draw_regions(
+            &mut img,
+            &[
+                at(-30.0, -10.0, 40.0, 20.0),
+                at(80.0, 30.0, 400.0, 300.0),
+                at(500.0, 500.0, 600.0, 540.0),
+                at(-90.0, -90.0, -10.0, -10.0),
+            ],
+        );
+        assert_eq!(*img.get_pixel(0, 0), Rgb([255, 255, 0]));
+        assert_eq!(*img.get_pixel(99, 49), Rgb([255, 255, 0]));
+        assert_eq!(*img.get_pixel(60, 10), Rgb([0, 0, 255]));
     }
 
     #[test]
