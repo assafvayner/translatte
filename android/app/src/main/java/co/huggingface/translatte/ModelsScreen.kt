@@ -60,7 +60,7 @@ fun ModelsScreen(
     var selected by rememberSaveable { mutableStateOf(setOf("rec-latin")) }
     val pending = models.filter { it.state != ModelState.INSTALLED }
     val wanted = if (setup) pending.filter { it.core || it.id in selected } else emptyList()
-    val needed = wanted.sumOf { it.sizeBytes.toLong() }
+    val needed = wanted.sumOf { it.remainingBytes() }
     val hasPack = models.any { !it.core && (it.state == ModelState.INSTALLED || it.id in selected) }
     val free = remember(downloads.finished, models) { StatFs(context.filesDir.path).availableBytes }
     fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
@@ -83,7 +83,10 @@ fun ModelsScreen(
                 (error ?: downloads.error)?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp))
                 }
-                if (downloads.running) {
+                if (downloads.waitingForUnmetered) {
+                    Text("Waiting for Wi-Fi to download.", modifier = Modifier.padding(bottom = 8.dp))
+                }
+                if (downloads.running || downloads.waitingForUnmetered) {
                     OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
                 } else if (setup) {
                     if (needed > free) {
@@ -95,7 +98,7 @@ fun ModelsScreen(
                     }
                     Button(
                         onClick = { onDownload(wanted.map { it.id }) },
-                        enabled = wanted.isNotEmpty() && hasPack,
+                        enabled = wanted.isNotEmpty() && hasPack && needed <= free,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text(if (needed > 0) "Download (${size(needed)})" else "Download") }
                 }
@@ -130,10 +133,16 @@ fun ModelsScreen(
                         null
                     } else {
                         {
-                            if (m.state == ModelState.INSTALLED) {
-                                OutlinedButton(onClick = { onDelete(m.id) }) { Text("Delete") }
-                            } else {
-                                Button(onClick = { onDownload(listOf(m.id)) }) { Text("Download") }
+                            Column(horizontalAlignment = Alignment.End) {
+                                if (m.state != ModelState.INSTALLED) {
+                                    Button(
+                                        onClick = { onDownload(listOf(m.id)) },
+                                        enabled = m.remainingBytes() <= free,
+                                    ) { Text(if (m.state == ModelState.INCOMPLETE) "Resume" else "Download") }
+                                }
+                                if (m.state != ModelState.NOT_INSTALLED) {
+                                    OutlinedButton(onClick = { onDelete(m.id) }) { Text("Delete") }
+                                }
                             }
                         }
                     },
@@ -142,6 +151,8 @@ fun ModelsScreen(
         }
     }
 }
+
+private fun ModelInfo.remainingBytes() = (sizeBytes - downloadedBytes).toLong()
 
 @Composable
 private fun ModelRow(

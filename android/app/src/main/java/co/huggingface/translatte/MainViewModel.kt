@@ -3,9 +3,9 @@ package co.huggingface.translatte
 import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
+import android.graphics.Bitmap
 import android.text.format.Formatter
 import android.util.Log
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.SystemClock
 import androidx.compose.runtime.getValue
@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,8 +35,19 @@ sealed interface Phase {
 
 private const val TAG = "translatte"
 
-/** Below this, loading the translator risks the low-memory killer; see [MainViewModel.checkMemory]. */
-private const val MIN_FREE_MEMORY = 1_500_000_000L
+/**
+ * Memory the loaded models need besides the memory-mapped weights (ONNX Runtime, llama.cpp's KV
+ * cache and compute buffers): peak anonymous RSS was ~840MB translating a photo, plus margin.
+ * Below this, loading risks the low-memory killer, so the app refuses.
+ */
+private const val MIN_FREE_MEMORY = 1_200_000_000L
+
+/**
+ * Also keeping the weights resident (~2.6GB of file-backed RSS at peak). Below this the kernel
+ * evicts weight pages and re-reads them from flash during decode, which made translation ~2x
+ * slower on a Pixel 8.
+ */
+private const val COMFORTABLE_FREE_MEMORY = 3_400_000_000L
 
 private class LowMemoryException(message: String) : Exception(message)
 
@@ -65,6 +77,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var phase by mutableStateOf<Phase>(Phase.Idle)
         private set
 
+    /** Shown above the photo when free memory is short; null when there's plenty. */
+    var memoryWarning by mutableStateOf<String?>(null)
+        private set
+
     init {
         refresh()
     }
@@ -82,8 +98,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 prepare()
             }
             setupError = null
-        } catch (e: FfiException) {
-            setupError = e.toString()
+        } catch (e: Exception) {
+            setupError = errorMessage(e)
             ready = false
         }
     }
@@ -113,6 +129,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 checkMemory()
                 engine.prepare(source, target)
                 translatte.modelsLoaded = true
+            } catch (e: LowMemoryException) {
+                withContext(Dispatchers.Main) { memoryWarning = e.message }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "prepare failed: $e")
             }
@@ -120,31 +140,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Refuses to load the translator when the system is short on memory, rather than letting the
-     * low-memory killer take the app (or others) down mid-translation. The ~2.4GB of weights are
-     * memory-mapped and count as reclaimable cache, so only the rest has to be free.
+     * Before loading the models: refuses below [MIN_FREE_MEMORY] rather than letting the
+     * low-memory killer take the app (or others) down mid-translation, and warns below
+     * [COMFORTABLE_FREE_MEMORY]. Runs on the engine dispatcher.
      */
-    private fun checkMemory() {
+    private suspend fun checkMemory() {
         if (translatte.modelsLoaded) return
-        val am = getApplication<Application>().getSystemService(ActivityManager::class.java)
-        val info = ActivityManager.MemoryInfo().also(am::getMemoryInfo)
+        val app = getApplication<Application>()
+        val info = ActivityManager.MemoryInfo().also(app.getSystemService(ActivityManager::class.java)::getMemoryInfo)
+        val free = Formatter.formatShortFileSize(app, info.availMem)
         if (info.availMem < MIN_FREE_MEMORY) {
-            val app = getApplication<Application>()
             throw LowMemoryException(
-                "Not enough free memory to load the translator (" +
-                    "${Formatter.formatShortFileSize(app, info.availMem)} free, needs " +
+                "Not enough free memory to load the translator ($free free, needs " +
                     "${Formatter.formatShortFileSize(app, MIN_FREE_MEMORY)}). Close other apps and try again.",
             )
         }
+        val warning = if (info.availMem < COMFORTABLE_FREE_MEMORY) {
+            "Low memory ($free free): translation will be slow. Close other apps to speed it up."
+        } else {
+            null
+        }
+        withContext(Dispatchers.Main) { memoryWarning = warning }
     }
+
+    /** Bytes still to fetch for [ids], counting partial downloads that will resume. */
+    fun bytesToDownload(ids: List<String>): Long =
+        models.filter { it.id in ids }.sumOf { (it.sizeBytes - it.downloadedBytes).toLong() }
 
     fun deleteModel(id: String) {
         viewModelScope.launch {
             val error = withContext(translatte.engineDispatcher) {
-                runCatching { engine.deleteModel(id) }.exceptionOrNull()
+                runCatching {
+                    // Deleting the pack in use frees every loaded model, the translator included.
+                    if (engine.deleteModel(id)) translatte.modelsLoaded = false
+                }.exceptionOrNull()
             }
             refresh()
-            error?.let { setupError = (it as? FfiException.Failed)?.reason ?: it.toString() }
+            error?.let { setupError = errorMessage(it) }
         }
     }
 
@@ -190,11 +222,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 output.regions.isEmpty() -> Phase.Failed("No text found. Try moving closer or reducing glare.")
                 else -> Phase.Done
             }
-        } catch (e: FfiException) {
-            phase = Phase.Failed((e as? FfiException.Failed)?.reason ?: e.toString())
-        } catch (e: LowMemoryException) {
-            phase = Phase.Failed(e.message.orEmpty())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            phase = Phase.Failed(errorMessage(e))
         }
+    }
+
+    /** Covers uniffi's InternalException (a Rust panic) and anything else, not just FfiException. */
+    private fun errorMessage(e: Throwable): String = when (e) {
+        is FfiException.Failed -> e.reason
+        is LowMemoryException -> e.message.orEmpty()
+        else -> e.toString()
     }
 
     /**

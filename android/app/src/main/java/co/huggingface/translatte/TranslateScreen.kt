@@ -1,5 +1,6 @@
 package co.huggingface.translatte
 
+import android.content.ActivityNotFoundException
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -62,6 +63,7 @@ fun TranslateScreen(vm: MainViewModel, onManageLanguages: () -> Unit) {
     }
     var showOriginal by rememberSaveable { mutableStateOf(false) }
     var tapped by remember { mutableStateOf<Region?>(null) }
+    var noCamera by remember { mutableStateOf(false) }
     val working = vm.phase is Phase.Working
 
     Scaffold(
@@ -89,6 +91,8 @@ fun TranslateScreen(vm: MainViewModel, onManageLanguages: () -> Unit) {
                     Text("Take a photo of a sign, menu or label.", style = MaterialTheme.typography.bodyLarge)
                 }
             }
+            vm.memoryWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (noCamera) Text("No camera app found; choose a photo instead.", color = MaterialTheme.colorScheme.error)
             when (val p = vm.phase) {
                 is Phase.Working -> {
                     Text(p.label)
@@ -104,7 +108,17 @@ fun TranslateScreen(vm: MainViewModel, onManageLanguages: () -> Unit) {
                 }
             }
             Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { camera.launch(captureUri) }, enabled = !working, modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = {
+                        try {
+                            camera.launch(captureUri)
+                        } catch (e: ActivityNotFoundException) {
+                            noCamera = true
+                        }
+                    },
+                    enabled = !working,
+                    modifier = Modifier.weight(1f),
+                ) {
                     Text("Take photo")
                 }
                 OutlinedButton(
