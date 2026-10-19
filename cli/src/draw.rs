@@ -43,8 +43,17 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Self {
+        #[allow(unused_mut)]
+        let mut fonts = FontSystem::new();
+        // fontdb has no Android system font paths.
+        #[cfg(target_os = "android")]
+        {
+            let db = fonts.db_mut();
+            db.load_fonts_dir("/system/fonts");
+            db.set_sans_serif_family("Roboto");
+        }
         Self {
-            fonts: FontSystem::new(),
+            fonts,
             cache: SwashCache::new(),
         }
     }

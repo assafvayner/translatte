@@ -2222,6 +2222,7 @@ dependencies = [
  "clap",
  "cosmic-text",
  "image",
+ "libc",
  "serde_json",
  "strsim",
  "translatte-core",
