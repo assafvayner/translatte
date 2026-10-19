@@ -1,7 +1,9 @@
 pub mod charset;
 pub mod ctc;
 pub mod det_post;
+pub mod detector;
 pub mod preprocess;
+pub mod recognizer;
 
 use image::RgbImage;
 use serde::Serialize;
