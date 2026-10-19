@@ -61,8 +61,11 @@ pub struct LlamaGenerator {
 impl LlamaGenerator {
     pub fn load(path: &Path) -> Result<Self> {
         let backend = backend()?;
-        let model =
-            LlamaModel::load_from_file(backend, path, &LlamaModelParams::default()).map_err(err)?;
+        let params = LlamaModelParams::default();
+        // The iOS Simulator's Metal device lacks features ggml-metal needs, so decode fails there.
+        #[cfg(all(target_os = "ios", target_abi = "sim"))]
+        let params = params.with_n_gpu_layers(0);
+        let model = LlamaModel::load_from_file(backend, path, &params).map_err(err)?;
         let threads = std::env::var("TRANSLATTE_THREADS")
             .ok()
             .and_then(|v| v.parse().ok())
