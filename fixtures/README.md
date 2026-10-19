@@ -8,7 +8,7 @@ Each fixture is an image plus a JSON file with the same stem:
 
 - `lang`: source language code from `models/manifest.json`.
 - `lines`: every text line a reader would expect to be translated, as written.
-- Scoring: for each expected line, the CER (whitespace- and case-insensitive) against the best-matching recognized line, averaged.
+- Scoring: for each expected line, the CER (whitespace- and case-insensitive) against the best-matching recognized line, averaged. The metric is recall-oriented: extra recognized lines (noise, unlisted text) are not penalized.
 
 Run: `cargo run -p translatte-cli --release -- eval fixtures --max-cer 0.15`
 

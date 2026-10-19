@@ -5,8 +5,9 @@ mod setup;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use translatte_core::manifest::Language;
 use translatte_core::pipeline::Stage;
 
 #[derive(Parser)]
@@ -73,14 +74,14 @@ fn main() -> Result<()> {
         }
         Command::Langs { models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
-            let codes = |ls: Vec<&translatte_core::manifest::Language>| {
+            let codes = |ls: &[&Language]| {
                 ls.iter()
                     .map(|l| l.code.as_str())
                     .collect::<Vec<_>>()
                     .join(" ")
             };
-            println!("source: {}", codes(store.available_source_languages()?));
-            println!("target: {}", codes(store.target_languages()));
+            println!("source: {}", codes(&store.available_source_languages()?));
+            println!("target: {}", codes(&store.target_languages()));
         }
         Command::Run {
             image,
@@ -91,6 +92,9 @@ fn main() -> Result<()> {
             no_translate,
             models,
         } => {
+            let mut img = image::open(&image)
+                .with_context(|| format!("opening {}", image.display()))?
+                .to_rgb8();
             let store = setup::load_store(&models.manifest, &models.models)?;
             let (src, tgt) = (
                 store.manifest().language(&from)?,
@@ -99,7 +103,6 @@ fn main() -> Result<()> {
             let t0 = Instant::now();
             let mut pipeline = setup::build_pipeline(&store, src, !no_translate)?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());
-            let img = image::open(&image)?.to_rgb8();
             let t1 = Instant::now();
             let mut last = "";
             let output_data = pipeline.run(&img, src, tgt, &mut |s: Stage| {
@@ -118,18 +121,21 @@ fn main() -> Result<()> {
             match json {
                 Some(p) => {
                     if let Some(dir) = p.parent() {
-                        std::fs::create_dir_all(dir)?;
+                        std::fs::create_dir_all(dir)
+                            .with_context(|| format!("creating {}", dir.display()))?;
                     }
-                    std::fs::write(p, json_text)?
+                    std::fs::write(&p, json_text)
+                        .with_context(|| format!("writing {}", p.display()))?
                 }
                 None => println!("{json_text}"),
             }
-            let mut rendered = img.clone();
-            draw::Renderer::new().draw_regions(&mut rendered, regions);
+            draw::Renderer::new().draw_regions(&mut img, regions);
             if let Some(dir) = output.parent() {
-                std::fs::create_dir_all(dir)?;
+                std::fs::create_dir_all(dir)
+                    .with_context(|| format!("creating {}", dir.display()))?;
             }
-            rendered.save(&output)?;
+            img.save(&output)
+                .with_context(|| format!("writing {}", output.display()))?;
             eprintln!("wrote {}", output.display());
         }
     }

@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::setup;
+use crate::setup::{self, CliPipeline};
 
 fn normalize(s: &str) -> Vec<char> {
     s.chars()
@@ -36,27 +37,43 @@ pub fn fixture_cer(expected: &[String], got: &[String]) -> f64 {
 
 pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>) -> Result<bool> {
     let store = setup::load_store(manifest, models)?;
-    let mut fixtures: Vec<_> = std::fs::read_dir(dir)?
+    let mut fixtures: Vec<_> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
         .collect();
     fixtures.sort();
+    let mut pipelines: HashMap<String, CliPipeline> = HashMap::new();
     let mut scores = Vec::new();
     for json_path in fixtures {
-        let spec: Value = serde_json::from_str(&std::fs::read_to_string(&json_path)?)?;
+        let text = std::fs::read_to_string(&json_path)
+            .with_context(|| format!("reading {}", json_path.display()))?;
+        let spec: Value = serde_json::from_str(&text)
+            .with_context(|| format!("parsing {}", json_path.display()))?;
         let lang_code = spec["lang"].as_str().context("fixture missing \"lang\"")?;
         let image_name = spec["image"]
             .as_str()
             .context("fixture missing \"image\"")?;
-        let expected: Vec<String> = spec["lines"]
+        let expected = spec["lines"]
             .as_array()
             .context("fixture missing \"lines\"")?
             .iter()
-            .filter_map(|v| v.as_str().map(str::to_string))
-            .collect();
+            .map(|v| {
+                v.as_str().map(str::to_string).with_context(|| {
+                    format!("non-string entry in \"lines\" of {}", json_path.display())
+                })
+            })
+            .collect::<Result<Vec<String>>>()?;
         let src = store.manifest().language(lang_code)?;
-        let mut pipeline = setup::build_pipeline(&store, src, false)?;
-        let img = image::open(dir.join(image_name))?.to_rgb8();
+        let key = src.script_pack.clone().unwrap_or_default();
+        if !pipelines.contains_key(&key) {
+            pipelines.insert(key.clone(), setup::build_pipeline(&store, src, false)?);
+        }
+        let pipeline = pipelines.get_mut(&key).expect("inserted above");
+        let image_path = dir.join(image_name);
+        let img = image::open(&image_path)
+            .with_context(|| format!("opening {}", image_path.display()))?
+            .to_rgb8();
         let got: Vec<String> = pipeline
             .ocr(&img, &mut |_| {})?
             .into_iter()
@@ -66,11 +83,11 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
         println!("{:<40} {lang_code:<6} CER {:.3}", image_name, score);
         scores.push(score);
     }
-    let mean = if scores.is_empty() {
-        0.0
-    } else {
-        scores.iter().sum::<f64>() / scores.len() as f64
-    };
+    if scores.is_empty() {
+        println!("0 fixtures found in {}", dir.display());
+        return Ok(max_cer.is_none());
+    }
+    let mean = scores.iter().sum::<f64>() / scores.len() as f64;
     println!("{} fixtures, mean CER {:.3}", scores.len(), mean);
     Ok(max_cer.is_none_or(|m| mean <= m))
 }
