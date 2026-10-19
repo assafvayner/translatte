@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -47,6 +47,7 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
     fixtures.sort();
     let mut pipelines: HashMap<String, LoadedPipeline> = HashMap::new();
     let mut scores = Vec::new();
+    let mut by_lang: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     for json_path in fixtures {
         let text = std::fs::read_to_string(&json_path)
             .with_context(|| format!("reading {}", json_path.display()))?;
@@ -84,12 +85,22 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
         let score = fixture_cer(&expected, &got);
         println!("{:<40} {lang_code:<6} CER {:.3}", image_name, score);
         scores.push(score);
+        by_lang
+            .entry(lang_code.to_string())
+            .or_default()
+            .push(score);
     }
     if scores.is_empty() {
         println!("0 fixtures found in {}", dir.display());
         return Ok(max_cer.is_none());
     }
     let mean = scores.iter().sum::<f64>() / scores.len() as f64;
+    if by_lang.len() > 1 {
+        for (lang, s) in &by_lang {
+            let m = s.iter().sum::<f64>() / s.len() as f64;
+            println!("  {lang:<6} {:>3} fixtures, mean CER {m:.3}", s.len());
+        }
+    }
     println!("{} fixtures, mean CER {:.3}", scores.len(), mean);
     Ok(max_cer.is_none_or(|m| mean <= m))
 }
