@@ -4,6 +4,7 @@ pub mod layout;
 pub mod manifest;
 pub mod model_store;
 pub mod ocr;
+pub mod pipeline;
 pub mod render;
 pub mod translate;
 
