@@ -13,6 +13,8 @@ use crate::{Result, TranslatteError};
 
 /// PP-OCRv5_mobile_det inference.yml uses resize_long: 960.
 const RESIZE_LONG: u32 = 960;
+/// Matches PaddleOCR filter_tag_det_res.
+const MIN_SIDE: f32 = 3.0;
 
 pub struct Detector {
     session: Session,
@@ -33,6 +35,9 @@ impl Detector {
 
 impl TextDetector for Detector {
     fn detect(&mut self, img: &RgbImage) -> Result<Vec<Quad>> {
+        if img.width() == 0 || img.height() == 0 {
+            return Ok(Vec::new());
+        }
         let input = det_preprocess(img, RESIZE_LONG);
         let outputs = self
             .session
@@ -52,6 +57,7 @@ impl TextDetector for Detector {
                 q.scale(input.scale_x, input.scale_y)
                     .clamp(w - 1.0, h - 1.0)
             })
+            .filter(|q| q.width() > MIN_SIDE && q.height() > MIN_SIDE)
             .collect())
     }
 }

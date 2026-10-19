@@ -43,3 +43,14 @@ fn detects_and_reads_hello_world() {
     assert!(text.to_uppercase().contains("HELLO"), "got {text:?}");
     assert!(text.to_uppercase().contains("WORLD"), "got {text:?}");
 }
+
+#[test]
+fn empty_image_yields_no_quads() {
+    let Some(store) = store() else {
+        eprintln!("TRANSLATTE_MODELS not set; skipping");
+        return;
+    };
+    let mut det = Detector::load(&store.model_file("det", "inference.onnx").unwrap()).unwrap();
+    assert!(det.detect(&image::RgbImage::new(0, 10)).unwrap().is_empty());
+    assert!(det.detect(&image::RgbImage::new(10, 0)).unwrap().is_empty());
+}

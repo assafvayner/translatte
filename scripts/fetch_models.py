@@ -11,6 +11,7 @@ so manifest paths are valid both locally and remotely.
 import argparse
 import hashlib
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -35,6 +36,23 @@ SCRIPT_PACKS = {
     "rec-el": ("PaddlePaddle/el_PP-OCRv5_mobile_rec_onnx", "Greek"),
     "rec-ta": ("PaddlePaddle/ta_PP-OCRv5_mobile_rec_onnx", "Tamil"),
     "rec-te": ("PaddlePaddle/te_PP-OCRv5_mobile_rec_onnx", "Telugu"),
+}
+
+REVISIONS = {
+    "PaddlePaddle/PP-OCRv5_mobile_det_onnx": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
+    "mradermacher/translategemma-4b-it-GGUF": "d37868f759d2f817a43d28dd80cf9f982ffa62fd",
+    "PaddlePaddle/PP-OCRv5_mobile_rec_onnx": "ed152b8b495f84de93cda5709d768548a9127622",
+    "PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b",
+    "PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx": "89d3a50e2c27e2e7cceeab0e944c25c807d5db4f",
+    "PaddlePaddle/eslav_PP-OCRv5_mobile_rec_onnx": "9a32171fc5718746875e1a261818884517975013",
+    "PaddlePaddle/cyrillic_PP-OCRv5_mobile_rec_onnx": "2cef88145434beb8afa9dd82d77d799eb1ad7b29",
+    "PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx": "5c6f574b8e2230adf4287b33e736d71b9fabd28e",
+    "PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx": "14aaedcd75825982689ecf5cd64ab33ee083215a",
+    "PaddlePaddle/devanagari_PP-OCRv5_mobile_rec_onnx": "251aec19e36739540d35e2cc943f6aa7503b98e5",
+    "PaddlePaddle/th_PP-OCRv5_mobile_rec_onnx": "1d4adbbafb1034a2fd6618498575b81ea7b69f69",
+    "PaddlePaddle/el_PP-OCRv5_mobile_rec_onnx": "8152b89d2ee0e1d4c92decab75fe75e5e3d836b6",
+    "PaddlePaddle/ta_PP-OCRv5_mobile_rec_onnx": "0db89798af0d5218fad9ea7ace0557526e9077f1",
+    "PaddlePaddle/te_PP-OCRv5_mobile_rec_onnx": "f1197c83430241c58c64b0952b3a80366d04eeba",
 }
 
 # (code, name, script pack or None for target-only, rtl, spaced)
@@ -87,10 +105,15 @@ def file_entry(out_dir: Path, rel: str) -> dict:
 
 def fetch(repo: str, filename: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
+    rev = REVISIONS[repo]
     if dest.exists():
-        return
-    src = hf_hub_download(repo, filename)
-    shutil.copyfile(src, dest)
+        expected = HfApi().get_paths_info(repo, [filename], revision=rev)[0].size
+        if dest.stat().st_size == expected:
+            return
+    src = hf_hub_download(repo, filename, revision=rev)
+    part = dest.with_name(dest.name + ".part")
+    shutil.copyfile(src, part)
+    os.replace(part, dest)
 
 
 def write_dict(yml_path: Path, dest: Path) -> None:
@@ -117,7 +140,7 @@ def main() -> None:
 
     translator_rel = "translator/model.gguf"
     if args.skip_translator:
-        info = HfApi().get_paths_info(TRANSLATOR_REPO, [TRANSLATOR_FILE], expand=True)[0]
+        info = HfApi().get_paths_info(TRANSLATOR_REPO, [TRANSLATOR_FILE], expand=True, revision=REVISIONS[TRANSLATOR_REPO])[0]
         translator_file = {"path": translator_rel, "size": info.size, "sha256": info.lfs.sha256}
     else:
         fetch(TRANSLATOR_REPO, TRANSLATOR_FILE, out / translator_rel)
@@ -127,7 +150,7 @@ def main() -> None:
 
     for pack, (repo, display) in SCRIPT_PACKS.items():
         fetch(repo, "inference.onnx", out / pack / "inference.onnx")
-        yml = Path(hf_hub_download(repo, "inference.yml"))
+        yml = Path(hf_hub_download(repo, "inference.yml", revision=REVISIONS[repo]))
         write_dict(yml, out / pack / "dict.txt")
         models.append({"id": pack, "kind": "script_pack", "display_name": display,
                        "files": [file_entry(out, f"{pack}/inference.onnx"), file_entry(out, f"{pack}/dict.txt")]})
