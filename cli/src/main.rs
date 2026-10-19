@@ -154,6 +154,11 @@ fn real_main() -> Result<i32> {
             let mut pipeline =
                 setup::build_pipeline(&store, src, !no_translate, translator_gguf.as_deref())?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());
+            if !no_translate {
+                let t = Instant::now();
+                pipeline.warm(src, tgt)?;
+                eprintln!("warmed translator prefix in {:.2?}", t.elapsed());
+            }
             let t1 = Instant::now();
             let mut last = "";
             let output_data = pipeline.run(&img, src, tgt, &mut |s: Stage| {

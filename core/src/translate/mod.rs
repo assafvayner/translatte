@@ -24,6 +24,12 @@ pub struct Generation {
 /// Raw text generation (one prompt in, completion out). Implemented by the LLM backend.
 pub trait TextGenerator {
     fn generate(&mut self, prompt: &Prompt, max_tokens: usize) -> Result<Generation>;
+
+    /// Prepares for prompts starting with `prefix` (e.g. by prefilling its KV cache) so later
+    /// calls are faster.
+    fn warm(&mut self, _prefix: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Splits blocks into consecutive ranges of at most CHUNK_SIZE blocks and MAX_CHUNK_CHARS chars;
@@ -53,6 +59,11 @@ pub trait Translator {
         src: &Language,
         tgt: &Language,
     ) -> Result<Vec<Option<String>>>;
+
+    /// Prepares for translating from `src` to `tgt`, off the latency-critical path.
+    fn warm(&mut self, _src: &Language, _tgt: &Language) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

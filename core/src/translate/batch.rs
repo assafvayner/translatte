@@ -79,6 +79,10 @@ impl<G: TextGenerator> Translator for BatchTranslator<G> {
         }
         Ok(out)
     }
+
+    fn warm(&mut self, src: &Language, tgt: &Language) -> Result<()> {
+        self.generator.warm(&build_prompt(src, tgt, "").prefix)
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +103,7 @@ mod tests {
     struct FakeGen {
         responses: VecDeque<Resp>,
         prompts: Vec<String>,
+        warmed: Vec<String>,
     }
 
     impl FakeGen {
@@ -106,6 +111,7 @@ mod tests {
             Self {
                 responses: responses.into(),
                 prompts: Vec::new(),
+                warmed: Vec::new(),
             }
         }
     }
@@ -127,6 +133,11 @@ mod tests {
                 text: text.to_string(),
                 truncated,
             })
+        }
+
+        fn warm(&mut self, prefix: &str) -> Result<()> {
+            self.warmed.push(prefix.to_string());
+            Ok(())
         }
     }
 
@@ -164,6 +175,15 @@ mod tests {
         let (out, prompts) = run(vec![], &[]);
         assert!(out.is_empty());
         assert!(prompts.is_empty());
+    }
+
+    #[test]
+    fn warm_passes_the_prompt_prefix_for_the_pair() {
+        let mut t = BatchTranslator::new(FakeGen::new(vec![]));
+        t.warm(&lang("fr"), &lang("en")).unwrap();
+        let prefix = build_prompt(&lang("fr"), &lang("en"), "Bonjour").prefix;
+        assert_eq!(t.generator.warmed, vec![prefix]);
+        assert!(t.generator.prompts.is_empty());
     }
 
     #[test]

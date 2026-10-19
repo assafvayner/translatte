@@ -54,6 +54,8 @@ pub struct LlamaGenerator {
     /// Tokens whose KV entries are in the context, at positions `0..cached.len()`.
     cached: Vec<LlamaToken>,
     prefix_cache: bool,
+    /// Prompt tokens the last `generate` call took from the cache instead of decoding.
+    reused: usize,
 }
 
 impl LlamaGenerator {
@@ -91,6 +93,7 @@ impl LlamaGenerator {
             n_swa,
             cached: Vec::new(),
             prefix_cache,
+            reused: 0,
         })
     }
 
@@ -99,21 +102,52 @@ impl LlamaGenerator {
         self.prefix_cache = enabled;
         self
     }
+
+    /// Prompt tokens the last `generate` call reused from the KV cache.
+    pub fn reused_tokens(&self) -> usize {
+        self.reused
+    }
+
+    /// Tokens currently held in the KV cache.
+    pub fn cached_tokens(&self) -> usize {
+        self.cached.len()
+    }
 }
 
-/// How many leading prompt tokens can keep their KV entries from the previous call. At least one
-/// prompt token is always decoded so the last position gets fresh logits. Once a sequence reaches
-/// the sliding attention window, llama.cpp may overwrite its early cells, so nothing is reused.
-fn reusable_prefix(cached: &[LlamaToken], tokens: &[LlamaToken], n_swa: Option<usize>) -> usize {
+/// How many leading tokens can keep their KV entries from the previous call. Once a sequence
+/// reaches the sliding attention window, llama.cpp may overwrite its early cells, so nothing is
+/// reused.
+fn shared_prefix(cached: &[LlamaToken], tokens: &[LlamaToken], n_swa: Option<usize>) -> usize {
     if n_swa.is_some_and(|w| cached.len() >= w) {
         return 0;
     }
-    let shared = cached
+    cached
         .iter()
         .zip(tokens)
         .take_while(|(a, b)| a == b)
-        .count();
-    shared.min(tokens.len().saturating_sub(1))
+        .count()
+}
+
+/// Like [`shared_prefix`], but always leaves a prompt token to decode so the last position gets
+/// fresh logits.
+fn reusable_prefix(cached: &[LlamaToken], tokens: &[LlamaToken], n_swa: Option<usize>) -> usize {
+    shared_prefix(cached, tokens, n_swa).min(tokens.len().saturating_sub(1))
+}
+
+/// Drops the KV entries at positions `n_keep..`.
+fn truncate_cache(
+    ctx: &mut LlamaContext,
+    cached: &mut Vec<LlamaToken>,
+    n_keep: usize,
+) -> Result<()> {
+    if n_keep == 0 {
+        ctx.clear_kv_cache();
+    } else {
+        ctx.kv_cache_seq_rm(0, Some(n_keep as u32), None)
+            .map_err(err)?;
+    }
+    cached.truncate(n_keep);
+    Ok(())
 }
 
 impl TextGenerator for LlamaGenerator {
@@ -124,6 +158,7 @@ impl TextGenerator for LlamaGenerator {
             n_swa,
             cached,
             prefix_cache,
+            reused,
         } = self;
         inner.with_dependent_mut(|model, ctx| {
             let vocab = model.vocab();
@@ -145,13 +180,68 @@ impl TextGenerator for LlamaGenerator {
                 0
             };
             let result = generate_from(ctx, &vocab, &tokens, n_keep, cached, budget, *threads);
-            if result.is_err() {
-                ctx.clear_kv_cache();
-                cached.clear();
+            match &result {
+                Ok(_) => *reused = n_keep,
+                Err(_) => {
+                    ctx.clear_kv_cache();
+                    cached.clear();
+                }
             }
             result
         })
     }
+
+    fn warm(&mut self, prefix: &str) -> Result<()> {
+        if !self.prefix_cache {
+            return Ok(());
+        }
+        let Self {
+            inner,
+            threads,
+            n_swa,
+            cached,
+            ..
+        } = self;
+        inner.with_dependent_mut(|model, ctx| {
+            let tokens = model.vocab().tokenize(prefix.as_bytes(), true, true);
+            let n_keep = shared_prefix(cached, &tokens, *n_swa);
+            let t0 = std::time::Instant::now();
+            let result = warm_from(ctx, &tokens, n_keep, cached);
+            match &result {
+                Ok(()) if std::env::var_os("TRANSLATTE_PERF").is_some() => eprintln!(
+                    "llama: threads={threads} warm {} tok ({n_keep} reused) in {:.2}s",
+                    tokens.len(),
+                    t0.elapsed().as_secs_f64(),
+                ),
+                Ok(()) => {}
+                Err(_) => {
+                    ctx.clear_kv_cache();
+                    cached.clear();
+                }
+            }
+            result
+        })
+    }
+}
+
+/// Decodes `tokens[n_keep..]` into the context without computing logits.
+fn warm_from(
+    ctx: &mut LlamaContext,
+    tokens: &[LlamaToken],
+    n_keep: usize,
+    cached: &mut Vec<LlamaToken>,
+) -> Result<()> {
+    truncate_cache(ctx, cached, n_keep)?;
+    if n_keep == tokens.len() {
+        return Ok(());
+    }
+    let mut batch = LlamaBatch::new(N_CTX as usize, 1);
+    for (i, &t) in (n_keep as i32..).zip(&tokens[n_keep..]) {
+        batch.add(t, i, &[0], false).map_err(err)?;
+    }
+    ctx.decode(&mut batch).map_err(err)?;
+    cached.extend_from_slice(&tokens[n_keep..]);
+    Ok(())
 }
 
 /// Decodes `tokens[n_keep..]` on top of the first `n_keep` cached entries, then samples greedily,
@@ -165,13 +255,7 @@ fn generate_from(
     budget: usize,
     threads: i32,
 ) -> Result<Generation> {
-    if n_keep == 0 {
-        ctx.clear_kv_cache();
-    } else {
-        ctx.kv_cache_seq_rm(0, Some(n_keep as u32), None)
-            .map_err(err)?;
-    }
-    cached.truncate(n_keep);
+    truncate_cache(ctx, cached, n_keep)?;
 
     let mut batch = LlamaBatch::new(N_CTX as usize, 1);
     let last = tokens.len() as i32 - 1;
@@ -263,6 +347,14 @@ mod tests {
             reusable_prefix(&cached, &toks(&[1, 2, 3, 4, 5, 6]), None),
             4
         );
+    }
+
+    #[test]
+    fn shared_prefix_may_cover_all_tokens() {
+        let cached = toks(&[1, 2, 3, 4]);
+        assert_eq!(shared_prefix(&cached, &toks(&[1, 2, 3]), None), 3);
+        assert_eq!(shared_prefix(&cached, &toks(&[1, 2, 3, 4, 5]), None), 4);
+        assert_eq!(shared_prefix(&cached, &toks(&[1, 2, 3]), Some(4)), 0);
     }
 
     #[test]
