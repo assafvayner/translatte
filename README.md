@@ -62,7 +62,7 @@ cargo test --workspace                                                    # unit
 TRANSLATTE_MODELS=$PWD/models-cache cargo test --workspace --release \
   --features translatte-core/llama                                        # + real-model tests
 TRANSLATTE_NETWORK_TESTS=1 TRANSLATTE_MODELS=$PWD/models-cache \
-  cargo test -p translatte-core --features download --test download_network  # downloads from the Hub
+  cargo test -p translatte-core --features download,tls-rustls --test download_network  # downloads from the Hub
 ```
 
 ## Android (emulator) smoke test
@@ -78,4 +78,12 @@ scripts/android/run.sh core/tests/data/hello_world.png en fr     # <image> <from
 - ONNX Runtime: `ort`'s prebuilt binaries don't cover Android, so `build.sh` downloads the official `com.microsoft.onnxruntime:onnxruntime-android` 1.22.0 AAR from Maven Central (checked against a pinned sha256, cached in `target/android-deps/`) and links its `libonnxruntime.so` dynamically. Desktop builds are unchanged.
 - llama.cpp builds CPU-only via the NDK CMake toolchain (llama-cpp-sys-2 turns OpenMP off on Android), using Ninja and sccache from `.cargo/config.toml` like the desktop build.
 - `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and the translator unless OCR-only; models whose size is unchanged are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
+- TLS: `build.sh` builds with `--no-default-features --features tls-native` (OpenSSL, vendored and built from source; needs `perl` and `make`, ~25s on a cold build). This backend is for testing only: the default `tls-rustls` verifies through `rustls-platform-verifier`, which needs JNI initialization that a bare `adb shell` binary can't do and panics without it. The app keeps rustls + the platform verifier (Android's trust store via JNI). native-tls reads Android's `/system/etc/security/cacerts` itself, so no CA setup is needed. Core enforces exactly one of `tls-rustls`/`tls-native` when `download` is on.
+- On-device `fetch`: Xet-backed files need a writable `HF_XET_CACHE` (only a small staging dir is written; the chunk cache is off), since `HOME` is `/` under `adb shell`:
+
+  ```bash
+  adb shell 'cd /data/local/tmp/translatte && LD_LIBRARY_PATH=. HF_XET_CACHE=/data/local/tmp/translatte/xet-cache \
+    ./translatte fetch --packs rec-en --models models --manifest manifest.json'
+  ```
+
 - On Android the CLI loads fonts from `/system/fonts` and exits via `_exit` after flushing stdout/stderr, skipping C++ static destructors (bionic otherwise aborts in ONNX Runtime's).
