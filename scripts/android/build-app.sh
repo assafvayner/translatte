@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/scripts/android/env.sh"
 
 cd "$ROOT"
-cargo build -p translatte-ffi --release --target "$TARGET" --features download
+cargo build --locked -p translatte-ffi --release --target "$TARGET" --features download
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 LIB="$TARGET_DIR/$TARGET/release/libtranslatte_ffi.so"
 
@@ -23,7 +23,7 @@ cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/sysroot/usr/lib/$TARGET
 cp "$ROOT/models/manifest.json" "$GEN/assets/"
 # uniffi-bindgen is a host binary; keep the Android-only ORT/llama.cpp settings out of its build.
 env -u ORT_LIB_LOCATION -u ORT_PREFER_DYNAMIC_LINK -u GGML_CPU_ARM_ARCH -u GGML_CPU_REPACK \
-  cargo run -q -p translatte-ffi --bin uniffi-bindgen -- generate \
+  cargo run -q --locked -p translatte-ffi --bin uniffi-bindgen -- generate \
   --library "$LIB" --language kotlin --out-dir "$GEN/kotlin" --no-format
 
 export ANDROID_HOME="$SDK"

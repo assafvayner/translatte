@@ -46,9 +46,12 @@ class TranslatteApp : Application() {
      */
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
-        // Debug builds: `run-as <pkg> sh -c 'echo xet_data=debug > files/rust_log'` sets RUST_LOG.
+        // Debug builds: `run-as <pkg> sh -c 'echo xet_data=debug > files/rust_log'` sets RUST_LOG, and
+        // files/translatte_threads sets TRANSLATTE_THREADS the same way.
         if (base.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
-            File(base.filesDir, "rust_log").takeIf { it.exists() }?.let { Os.setenv("RUST_LOG", it.readText().trim(), true) }
+            for ((file, name) in listOf("rust_log" to "RUST_LOG", "translatte_threads" to "TRANSLATTE_THREADS")) {
+                File(base.filesDir, file).takeIf { it.exists() }?.let { Os.setenv(name, it.readText().trim(), true) }
+            }
         }
         configureDownloads(File(base.cacheDir, "hf").path)
         Platform.init(base)

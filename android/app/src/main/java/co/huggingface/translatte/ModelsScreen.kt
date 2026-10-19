@@ -85,8 +85,10 @@ fun ModelsScreen(
                 }
                 if (downloads.waitingForUnmetered) {
                     Text("Waiting for Wi-Fi to download.", modifier = Modifier.padding(bottom = 8.dp))
+                } else if (downloads.queued && !downloads.running && downloads.error == null) {
+                    Text("Download queued.", modifier = Modifier.padding(bottom = 8.dp))
                 }
-                if (downloads.running || downloads.waitingForUnmetered) {
+                if (downloads.busy) {
                     OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel download") }
                 } else if (setup) {
                     if (needed > free) {
@@ -129,7 +131,7 @@ fun ModelsScreen(
                         null
                     },
                     checked = m.core || m.id in selected || m.state == ModelState.INSTALLED,
-                    actions = if (setup || m.core || downloads.running) {
+                    actions = if (setup || m.core || downloads.busy) {
                         null
                     } else {
                         {
@@ -140,7 +142,7 @@ fun ModelsScreen(
                                         enabled = m.remainingBytes() <= free,
                                     ) { Text(if (m.state == ModelState.INCOMPLETE) "Resume" else "Download") }
                                 }
-                                if (m.state != ModelState.NOT_INSTALLED) {
+                                if (m.state != ModelState.NOT_INSTALLED || m.downloadedBytes > 0u) {
                                     OutlinedButton(onClick = { onDelete(m.id) }) { Text("Delete") }
                                 }
                             }

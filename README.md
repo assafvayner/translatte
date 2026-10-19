@@ -102,6 +102,7 @@ tag `translatte`).
 
 ```bash
 cargo test --workspace                                                    # unit tests (core, cli, ffi)
+cargo test -p translatte-ffi --features download                          # + ffi model management
 TRANSLATTE_MODELS=$PWD/models-cache cargo test --workspace --release \
   --features translatte-core/llama                                        # + real-model tests
 TRANSLATTE_NETWORK_TESTS=1 TRANSLATTE_MODELS=$PWD/models-cache \

@@ -43,17 +43,17 @@ private const val TAG = "translatte"
 private const val MIN_FREE_MEMORY = 1_200_000_000L
 
 /**
- * Also keeping the weights resident (~2.6GB of file-backed RSS at peak). Below this the kernel
- * evicts weight pages and re-reads them from flash during decode, which made translation ~2x
- * slower on a Pixel 8.
+ * Also keeping the weights resident (~2.6GB of file-backed RSS at peak), plus a margin. Well below
+ * this the kernel evicts weight pages and re-reads them from flash during decode, which made
+ * translation ~2x slower on a Pixel 8 (which typically has 3.0-3.6GB available).
  */
-private const val COMFORTABLE_FREE_MEMORY = 3_400_000_000L
+private const val COMFORTABLE_FREE_MEMORY = 2_800_000_000L
 
 private class LowMemoryException(message: String) : Exception(message)
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val translatte = app as TranslatteApp
-    private val engine = translatte.engine
+    private val engine get() = translatte.engine
     private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     var models by mutableStateOf<List<ModelInfo>>(emptyList())
@@ -140,16 +140,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Before loading the models: refuses below [MIN_FREE_MEMORY] rather than letting the
-     * low-memory killer take the app (or others) down mid-translation, and warns below
-     * [COMFORTABLE_FREE_MEMORY]. Runs on the engine dispatcher.
+     * Before preparing or translating: when the models aren't loaded yet, refuses below
+     * [MIN_FREE_MEMORY] rather than letting the low-memory killer take the app (or others) down
+     * mid-translation. Warns below [COMFORTABLE_FREE_MEMORY] and clears the warning once memory
+     * recovers. Runs on the engine dispatcher.
      */
     private suspend fun checkMemory() {
-        if (translatte.modelsLoaded) return
         val app = getApplication<Application>()
         val info = ActivityManager.MemoryInfo().also(app.getSystemService(ActivityManager::class.java)::getMemoryInfo)
         val free = Formatter.formatShortFileSize(app, info.availMem)
-        if (info.availMem < MIN_FREE_MEMORY) {
+        if (info.availMem < MIN_FREE_MEMORY && !translatte.modelsLoaded) {
             throw LowMemoryException(
                 "Not enough free memory to load the translator ($free free, needs " +
                     "${Formatter.formatShortFileSize(app, MIN_FREE_MEMORY)}). Close other apps and try again.",

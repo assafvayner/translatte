@@ -14,6 +14,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkRequest
 import androidx.work.WorkerParameters
@@ -23,8 +24,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import uniffi.translatte_ffi.DownloadListener
@@ -38,12 +40,20 @@ data class DownloadState(
     /** Model id to (bytes done, bytes total) for models in the current or last run. */
     val progress: Map<String, Pair<Long, Long>> = emptyMap(),
     val error: String? = null,
+    /**
+     * The unique work has a request enqueued, running or blocked, also while it backs off before a
+     * retry and after process death.
+     */
+    val queued: Boolean = false,
     /** Queued until an unmetered network is available. */
     val waitingForUnmetered: Boolean = false,
     /** Bumped when a model finishes or a run ends, so screens re-read install state. */
     val finished: Int = 0,
 ) {
     val running get() = active > 0
+
+    /** A download is running or pending: it can be canceled, and starting or deleting would race it. */
+    val busy get() = running || queued
 }
 
 /** Model downloads, run by WorkManager with a foreground notification so they survive backgrounding. */
@@ -54,7 +64,19 @@ object Downloads {
     const val LARGE_DOWNLOAD = 100_000_000L
 
     private val mutableState = MutableStateFlow(DownloadState())
-    val state: StateFlow<DownloadState> = mutableState
+
+    /** This process's download progress combined with the unique work's state, which outlives it. */
+    fun state(context: Context): Flow<DownloadState> =
+        WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(WORK_NAME).combine(mutableState) { infos, s ->
+            val pending = infos.filter { !it.state.isFinished }
+            s.copy(
+                queued = pending.isNotEmpty(),
+                waitingForUnmetered = !s.running && pending.any {
+                    it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount == 0 &&
+                        it.constraints.requiredNetworkType == NetworkType.UNMETERED
+                },
+            )
+        }
 
     fun isMetered(context: Context): Boolean =
         context.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
@@ -63,7 +85,7 @@ object Downloads {
     fun start(context: Context, ids: List<String>, allowMetered: Boolean) {
         if (ids.isEmpty()) return
         val network = if (allowMetered) NetworkType.CONNECTED else NetworkType.UNMETERED
-        mutableState.update { it.copy(error = null, waitingForUnmetered = !allowMetered && isMetered(context)) }
+        mutableState.update { it.copy(error = null) }
         val request = OneTimeWorkRequestBuilder<DownloadWorker>()
             .setInputData(workDataOf(DownloadWorker.IDS to ids.toTypedArray()))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
@@ -76,7 +98,7 @@ object Downloads {
 
     fun cancel(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
-        mutableState.update { it.copy(waitingForUnmetered = false) }
+        mutableState.update { it.copy(error = null) }
     }
 
     internal fun update(f: (DownloadState) -> DownloadState) = mutableState.update(f)
@@ -103,7 +125,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             s.copy(
                 active = s.active + 1,
                 error = null,
-                waitingForUnmetered = false,
                 progress = s.progress + ids.associateWith { 0L to (sizes[it] ?: 0L) },
             )
         }

@@ -20,6 +20,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,7 +35,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                val downloads by Downloads.state.collectAsStateWithLifecycle()
+                val downloads by remember { Downloads.state(applicationContext) }.collectAsStateWithLifecycle(DownloadState())
                 var managing by rememberSaveable { mutableStateOf(false) }
                 LaunchedEffect(downloads.finished) { vm.refresh() }
 

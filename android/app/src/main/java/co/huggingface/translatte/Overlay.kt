@@ -41,7 +41,8 @@ fun OverlayImage(
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val regions = remember(result) { result?.regions.orEmpty().filter { it.translatedText != null }.map(::Box) }
     Canvas(
-        modifier.pointerInput(regions) {
+        modifier.pointerInput(regions, showOriginal) {
+            if (showOriginal) return@pointerInput
             detectTapGestures { tap ->
                 val fit = Fit(bitmap, size.toSize())
                 val p = Offset((tap.x - fit.left) / fit.scale, (tap.y - fit.top) / fit.scale)
