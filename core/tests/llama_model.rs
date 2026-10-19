@@ -1,19 +1,12 @@
 #![cfg(feature = "llama")]
 
-use std::path::PathBuf;
+mod common;
 
-use translatte_core::manifest::Manifest;
+use common::store;
 use translatte_core::model_store::ModelStore;
 use translatte_core::translate::batch::BatchTranslator;
 use translatte_core::translate::llama::LlamaGenerator;
 use translatte_core::translate::Translator;
-
-fn store() -> Option<ModelStore> {
-    let dir = PathBuf::from(std::env::var_os("TRANSLATTE_MODELS")?);
-    let manifest_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../models/manifest.json");
-    let manifest = Manifest::from_json(&std::fs::read_to_string(manifest_path).unwrap()).unwrap();
-    Some(ModelStore::new(manifest, dir))
-}
 
 fn translate(store: &ModelStore, blocks: &[&str], src: &str, tgt: &str) -> Vec<Option<String>> {
     let generator =
@@ -49,4 +42,26 @@ fn translates_with_translategemma() {
         "en",
     );
     assert!(lower(&fr[0]).contains("coffee"), "{fr:?}");
+}
+
+#[test]
+fn two_generators_can_coexist() {
+    let Some(store) = store() else {
+        eprintln!("TRANSLATTE_MODELS not set; skipping");
+        return;
+    };
+    let path = store.model_file("translator", "model.gguf").unwrap();
+    let first = LlamaGenerator::load(&path).unwrap();
+    let second = LlamaGenerator::load(&path).unwrap();
+    drop(first);
+    let mut t = BatchTranslator::new(second);
+    let m = store.manifest();
+    let out = t
+        .translate(
+            &["非常口".to_string()],
+            m.language("ja").unwrap(),
+            m.language("en").unwrap(),
+        )
+        .unwrap();
+    assert!(lower(&out[0]).contains("exit"), "{out:?}");
 }
