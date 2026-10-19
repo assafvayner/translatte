@@ -15,38 +15,38 @@ fn store() -> Option<ModelStore> {
     Some(ModelStore::new(manifest, dir))
 }
 
-#[test]
-fn translates_french_blocks_to_english() {
-    let Some(store) = store() else {
-        eprintln!("TRANSLATTE_MODELS not set; skipping");
-        return;
-    };
+fn translate(store: &ModelStore, blocks: &[&str], src: &str, tgt: &str) -> Vec<Option<String>> {
     let generator =
         LlamaGenerator::load(&store.model_file("translator", "model.gguf").unwrap()).unwrap();
     let mut t = BatchTranslator::new(generator);
     let m = store.manifest();
-    let blocks = vec![
-        "Sortie de secours".to_string(),
-        "Défense de fumer".to_string(),
-    ];
+    let blocks: Vec<String> = blocks.iter().map(|s| s.to_string()).collect();
     let out = t
-        .translate(
-            &blocks,
-            m.language("fr").unwrap(),
-            m.language("en").unwrap(),
-        )
+        .translate(&blocks, m.language(src).unwrap(), m.language(tgt).unwrap())
         .unwrap();
-    eprintln!("{out:?}");
-    let joined = out
-        .iter()
-        .flatten()
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
-    assert!(
-        joined.contains("exit") || joined.contains("evacuat"),
-        "{joined}"
+    eprintln!("{src}->{tgt}: {out:?}");
+    out
+}
+
+fn lower(o: &Option<String>) -> String {
+    o.as_deref().unwrap_or_default().to_lowercase()
+}
+
+#[test]
+fn translates_with_translategemma() {
+    let Some(store) = store() else {
+        eprintln!("TRANSLATTE_MODELS not set; skipping");
+        return;
+    };
+    let ja = translate(&store, &["非常口", "禁煙"], "ja", "en");
+    assert!(lower(&ja[0]).contains("exit"), "{ja:?}");
+    assert!(lower(&ja[1]).contains("smok"), "{ja:?}");
+
+    let fr = translate(
+        &store,
+        &["Je voudrais un café, s'il vous plaît."],
+        "fr",
+        "en",
     );
-    assert!(joined.contains("smok"), "{joined}");
+    assert!(lower(&fr[0]).contains("coffee"), "{fr:?}");
 }

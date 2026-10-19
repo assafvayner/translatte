@@ -8,7 +8,8 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 
-use super::TextGenerator;
+use super::prompt::Prompt;
+use super::{Generation, TextGenerator};
 use crate::{Result, TranslatteError};
 
 const N_CTX: u32 = 4096;
@@ -17,9 +18,10 @@ fn err(e: impl std::fmt::Display) -> TranslatteError {
     TranslatteError::Translate(e.to_string())
 }
 
+// Field order matters: the model must be dropped before the backend it was loaded with.
 pub struct LlamaGenerator {
-    backend: LlamaBackend,
     model: LlamaModel,
+    backend: LlamaBackend,
     threads: i32,
 }
 
@@ -33,20 +35,25 @@ impl LlamaGenerator {
             .map(|n| n.get().min(8) as i32)
             .unwrap_or(4);
         Ok(Self {
-            backend,
             model,
+            backend,
             threads,
         })
     }
 }
 
 impl TextGenerator for LlamaGenerator {
-    fn generate(&mut self, prompt: &str, max_tokens: usize) -> Result<String> {
+    fn generate(&mut self, prompt: &Prompt, max_tokens: usize) -> Result<Generation> {
         let vocab = self.model.vocab();
-        let tokens = vocab.tokenize(prompt.as_bytes(), true, true);
-        if tokens.len() + max_tokens > N_CTX as usize {
+        // The user text is OCR output: tokenizing it without special parsing keeps a literal
+        // "<end_of_turn>" in an image from becoming a control token.
+        let mut tokens = vocab.tokenize(prompt.prefix.as_bytes(), true, true);
+        tokens.extend(vocab.tokenize(prompt.text.as_bytes(), false, false));
+        tokens.extend(vocab.tokenize(prompt.suffix.as_bytes(), false, true));
+        let budget = max_tokens.min((N_CTX as usize).saturating_sub(tokens.len()));
+        if budget == 0 {
             return Err(TranslatteError::Translate(format!(
-                "prompt ({} tokens) + output budget ({max_tokens}) exceeds context {N_CTX}",
+                "prompt ({} tokens) leaves no room for output in context {N_CTX}",
                 tokens.len()
             )));
         }
@@ -71,11 +78,13 @@ impl TextGenerator for LlamaGenerator {
         let mut sampler = LlamaSampler::greedy();
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut out = String::new();
+        let mut truncated = true;
         let start = batch.n_tokens();
-        for pos in (start..).take(max_tokens) {
+        for pos in (start..).take(budget) {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(token);
             if vocab.is_eog(token) {
+                truncated = false;
                 break;
             }
             let bytes = vocab.token_to_piece(token, true, None);
@@ -86,12 +95,18 @@ impl TextGenerator for LlamaGenerator {
             );
             let _ = decoder.decode_to_string(&bytes, &mut out, false);
             if out.ends_with("<end_of_turn>") {
+                truncated = false;
                 break;
             }
             batch.clear();
             batch.add(token, pos, &[0], true).map_err(err)?;
             ctx.decode(&mut batch).map_err(err)?;
         }
-        Ok(out)
+        out.reserve(decoder.max_utf8_buffer_length(0).unwrap_or(4));
+        let _ = decoder.decode_to_string(&[], &mut out, true);
+        Ok(Generation {
+            text: out,
+            truncated,
+        })
     }
 }

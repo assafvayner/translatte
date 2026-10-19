@@ -1,4 +1,4 @@
-use super::prompt::{build_prompt, clean_output, format_numbered, parse_numbered};
+use super::prompt::{build_prompt, clean_output, format_numbered, parse_numbered_items, Prompt};
 use super::{TextGenerator, Translator};
 use crate::manifest::Language;
 use crate::Result;
@@ -18,17 +18,17 @@ impl<G: TextGenerator> BatchTranslator<G> {
         &self.generator
     }
 
-    fn translate_one(
-        &mut self,
-        text: &str,
-        src: &Language,
-        tgt: &Language,
-    ) -> Result<Option<String>> {
-        let out = self
-            .generator
-            .generate(&build_prompt(src, tgt, text), max_tokens_for(&[text]))?;
-        let out = clean_output(&out);
-        Ok((!out.is_empty()).then_some(out))
+    /// Completion text, or `None` if generation failed or hit the token limit.
+    fn complete(&mut self, prompt: &Prompt, max_tokens: usize) -> Option<String> {
+        match self.generator.generate(prompt, max_tokens) {
+            Ok(g) if !g.truncated => Some(clean_output(&g.text)),
+            _ => None,
+        }
+    }
+
+    fn translate_one(&mut self, text: &str, src: &Language, tgt: &Language) -> Option<String> {
+        self.complete(&build_prompt(src, tgt, text), max_tokens_for(&[text]))
+            .filter(|out| !out.is_empty())
     }
 }
 
@@ -45,21 +45,28 @@ impl<G: TextGenerator> Translator for BatchTranslator<G> {
         src: &Language,
         tgt: &Language,
     ) -> Result<Vec<Option<String>>> {
-        match blocks.len() {
-            0 => Ok(Vec::new()),
-            1 => Ok(vec![self.translate_one(&blocks[0], src, tgt)?]),
-            n => {
+        let n = blocks.len();
+        let items = match n {
+            0 => return Ok(Vec::new()),
+            1 => vec![String::new()],
+            _ => {
                 let prompt = build_prompt(src, tgt, &format_numbered(blocks));
-                let out = self.generator.generate(&prompt, max_tokens_for(blocks))?;
-                if let Some(items) = parse_numbered(&clean_output(&out), n) {
-                    return Ok(items.into_iter().map(Some).collect());
-                }
-                blocks
-                    .iter()
-                    .map(|b| self.translate_one(b, src, tgt))
-                    .collect()
+                self.complete(&prompt, max_tokens_for(blocks))
+                    .and_then(|out| parse_numbered_items(&out, n))
+                    .unwrap_or_else(|| vec![String::new(); n])
             }
-        }
+        };
+        Ok(items
+            .into_iter()
+            .zip(blocks)
+            .map(|(item, block)| {
+                if item.is_empty() {
+                    self.translate_one(block, src, tgt)
+                } else {
+                    Some(item)
+                }
+            })
+            .collect())
     }
 }
 
@@ -68,28 +75,47 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
+    use crate::translate::Generation;
+    use crate::TranslatteError;
+
+    enum Resp {
+        Done(&'static str),
+        Truncated(&'static str),
+        Fail,
+    }
+    use Resp::*;
 
     struct FakeGen {
-        responses: VecDeque<String>,
+        responses: VecDeque<Resp>,
         prompts: Vec<String>,
     }
 
     impl FakeGen {
-        fn new(responses: &[&str]) -> Self {
+        fn new(responses: Vec<Resp>) -> Self {
             Self {
-                responses: responses.iter().map(|s| s.to_string()).collect(),
+                responses: responses.into(),
                 prompts: Vec::new(),
             }
         }
     }
 
     impl TextGenerator for FakeGen {
-        fn generate(&mut self, prompt: &str, _max_tokens: usize) -> Result<String> {
-            self.prompts.push(prompt.to_string());
-            Ok(self
+        fn generate(&mut self, prompt: &Prompt, _max_tokens: usize) -> Result<Generation> {
+            self.prompts
+                .push(format!("{}{}{}", prompt.prefix, prompt.text, prompt.suffix));
+            let (text, truncated) = match self
                 .responses
                 .pop_front()
-                .expect("unexpected generate call"))
+                .expect("unexpected generate call")
+            {
+                Done(t) => (t, false),
+                Truncated(t) => (t, true),
+                Fail => return Err(TranslatteError::Translate("boom".into())),
+            };
+            Ok(Generation {
+                text: text.to_string(),
+                truncated,
+            })
         }
     }
 
@@ -107,44 +133,94 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    fn run(responses: Vec<Resp>, input: &[&str]) -> (Vec<Option<String>>, Vec<String>) {
+        let mut t = BatchTranslator::new(FakeGen::new(responses));
+        let out = t
+            .translate(&blocks(input), &lang("fr"), &lang("en"))
+            .unwrap();
+        let g = t.generator;
+        assert!(g.responses.is_empty(), "unused responses");
+        (out, g.prompts)
+    }
+
+    fn some(v: &[&str]) -> Vec<Option<String>> {
+        v.iter().map(|s| Some(s.to_string())).collect()
+    }
+
     #[test]
     fn empty_input_makes_no_calls() {
-        let mut t = BatchTranslator::new(FakeGen::new(&[]));
-        assert!(t
-            .translate(&[], &lang("fr"), &lang("en"))
-            .unwrap()
-            .is_empty());
+        let (out, prompts) = run(vec![], &[]);
+        assert!(out.is_empty());
+        assert!(prompts.is_empty());
     }
 
     #[test]
     fn single_block_is_sent_unnumbered() {
-        let mut t = BatchTranslator::new(FakeGen::new(&["Hello<end_of_turn>"]));
-        let out = t
-            .translate(&blocks(&["Bonjour"]), &lang("fr"), &lang("en"))
-            .unwrap();
-        assert_eq!(out, vec![Some("Hello".to_string())]);
-        assert!(t.generator().prompts[0].contains("\n\n\nBonjour<end_of_turn>"));
+        let (out, prompts) = run(vec![Done("Hello<end_of_turn>")], &["Bonjour"]);
+        assert_eq!(out, some(&["Hello"]));
+        assert!(prompts[0].contains("\n\n\nBonjour<end_of_turn>"));
     }
 
     #[test]
     fn multiple_blocks_use_one_numbered_call() {
-        let mut t = BatchTranslator::new(FakeGen::new(&["1. Hello\n2. Exit"]));
-        let out = t
-            .translate(&blocks(&["Bonjour", "Sortie"]), &lang("fr"), &lang("en"))
-            .unwrap();
-        assert_eq!(out, vec![Some("Hello".into()), Some("Exit".into())]);
-        assert_eq!(t.generator().prompts.len(), 1);
-        assert!(t.generator().prompts[0].contains("1. Bonjour\n2. Sortie"));
+        let (out, prompts) = run(vec![Done("1. Hello\n2. Exit")], &["Bonjour", "Sortie"]);
+        assert_eq!(out, some(&["Hello", "Exit"]));
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("1. Bonjour\n2. Sortie"));
     }
 
     #[test]
     fn falls_back_to_per_block_when_numbering_breaks() {
-        let mut t = BatchTranslator::new(FakeGen::new(&["Hello, Exit", "Hello", ""]));
-        let out = t
-            .translate(&blocks(&["Bonjour", "Sortie"]), &lang("fr"), &lang("en"))
-            .unwrap();
+        let (out, prompts) = run(
+            vec![Done("Hello, Exit"), Done("Hello"), Done("")],
+            &["Bonjour", "Sortie"],
+        );
         assert_eq!(out, vec![Some("Hello".into()), None]);
-        assert_eq!(t.generator().prompts.len(), 3);
+        assert_eq!(prompts.len(), 3);
+    }
+
+    #[test]
+    fn truncated_batch_falls_back_to_per_block() {
+        let (out, _) = run(
+            vec![Truncated("1. Hello\n2. Ex"), Done("Hello"), Done("Exit")],
+            &["Bonjour", "Sortie"],
+        );
+        assert_eq!(out, some(&["Hello", "Exit"]));
+    }
+
+    #[test]
+    fn batch_error_falls_back_to_per_block() {
+        let (out, _) = run(
+            vec![Fail, Done("Hello"), Done("Exit")],
+            &["Bonjour", "Sortie"],
+        );
+        assert_eq!(out, some(&["Hello", "Exit"]));
+    }
+
+    #[test]
+    fn only_empty_items_are_retried() {
+        let (out, prompts) = run(
+            vec![Done("1. Hello\n2.\n3. Water"), Done("Exit")],
+            &["Bonjour", "Sortie", "Eau"],
+        );
+        assert_eq!(out, some(&["Hello", "Exit", "Water"]));
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[1].contains("\n\n\nSortie<end_of_turn>"));
+    }
+
+    #[test]
+    fn per_block_errors_and_truncations_become_none() {
+        let (out, _) = run(
+            vec![Done("garbage"), Fail, Truncated("Exi"), Done("Water")],
+            &["Bonjour", "Sortie", "Eau"],
+        );
+        assert_eq!(out, vec![None, None, Some("Water".into())]);
+    }
+
+    #[test]
+    fn single_block_error_or_truncation_is_none() {
+        assert_eq!(run(vec![Fail], &["Bonjour"]).0, vec![None]);
+        assert_eq!(run(vec![Truncated("Hel")], &["Bonjour"]).0, vec![None]);
     }
 
     #[test]

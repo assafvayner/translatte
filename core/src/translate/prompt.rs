@@ -1,16 +1,27 @@
 use crate::manifest::Language;
 
+/// TranslateGemma's chat template split so the backend can tokenize the untrusted `text` without
+/// special-token parsing; `prefix + text + suffix` is the full rendered prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prompt {
+    pub prefix: String,
+    pub text: String,
+    pub suffix: String,
+}
+
 /// Renders TranslateGemma's chat template (see the model's chat_template.jinja). BOS is added by the tokenizer.
-pub fn build_prompt(src: &Language, tgt: &Language, text: &str) -> String {
+pub fn build_prompt(src: &Language, tgt: &Language, text: &str) -> Prompt {
     let (s, sc, t, tc) = (&src.name, &src.code, &tgt.name, &tgt.code);
-    format!(
-        "<start_of_turn>user\nYou are a professional {s} ({sc}) to {t} ({tc}) translator. Your goal is to \
-         accurately convey the meaning and nuances of the original {s} text while adhering to {t} grammar, \
-         vocabulary, and cultural sensitivities.\nProduce only the {t} translation, without any additional \
-         explanations or commentary. Please translate the following {s} text into {t}:\n\n\n{}<end_of_turn>\n\
-         <start_of_turn>model\n",
-        text.trim()
-    )
+    Prompt {
+        prefix: format!(
+            "<start_of_turn>user\nYou are a professional {s} ({sc}) to {t} ({tc}) translator. Your goal is to \
+             accurately convey the meaning and nuances of the original {s} text while adhering to {t} grammar, \
+             vocabulary, and cultural sensitivities.\nProduce only the {t} translation, without any additional \
+             explanations or commentary. Please translate the following {s} text into {t}:\n\n\n"
+        ),
+        text: text.trim().to_string(),
+        suffix: "<end_of_turn>\n<start_of_turn>model\n".to_string(),
+    }
 }
 
 pub fn format_numbered(blocks: &[String]) -> String {
@@ -64,7 +75,8 @@ fn split_marker(line: &str) -> Option<(usize, &str)> {
     Some((num, body.trim()))
 }
 
-pub fn parse_numbered(output: &str, n: usize) -> Option<Vec<String>> {
+/// Exactly `n` items numbered 1..=n (some possibly empty), or `None` if the numbering is broken.
+pub fn parse_numbered_items(output: &str, n: usize) -> Option<Vec<String>> {
     let mut items: Vec<String> = Vec::with_capacity(n);
     for line in output.lines() {
         match split_marker(line) {
@@ -85,7 +97,11 @@ pub fn parse_numbered(output: &str, n: usize) -> Option<Vec<String>> {
             }
         }
     }
-    (items.len() == n && items.iter().all(|i| !i.is_empty())).then_some(items)
+    (items.len() == n).then_some(items)
+}
+
+pub fn parse_numbered(output: &str, n: usize) -> Option<Vec<String>> {
+    parse_numbered_items(output, n).filter(|items| items.iter().all(|i| !i.is_empty()))
 }
 
 pub fn clean_output(s: &str) -> String {
@@ -117,8 +133,9 @@ mod tests {
             &lang("en", "English"),
             "  こんにちは \n",
         );
+        assert_eq!(p.text, "こんにちは");
         assert_eq!(
-            p,
+            format!("{}{}{}", p.prefix, p.text, p.suffix),
             "<start_of_turn>user\nYou are a professional Japanese (ja) to English (en) translator. Your goal is to \
              accurately convey the meaning and nuances of the original Japanese text while adhering to English \
              grammar, vocabulary, and cultural sensitivities.\nProduce only the English translation, without any \
@@ -167,6 +184,15 @@ mod tests {
 
     fn ab() -> Option<Vec<String>> {
         Some(vec!["A".into(), "B".into()])
+    }
+
+    #[test]
+    fn parse_items_keeps_empty_items_but_requires_count() {
+        assert_eq!(
+            parse_numbered_items("1. A\n2.\n3. C", 3),
+            Some(vec!["A".into(), String::new(), "C".into()])
+        );
+        assert_eq!(parse_numbered_items("1. A", 2), None);
     }
 
     #[test]
