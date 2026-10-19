@@ -146,6 +146,11 @@ fn main() -> Result<()> {
             img.save(&output)
                 .with_context(|| format!("writing {}", output.display()))?;
             eprintln!("wrote {}", output.display());
+            #[cfg(target_os = "android")]
+            {
+                drop(pipeline);
+                unsafe { translatte_core::ocr::release_ort_environment() };
+            }
         }
     }
     Ok(())
