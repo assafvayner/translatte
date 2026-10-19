@@ -28,12 +28,27 @@ cargo run -p translatte-cli --release -- run photo.jpg --from ja --to en --no-tr
 cargo run -p translatte-cli --release -- eval fixtures --max-cer 0.15
 ```
 
-`run` writes the overlay PNG (`-o`) and prints JSON (or writes it with `--json`):
+`run` writes the overlay PNG (`-o`) and prints JSON (or writes it with `--json`). The output is a `PipelineOutput { regions, translation_error }`:
 
 ```json
-{ "regions": [{ "quad": [...], "source_text": "...", "translated_text": "...", "bg_rgb": [..], "fg_rgb": [..], "angle": 0.0 }],
-  "translation_error": null }
+{
+  "regions": [
+    {
+      "quad": [{ "x": 10.0, "y": 10.0 }, { "x": 90.0, "y": 10.0 }, { "x": 90.0, "y": 30.0 }, { "x": 10.0, "y": 30.0 }],
+      "source_text": "...",
+      "translated_text": "...",
+      "bg_rgb": [255, 255, 255],
+      "fg_rgb": [0, 0, 0],
+      "angle": 0.0
+    }
+  ],
+  "translation_error": null
+}
 ```
+
+`quad` lists the corners clockwise from the top-left.
+
+`--to` is required unless `--no-translate` is set. With `--no-translate` the LLM is not loaded, `translated_text` is null, and the PNG is the input photo with the detected text boxes outlined in red instead of a translation overlay.
 
 If translation fails, OCR results are kept: `translated_text` is absent/null, `translation_error` is set, and the error is printed to stderr.
 
