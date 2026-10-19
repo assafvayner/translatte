@@ -76,7 +76,7 @@ fn downloads_small_pack_and_resumes_truncated_part() {
     d.download_model_blocking("rec-el", &cancel, |_| {})
         .unwrap();
     assert_eq!(store.state("rec-el").unwrap(), InstallState::Installed);
-    assert!(store.verify("rec-el").unwrap());
+    assert_eq!(store.state("rec-el").unwrap(), InstallState::Installed);
     let onnx = file(&store, "rec-el", "inference.onnx");
     assert_eq!(
         rec.take(),
@@ -103,7 +103,7 @@ fn downloads_small_pack_and_resumes_truncated_part() {
         rec.take(),
         vec![("inference.onnx".to_string(), Some(cut..onnx.size))]
     );
-    assert!(store.verify("rec-el").unwrap());
+    assert_eq!(store.state("rec-el").unwrap(), InstallState::Installed);
     assert!(!store.part_path(onnx).exists());
 }
 
@@ -137,5 +137,5 @@ fn resumes_translator_tail_from_local_copy() {
         rec.take(),
         vec![(gguf.source_path.clone(), Some(keep..gguf.size))]
     );
-    assert!(store.verify("translator").unwrap());
+    assert_eq!(store.state("translator").unwrap(), InstallState::Installed);
 }

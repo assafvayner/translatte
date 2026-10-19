@@ -1,8 +1,8 @@
-//! Resumable, verified model downloads straight from the pinned upstream Hugging Face repos.
+//! Resumable model downloads straight from the pinned upstream Hugging Face repos.
 //!
 //! Files are streamed into `<file>.part` (appending from its current length via a byte-range
-//! request), then `ModelStore::commit_download` verifies the sha256 and renames it into place.
-//! Downloaded bytes are untrusted until that check passes.
+//! request), then `ModelStore::commit_download` checks the size and renames it into place.
+//! Content integrity is left to the transport (TLS, and hf-xet's chunk hashes for Xet-backed files).
 
 use std::fs::OpenOptions;
 use std::future::Future;
@@ -105,7 +105,7 @@ fn download_err(e: impl std::fmt::Display) -> TranslatteError {
 }
 
 /// `bytes_done` (and with it `model_bytes_done`) drops back to 0 when a file restarts from
-/// scratch: after a checksum mismatch, or when the server ignored the resume range.
+/// scratch because the server ignored the resume range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadProgress {
     pub model_id: String,
@@ -174,10 +174,7 @@ impl<'a> Downloader<'a> {
         };
         for f in &entry.files {
             check_cancel(cancel)?;
-            if !self
-                .store
-                .verify_file(f, &self.store.root().join(&f.path))?
-            {
+            if !self.store.is_file_installed(f)? {
                 if let Some(dir) = self.store.part_path(f).parent() {
                     std::fs::create_dir_all(dir)?;
                 }
@@ -237,7 +234,6 @@ impl<'a> Downloader<'a> {
         let part = self.store.part_path(f);
         OpenOptions::new().create(true).append(true).open(&part)?;
         let mut stalled = 0;
-        let mut restarted = false;
         loop {
             check_cancel(cancel)?;
             let before = part_len(&part)?;
@@ -258,14 +254,7 @@ impl<'a> Downloader<'a> {
                 None => match self.store.commit_download(f) {
                     Ok(()) => return Ok(()),
                     Err(e @ TranslatteError::Incomplete { .. }) => e,
-                    Err(e @ TranslatteError::ChecksumMismatch { .. }) => {
-                        if restarted {
-                            return Err(e);
-                        }
-                        restarted = true;
-                        stalled = 0;
-                        continue;
-                    }
+                    Err(e @ TranslatteError::SizeMismatch { .. }) => e,
                     Err(e) => return Err(e),
                 },
             };
@@ -312,8 +301,7 @@ impl<'a> Downloader<'a> {
                 break;
             };
             let chunk = chunk?;
-            // Bytes past the expected size are never written; the hash check catches a body that
-            // is not what was asked for.
+            // Bytes past the expected size are never written.
             let take = chunk
                 .len()
                 .min(usize::try_from(f.size - have).unwrap_or(usize::MAX));
@@ -333,18 +321,18 @@ impl<'a> Downloader<'a> {
     ) -> Result<()> {
         let part = self.store.part_path(f);
         let mut stalled = 0;
-        let mut restarted = false;
         loop {
             check_cancel(cancel)?;
             let failure = match self.derive_once(entry, f, kind, cancel).await {
                 Ok(()) => match self.store.commit_download(f) {
                     Ok(()) => return Ok(()),
-                    Err(TranslatteError::ChecksumMismatch { .. }) if !restarted => {
-                        restarted = true;
-                        continue;
-                    }
                     Err(TranslatteError::Incomplete { path, have, want }) => {
                         std::fs::remove_file(&part)?;
+                        TranslatteError::Download(format!(
+                            "derived {path} has {have} bytes, expected {want}"
+                        ))
+                    }
+                    Err(TranslatteError::SizeMismatch { path, have, want }) => {
                         TranslatteError::Download(format!(
                             "derived {path} has {have} bytes, expected {want}"
                         ))
@@ -499,7 +487,7 @@ impl Reporter<'_> {
 /// (`PostProcess.character_dict`), one entry per line with a trailing newline.
 ///
 /// Byte-identical to `paddle_dict` in `scripts/gen_manifest.py`, which produced the manifest
-/// checksums.
+/// sizes.
 pub fn paddle_dict(yml: &str) -> Result<Vec<u8>> {
     #[derive(Deserialize)]
     struct Config {
@@ -527,8 +515,6 @@ pub fn paddle_dict(yml: &str) -> Result<Vec<u8>> {
 mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
-
-    use sha2::{Digest, Sha256};
 
     use super::*;
     use crate::manifest::Manifest;
@@ -603,8 +589,6 @@ PostProcess:
         cut_after: Mutex<HashMap<String, Vec<usize>>>,
         /// Paths whose next request ignores the range and serves the whole file.
         ignore_range: Mutex<Vec<String>>,
-        /// Paths whose next request serves this content instead.
-        corrupt_once: Mutex<HashMap<String, Vec<u8>>>,
         /// Number of upcoming requests per path whose `open` fails.
         open_errors: Mutex<HashMap<String, u32>>,
         /// Every `open` never resolves, after setting this flag if given.
@@ -637,10 +621,7 @@ PostProcess:
                     return Box::pin(async { Err(TranslatteError::Download("503".into())) });
                 }
             }
-            let full = match self.corrupt_once.lock().unwrap().remove(&key) {
-                Some(d) => d,
-                None => self.files.get(&key).cloned().unwrap_or_default(),
-            };
+            let full = self.files.get(&key).cloned().unwrap_or_default();
             let mut ignore = self.ignore_range.lock().unwrap();
             let data = match (&range, ignore.iter().position(|p| *p == key)) {
                 (_, Some(i)) => {
@@ -693,9 +674,8 @@ PostProcess:
         let dict = paddle_dict(YAML).unwrap();
         let entry = |path: &str, data: &[u8], source_path: &str, derive: bool| {
             format!(
-                r#"{{"path": "{path}", "size": {}, "sha256": "{}", "source_path": "{source_path}"{}}}"#,
+                r#"{{"path": "{path}", "size": {}, "source_path": "{source_path}"{}}}"#,
                 data.len(),
-                hex::encode(Sha256::digest(data)),
                 if derive {
                     r#", "derive": "paddle_dict""#
                 } else {
@@ -793,7 +773,7 @@ PostProcess:
         let (r, events) = run(&fx, "rec-x");
         r.unwrap();
         assert_eq!(fx.store.state("rec-x").unwrap(), InstallState::Installed);
-        assert!(fx.store.verify("rec-x").unwrap());
+        assert_eq!(fx.store.state("rec-x").unwrap(), InstallState::Installed);
         assert_eq!(
             requests(&fx),
             vec![
@@ -822,7 +802,10 @@ PostProcess:
             requests(&fx),
             vec![("o/tr/up.gguf".into(), Some(4321..BIG as u64))]
         );
-        assert!(fx.store.verify("translator").unwrap());
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
         assert!(!fx.store.part_path(f).exists());
     }
 
@@ -840,7 +823,10 @@ PostProcess:
             ranges,
             vec![0..10_000, 2500..10_000, 2500..10_000, 5500..10_000]
         );
-        assert!(fx.store.verify("translator").unwrap());
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
     }
 
     #[test]
@@ -861,34 +847,17 @@ PostProcess:
     }
 
     #[test]
-    fn restarts_once_from_zero_on_checksum_mismatch() {
+    fn oversize_part_is_discarded_and_redownloaded() {
         let fx = fixture();
-        let mut bad = fx.fake.files["o/tr/up.gguf"].clone();
-        bad[9000] ^= 0xff;
-        fx.fake
-            .corrupt_once
-            .lock()
-            .unwrap()
-            .insert("o/tr/up.gguf".into(), bad);
+        let f = translator(&fx);
+        std::fs::create_dir_all(fx.store.part_path(f).parent().unwrap()).unwrap();
+        std::fs::write(fx.store.part_path(f), vec![0u8; BIG + 5]).unwrap();
         run(&fx, "translator").0.unwrap();
-        let ranges: Vec<_> = requests(&fx).into_iter().map(|(_, r)| r.unwrap()).collect();
-        assert_eq!(ranges, vec![0..10_000, 0..10_000]);
-        assert!(fx.store.verify("translator").unwrap());
-    }
-
-    #[test]
-    fn fails_after_second_checksum_mismatch() {
-        let mut fx = fixture();
-        fx.fake
-            .files
-            .get_mut("o/tr/up.gguf")
-            .unwrap()
-            .iter_mut()
-            .for_each(|b| *b = !*b);
-        let (r, _) = run(&fx, "translator");
-        assert!(matches!(r, Err(TranslatteError::ChecksumMismatch { .. })));
-        assert_eq!(requests(&fx).len(), 2);
-        assert!(!fx.store.part_path(translator(&fx)).exists());
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
+        assert!(!fx.store.part_path(f).exists());
     }
 
     #[test]
@@ -907,7 +876,10 @@ PostProcess:
         r.unwrap();
         let ranges: Vec<_> = requests(&fx).into_iter().map(|(_, r)| r.unwrap()).collect();
         assert_eq!(ranges, vec![100..10_000]);
-        assert!(fx.store.verify("translator").unwrap());
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
         assert_eq!(events[0].bytes_done, 0);
     }
 
@@ -921,7 +893,10 @@ PostProcess:
             .insert("o/tr/up.gguf".into(), 2);
         run(&fx, "translator").0.unwrap();
         assert_eq!(requests(&fx).len(), 3);
-        assert!(fx.store.verify("translator").unwrap());
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
 
         fx.fake
             .open_errors
@@ -942,7 +917,7 @@ PostProcess:
             .unwrap()
             .insert("o/rec/inference.yml".into(), 2);
         run(&fx, "rec-x").0.unwrap();
-        assert!(fx.store.verify("rec-x").unwrap());
+        assert_eq!(fx.store.state("rec-x").unwrap(), InstallState::Installed);
         let yml = requests(&fx)
             .into_iter()
             .filter(|(k, _)| k.ends_with(".yml"))
@@ -1018,7 +993,10 @@ PostProcess:
         cancel.store(false, Ordering::Relaxed);
         d.download_model_blocking("translator", &cancel, |_| {})
             .unwrap();
-        assert!(fx.store.verify("translator").unwrap());
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
     }
 
     #[test]
@@ -1033,11 +1011,11 @@ PostProcess:
     fn redownloads_corrupt_installed_file() {
         let fx = fixture();
         run(&fx, "det").0.unwrap();
-        std::fs::write(fx.store.root().join("det/inference.onnx"), "dex").unwrap();
+        std::fs::write(fx.store.root().join("det/inference.onnx"), "de").unwrap();
         requests(&fx);
         run(&fx, "det").0.unwrap();
         assert_eq!(requests(&fx).len(), 1);
-        assert!(fx.store.verify("det").unwrap());
+        assert_eq!(fx.store.state("det").unwrap(), InstallState::Installed);
     }
 
     #[test]
@@ -1081,8 +1059,8 @@ PostProcess:
         d.progress_interval = Duration::ZERO;
         d.download_models_blocking(&["det", "rec-x"], &AtomicBool::new(false), |_| {})
             .unwrap();
-        assert!(fx.store.verify("det").unwrap());
-        assert!(fx.store.verify("rec-x").unwrap());
+        assert_eq!(fx.store.state("det").unwrap(), InstallState::Installed);
+        assert_eq!(fx.store.state("rec-x").unwrap(), InstallState::Installed);
         assert!(matches!(
             d.download_model_blocking("nope", &AtomicBool::new(false), |_| {}),
             Err(TranslatteError::Manifest(_))

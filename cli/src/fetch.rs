@@ -6,7 +6,7 @@ use translatte_core::download::{DownloadProgress, Downloader};
 use translatte_core::manifest::{ModelKind, DETECTOR_ID, TRANSLATOR_ID};
 use translatte_core::model_store::ModelStore;
 
-/// Downloads the core models plus the requested script packs; verified files are skipped.
+/// Downloads the core models plus the requested script packs; installed files are skipped.
 pub fn run_fetch(store: &ModelStore, packs: &[String], all_packs: bool) -> Result<()> {
     let manifest = store.manifest();
     let mut ids = vec![DETECTOR_ID, TRANSLATOR_ID];

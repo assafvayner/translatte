@@ -4,13 +4,12 @@
 # ///
 """Generate models/manifest.json from the pinned upstream repos in REVISIONS.
 
-Sizes and sha256 of upstream files come from Hub metadata; derived files (rec-*/dict.txt) are
+Sizes of upstream files come from Hub metadata; derived files (rec-*/dict.txt) are
 computed from the pinned inference.yml. Models are downloaded by `translatte fetch`, which reads
 `source`/`source_path`/`derive` from the manifest and fetches straight from these repos.
 """
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
@@ -96,15 +95,11 @@ def source(repo: str) -> dict:
 
 
 def upstream_entry(repo: str, filename: str, rel: str) -> dict:
-    """Size and sha256 of an upstream file, from LFS metadata or by hashing its contents."""
+    """Size of an upstream file from Hub metadata."""
     rev = REVISIONS[repo]
     info = HfApi().get_paths_info(repo, [filename], expand=True, revision=rev)[0]
-    if info.lfs is not None:
-        size, sha = info.lfs.size, info.lfs.sha256
-    else:
-        data = Path(hf_hub_download(repo, filename, revision=rev)).read_bytes()
-        size, sha = len(data), hashlib.sha256(data).hexdigest()
-    return {"path": rel, "size": size, "sha256": sha, "source_path": filename}
+    size = info.lfs.size if info.lfs is not None else info.size
+    return {"path": rel, "size": size, "source_path": filename}
 
 
 def paddle_dict(yml_text: str) -> bytes:
@@ -118,7 +113,7 @@ def paddle_dict(yml_text: str) -> bytes:
 def dict_entry(repo: str, rel: str) -> dict:
     yml = Path(hf_hub_download(repo, "inference.yml", revision=REVISIONS[repo]))
     data = paddle_dict(yml.read_text(encoding="utf-8"))
-    return {"path": rel, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+    return {"path": rel, "size": len(data),
             "source_path": "inference.yml", "derive": "paddle_dict"}
 
 

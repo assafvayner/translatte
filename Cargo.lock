@@ -1333,12 +1333,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
 name = "hf-hub"
 version = "1.1.0"
 source = "git+https://github.com/huggingface/hf-hub?branch=main#473de9430b0fbc544fb1d91102180eb713f8dc87"
@@ -4075,7 +4069,6 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures",
- "hex",
  "hf-hub",
  "image",
  "imageproc",
@@ -4086,7 +4079,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
- "sha2 0.10.9",
  "tempfile",
  "thiserror",
  "tokio",

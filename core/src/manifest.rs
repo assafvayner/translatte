@@ -27,7 +27,6 @@ pub enum Derive {
 pub struct ModelFile {
     pub path: String,
     pub size: u64,
-    pub sha256: String,
     /// File name in the upstream repo (`ModelEntry::source`).
     pub source_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,15 +231,15 @@ pub(crate) mod tests {
       "models": [
         {"id": "det", "kind": "core", "display_name": "Text detector",
          "source": {"repo": "acme/det", "revision": "0123456789abcdef0123456789abcdef01234567"},
-         "files": [{"path": "det/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.onnx"}]},
+         "files": [{"path": "det/inference.onnx", "size": 3, "source_path": "inference.onnx"}]},
         {"id": "translator", "kind": "core", "display_name": "Translator",
          "source": {"repo": "acme/translator-GGUF", "revision": "0123456789abcdef0123456789abcdef01234567"},
-         "files": [{"path": "translator/model.gguf", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "translator.Q4_K_M.gguf"}]},
+         "files": [{"path": "translator/model.gguf", "size": 3, "source_path": "translator.Q4_K_M.gguf"}]},
         {"id": "rec-latin", "kind": "script_pack", "display_name": "Latin script",
          "source": {"repo": "acme/latin_rec", "revision": "0123456789abcdef0123456789abcdef01234567"},
          "files": [
-           {"path": "rec-latin/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.onnx"},
-           {"path": "rec-latin/dict.txt", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.yml", "derive": "paddle_dict"}
+           {"path": "rec-latin/inference.onnx", "size": 3, "source_path": "inference.onnx"},
+           {"path": "rec-latin/dict.txt", "size": 3, "source_path": "inference.yml", "derive": "paddle_dict"}
          ]}
       ],
       "languages": [
@@ -359,7 +358,7 @@ pub(crate) mod tests {
     #[test]
     fn rejects_model_without_files() {
         let bad = SAMPLE.replace(
-            r#""files": [{"path": "det/inference.onnx", "size": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source_path": "inference.onnx"}]"#,
+            r#""files": [{"path": "det/inference.onnx", "size": 3, "source_path": "inference.onnx"}]"#,
             r#""files": []"#,
         );
         assert_rejected(bad);

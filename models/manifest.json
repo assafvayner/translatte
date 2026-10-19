@@ -13,7 +13,6 @@
         {
           "path": "det/inference.onnx",
           "size": 4826518,
-          "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
           "source_path": "inference.onnx"
         }
       ]
@@ -30,7 +29,6 @@
         {
           "path": "translator/model.gguf",
           "size": 2489909760,
-          "sha256": "81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330",
           "source_path": "translategemma-4b-it.Q4_K_M.gguf"
         }
       ]
@@ -47,13 +45,11 @@
         {
           "path": "rec-cjk/inference.onnx",
           "size": 16534782,
-          "sha256": "da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-cjk/dict.txt",
           "size": 74012,
-          "sha256": "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -71,13 +67,11 @@
         {
           "path": "rec-en/inference.onnx",
           "size": 7848423,
-          "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-en/dict.txt",
           "size": 1416,
-          "sha256": "e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -95,13 +89,11 @@
         {
           "path": "rec-latin/inference.onnx",
           "size": 8042023,
-          "sha256": "7888113072263cb471b93f66dd5e2ad70548dc526fa1ace760d0d973dd121498",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-latin/dict.txt",
           "size": 2616,
-          "sha256": "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -119,13 +111,11 @@
         {
           "path": "rec-eslav/inference.onnx",
           "size": 7887627,
-          "sha256": "b3018ef2b09a0250b6e0c8e871c927098363e5fd4df890cc68e8358eb0aaf1bd",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-eslav/dict.txt",
           "size": 1663,
-          "sha256": "3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -143,13 +133,11 @@
         {
           "path": "rec-cyrillic/inference.onnx",
           "size": 8048799,
-          "sha256": "5371ee1ddaa7983cc62d0818d99e982b6804638c85e4f960d59a574094e172e5",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-cyrillic/dict.txt",
           "size": 2781,
-          "sha256": "db40aa52ceb112055be80c694afdf655d5d2c4f7873704524cc16a447ca913ba",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -167,13 +155,11 @@
         {
           "path": "rec-korean/inference.onnx",
           "size": 13418787,
-          "sha256": "92f0b7785e64fc9090106a241cf4c1eb97472824558272751b88a2a4476d3a08",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-korean/dict.txt",
           "size": 47451,
-          "sha256": "a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -191,13 +177,11 @@
         {
           "path": "rec-arabic/inference.onnx",
           "size": 7998947,
-          "sha256": "799113ebf267fbe742deb99eb36e8d42c9ddc5291ceacf92add41b4d52a59110",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-arabic/dict.txt",
           "size": 2369,
-          "sha256": "7f92f7dbb9b75a4787a83bfb4f6d14a8ab515525130c9d40a9036f61cf6999e9",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -215,13 +199,11 @@
         {
           "path": "rec-devanagari/inference.onnx",
           "size": 7912311,
-          "sha256": "cb789212ce96c69d3e74728ae4309d179281d68cb3945d0616b67cafab41c986",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-devanagari/dict.txt",
           "size": 1943,
-          "sha256": "09c7440bfc5477e5c41052304b6b185aff8c4a5e8b2b4c23c1c706f6fe1ee9fc",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -239,13 +221,11 @@
         {
           "path": "rec-th/inference.onnx",
           "size": 7891015,
-          "sha256": "27618be66018f8598ac0a526a593f9f1cebf794e7eded93428e8fb016e537f5f",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-th/dict.txt",
           "size": 1767,
-          "sha256": "57f5406f94bb6688fb7077f7be65f08bbd71cecf48c01ea26c522cb5c4836b7a",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -263,13 +243,11 @@
         {
           "path": "rec-el/inference.onnx",
           "size": 7808735,
-          "sha256": "2acf17fcaea2bc81b878e311e6263b8885f48bb03796f75f9f30ed3242bbaa6d",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-el/dict.txt",
           "size": 1103,
-          "sha256": "31defc62c0c3ad3674a82da6192226a2ba98ef4ff014a7045cb88d59f9c3de31",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -287,13 +265,11 @@
         {
           "path": "rec-ta/inference.onnx",
           "size": 7885691,
-          "sha256": "c6d2b682d2a0ea4cb1fccdba295976f93fd439964d16cdc666cadef531accbee",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-ta/dict.txt",
           "size": 1723,
-          "sha256": "85b541352ae18dc6ba6d47152d8bf8adff6b0266e605d2eef2990c1bf466117b",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -311,13 +287,11 @@
         {
           "path": "rec-te/inference.onnx",
           "size": 7898759,
-          "sha256": "8238bfc46d4cffe720ed6706e3842802467343497428693ff2bfb4e6b3caa36b",
           "source_path": "inference.onnx"
         },
         {
           "path": "rec-te/dict.txt",
           "size": 1831,
-          "sha256": "42f83f5d3fdb50778e4fa5b66c58d99a59ab7792151c5e74f34b8ffd7b61c9d6",
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
