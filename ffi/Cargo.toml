@@ -11,9 +11,19 @@ name = "translatte_ffi"
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
+[features]
+# In-app model downloads. Off for iOS, where hf-xet's sysinfo dependency doesn't build yet.
+download = ["translatte-core/download", "translatte-core/tls-rustls"]
+
 [dependencies]
 translatte-core = { path = "../core", features = ["llama"] }
 image.workspace = true
 thiserror.workspace = true
 uniffi = { version = "0.29", features = ["cli"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+# Must resolve to the same version reqwest uses, so the JNI init below reaches its verifier.
+rustls-platform-verifier = "0.7"
+paranoid-android = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "env-filter"] }

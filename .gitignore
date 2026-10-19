@@ -7,3 +7,7 @@
 /ios/Translatte.xcodeproj
 /ios/Frameworks
 /ios/Translatte/Generated
+/android/app/src/generated
+/android/.gradle
+/android/**/build
+/android/local.properties

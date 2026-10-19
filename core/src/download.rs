@@ -119,6 +119,13 @@ pub struct DownloadProgress {
 const MAX_STALLED_ATTEMPTS: u32 = 5;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Xet-backed files arrive in order while many byte ranges download in parallel, so the first chunk
+/// can take minutes on a slow link even though data is flowing; restarting then throws that away.
+const FIRST_CHUNK_TIMEOUT: Duration = Duration::from_secs(600);
+/// Attempts in a row without progress that wait [`FIRST_CHUNK_TIMEOUT`] for the first chunk; later
+/// ones wait [`IDLE_TIMEOUT`], so a link that's dead from the start fails in about 20 minutes rather
+/// than 50.
+const LONG_FIRST_CHUNK_ATTEMPTS: u32 = 2;
 const CANCEL_POLL: Duration = Duration::from_millis(200);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 /// Upper bound on a source file that is parsed rather than stored (e.g. `inference.yml`).
@@ -129,6 +136,7 @@ pub struct Downloader<'a> {
     source: Box<dyn Source + 'a>,
     retry_delay: Duration,
     idle_timeout: Duration,
+    first_chunk_timeout: Duration,
     progress_interval: Duration,
 }
 
@@ -143,6 +151,7 @@ impl<'a> Downloader<'a> {
             source: Box::new(source),
             retry_delay: RETRY_DELAY,
             idle_timeout: IDLE_TIMEOUT,
+            first_chunk_timeout: FIRST_CHUNK_TIMEOUT,
             progress_interval: PROGRESS_INTERVAL,
         }
     }
@@ -237,9 +246,14 @@ impl<'a> Downloader<'a> {
         loop {
             check_cancel(cancel)?;
             let before = part_len(&part)?;
+            let first_chunk_timeout = if stalled < LONG_FIRST_CHUNK_ATTEMPTS {
+                self.first_chunk_timeout
+            } else {
+                self.idle_timeout
+            };
             let failure = if before < f.size {
                 match self
-                    .transfer(entry, f, &part, before, cancel, reporter)
+                    .transfer(entry, f, &part, first_chunk_timeout, cancel, reporter)
                     .await
                 {
                     Ok(()) => None,
@@ -270,17 +284,18 @@ impl<'a> Downloader<'a> {
         }
     }
 
-    /// Requests `have..size` and appends it to the `.part`, or rewrites the `.part` from the
-    /// start when the server ignores the range.
+    /// Requests the rest of the file after the `.part` and appends it, or rewrites the `.part` from
+    /// the start when the server ignores the range.
     async fn transfer(
         &self,
         entry: &ModelEntry,
         f: &ModelFile,
         part: &Path,
-        mut have: u64,
+        first_chunk_timeout: Duration,
         cancel: &AtomicBool,
         reporter: &mut Reporter<'_>,
     ) -> Result<()> {
+        let mut have = part_len(part)?;
         let opened = self
             .watch(
                 self.source
@@ -296,10 +311,12 @@ impl<'a> Downloader<'a> {
         } else {
             OpenOptions::new().create(true).append(true).open(part)?
         };
+        let mut timeout = first_chunk_timeout;
         while have < f.size {
-            let Some(chunk) = self.watch(stream.next(), cancel).await? else {
+            let Some(chunk) = self.watch_for(stream.next(), timeout, cancel).await? else {
                 break;
             };
+            timeout = self.idle_timeout;
             let chunk = chunk?;
             // Bytes past the expected size are never written.
             let take = chunk
@@ -400,6 +417,15 @@ impl<'a> Downloader<'a> {
     /// Awaits `fut`, checking `cancel` every [`CANCEL_POLL`] and failing with a `Download`
     /// error once it has made no progress for the idle timeout.
     async fn watch<F: Future>(&self, fut: F, cancel: &AtomicBool) -> Result<F::Output> {
+        self.watch_for(fut, self.idle_timeout, cancel).await
+    }
+
+    async fn watch_for<F: Future>(
+        &self,
+        fut: F,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<F::Output> {
         let mut fut = std::pin::pin!(fut);
         let mut idle = Duration::ZERO;
         loop {
@@ -408,7 +434,7 @@ impl<'a> Downloader<'a> {
                 Ok(out) => return Ok(out),
                 Err(_) => {
                     idle += CANCEL_POLL;
-                    if idle >= self.idle_timeout {
+                    if idle >= timeout {
                         return Err(TranslatteError::Download(format!(
                             "no response for {}s",
                             idle.as_secs()
@@ -593,6 +619,10 @@ PostProcess:
         open_errors: Mutex<HashMap<String, u32>>,
         /// Every `open` never resolves, after setting this flag if given.
         hang_open: Option<Option<Arc<AtomicBool>>>,
+        /// Streams wait this long before their first chunk, or forever when `Duration::MAX`.
+        first_chunk_delay: Option<Duration>,
+        /// Streams hang after their first chunk.
+        stall_after_first_chunk: bool,
         requests: Mutex<Vec<(String, Option<Range<u64>>)>>,
     }
 
@@ -652,11 +682,21 @@ PostProcess:
                 items.push(Ok(Bytes::copy_from_slice(c)));
             }
             let len = Some(data.len() as u64);
+            let delay = self.first_chunk_delay;
+            let stall = self.stall_after_first_chunk;
             Box::pin(async move {
-                Ok(Opened {
-                    stream: Box::pin(futures::stream::iter(items)),
-                    len,
-                })
+                let items = futures::stream::iter(items);
+                let stream: ByteStream = match delay {
+                    None if stall => Box::pin(items.take(1).chain(futures::stream::pending())),
+                    None => Box::pin(items),
+                    Some(d) if d == Duration::MAX => Box::pin(futures::stream::pending()),
+                    Some(d) => Box::pin(
+                        futures::stream::once(tokio::time::sleep(d))
+                            .filter_map(|_| async { None })
+                            .chain(items),
+                    ),
+                };
+                Ok(Opened { stream, len })
             })
         }
     }
@@ -954,6 +994,59 @@ PostProcess:
             let waited = rt.block_on(async move { start.elapsed() });
             assert!(waited >= IDLE_TIMEOUT * MAX_STALLED_ATTEMPTS, "{waited:?}");
         }
+    }
+
+    #[test]
+    fn waits_past_idle_timeout_for_first_chunk() {
+        let mut fx = fixture();
+        fx.fake.first_chunk_delay = Some(IDLE_TIMEOUT * 3);
+        install_rec_onnx(&fx);
+        let d = Downloader::with_source(&fx.store, &fx.fake);
+        let rt = paused_runtime();
+        rt.block_on(d.download_model("translator", &AtomicBool::new(false), |_| {}))
+            .unwrap();
+        assert_eq!(requests(&fx).len(), 1);
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
+    }
+
+    #[test]
+    fn stall_after_first_chunk_times_out_at_idle_timeout() {
+        let mut fx = fixture();
+        fx.fake.stall_after_first_chunk = true;
+        let d = Downloader::with_source(&fx.store, &fx.fake);
+        let rt = paused_runtime();
+        let start = rt.block_on(async { tokio::time::Instant::now() });
+        rt.block_on(d.download_model("translator", &AtomicBool::new(false), |_| {}))
+            .unwrap();
+        // One chunk per request, each followed by an idle timeout, until the file is complete.
+        let n = requests(&fx).len() as u32;
+        assert_eq!(n as usize, BIG / fx.fake.chunk);
+        let waited = rt.block_on(async move { start.elapsed() });
+        assert!(waited >= IDLE_TIMEOUT * (n - 1), "{waited:?}");
+        assert!(waited < (IDLE_TIMEOUT + RETRY_DELAY) * n, "{waited:?}");
+    }
+
+    #[test]
+    fn missing_first_chunk_times_out_into_bounded_retries() {
+        let mut fx = fixture();
+        fx.fake.first_chunk_delay = Some(Duration::MAX);
+        let d = Downloader::with_source(&fx.store, &fx.fake);
+        let rt = paused_runtime();
+        let start = rt.block_on(async { tokio::time::Instant::now() });
+        let r = rt.block_on(d.download_model("translator", &AtomicBool::new(false), |_| {}));
+        assert!(matches!(r, Err(TranslatteError::Download(_))), "{r:?}");
+        assert_eq!(requests(&fx).len(), MAX_STALLED_ATTEMPTS as usize);
+        let waited = rt.block_on(async move { start.elapsed() });
+        let timeouts = FIRST_CHUNK_TIMEOUT * LONG_FIRST_CHUNK_ATTEMPTS
+            + IDLE_TIMEOUT * (MAX_STALLED_ATTEMPTS - LONG_FIRST_CHUNK_ATTEMPTS);
+        assert!(waited >= timeouts, "{waited:?}");
+        assert!(
+            waited < timeouts + RETRY_DELAY * MAX_STALLED_ATTEMPTS.pow(2),
+            "{waited:?}"
+        );
     }
 
     #[test]

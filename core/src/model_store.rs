@@ -122,16 +122,36 @@ impl ModelStore {
         Ok(())
     }
 
+    /// Bytes of `id` already on disk: installed files plus partial downloads, for resuming.
+    pub fn downloaded_bytes(&self, id: &str) -> Result<u64> {
+        let mut total = 0;
+        for f in &self.entry(id)?.files {
+            total += if self.is_file_installed(f)? {
+                f.size
+            } else {
+                match std::fs::metadata(self.part_path(f)) {
+                    Ok(m) => m.len().min(f.size),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => 0,
+                    Err(e) => return Err(e.into()),
+                }
+            };
+        }
+        Ok(total)
+    }
+
+    /// Removes a script pack's files, including partial downloads.
     pub fn delete(&self, id: &str) -> Result<()> {
         let entry = self.entry(id)?;
         if entry.kind == ModelKind::Core {
             return Err(TranslatteError::CoreModelDelete(id.to_string()));
         }
         for f in &entry.files {
-            match std::fs::remove_file(self.root.join(&f.path)) {
-                Ok(()) => {}
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
+            for path in [self.root.join(&f.path), self.part_path(f)] {
+                match std::fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
         // Best effort: the directory may hold unrelated files we shouldn't touch.
@@ -311,6 +331,26 @@ mod tests {
             s.delete("det"),
             Err(TranslatteError::CoreModelDelete(_))
         ));
+    }
+
+    #[test]
+    fn delete_removes_partial_downloads() {
+        let (_d, s) = store();
+        write(&s, "rec-latin/inference.onnx", "abc");
+        write(&s, "rec-latin/dict.txt.part", "ab");
+        s.delete("rec-latin").unwrap();
+        assert!(!s.root().join("rec-latin").exists());
+    }
+
+    #[test]
+    fn downloaded_bytes_counts_installed_and_partial_files() {
+        let (_d, s) = store();
+        assert_eq!(s.downloaded_bytes("rec-latin").unwrap(), 0);
+        write(&s, "rec-latin/inference.onnx", "abc");
+        write(&s, "rec-latin/dict.txt.part", "ab");
+        assert_eq!(s.downloaded_bytes("rec-latin").unwrap(), 5);
+        write(&s, "rec-latin/dict.txt.part", "abcdef");
+        assert_eq!(s.downloaded_bytes("rec-latin").unwrap(), 6);
     }
 
     #[test]

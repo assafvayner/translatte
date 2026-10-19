@@ -16,7 +16,12 @@ if [[ ! -f "$ZIP" ]]; then
   curl -sSfL -o "$ZIP.part" "https://download.onnxruntime.ai/pod-archive-onnxruntime-c-$ORT_VERSION.zip"
   mv "$ZIP.part" "$ZIP"
 fi
-echo "$ORT_SHA256  $ZIP" | shasum -a 256 -c - >/dev/null
+actual="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+if [[ "$actual" != "$ORT_SHA256" ]]; then
+  echo "ORT zip checksum mismatch: got $actual, pinned $ORT_SHA256" >&2
+  rm -f "$ZIP"
+  exit 1
+fi
 
 rm -rf "$DEPS/ort" "$DEPS/lib-ios" "$DEPS/lib-sim"
 unzip -q "$ZIP" -d "$DEPS/ort"
