@@ -1,0 +1,19 @@
+[package]
+name = "translatte-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+name = "translatte_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+translatte-core = { path = "../core", features = ["llama"] }
+image.workspace = true
+thiserror.workspace = true
+uniffi = { version = "0.29", features = ["cli"] }
+

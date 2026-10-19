@@ -61,14 +61,24 @@ pub struct LlamaGenerator {
 impl LlamaGenerator {
     pub fn load(path: &Path) -> Result<Self> {
         let backend = backend()?;
-        let model =
-            LlamaModel::load_from_file(backend, path, &LlamaModelParams::default()).map_err(err)?;
+        let params = LlamaModelParams::default();
+        // The iOS Simulator's Metal device lacks features ggml-metal needs, so decode fails there.
+        #[cfg(all(target_os = "ios", target_abi = "sim"))]
+        let params = params.with_n_gpu_layers(0);
+        let model = LlamaModel::load_from_file(backend, path, &params).map_err(err)?;
         let threads = std::env::var("TRANSLATTE_THREADS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(|| {
-                // On big.LITTLE phones extra threads land on little cores and stall the rest.
-                let cap = if cfg!(target_os = "android") { 5 } else { 8 };
+                // On big.LITTLE phones extra threads land on little cores and stall the rest. iPhones
+                // have only 2 P-cores; the simulator runs on the Mac's cores.
+                let cap = if cfg!(target_os = "android") {
+                    5
+                } else if cfg!(all(target_os = "ios", not(target_abi = "sim"))) {
+                    2
+                } else {
+                    8
+                };
                 std::thread::available_parallelism()
                     .map(|n| n.get().min(cap) as i32)
                     .unwrap_or(4)
