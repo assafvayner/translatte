@@ -34,10 +34,10 @@ android {
     }
 
     sourceSets["main"].apply {
-        // Written by scripts/android/build-app.sh: UniFFI bindings and the native libraries.
+        // Written by scripts/android/build-app.sh: UniFFI bindings, native libraries, manifest.json.
         java.srcDir("src/generated/kotlin")
         jniLibs.srcDir("src/generated/jniLibs")
-        assets.srcDir("../../models")
+        assets.srcDir("src/generated/assets")
     }
 
     compileOptions {
@@ -46,7 +46,13 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    packaging { jniLibs { useLegacyPackaging = false } }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+            // Already stripped by build-app.sh.
+            keepDebugSymbols += "**/*.so"
+        }
+    }
 }
 
 dependencies {
