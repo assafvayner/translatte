@@ -8,7 +8,7 @@ name = "translatte"
 path = "src/main.rs"
 
 [dependencies]
-translatte-core = { path = "../core", features = ["llama"] }
+translatte-core = { path = "../core", features = ["llama", "download"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 cosmic-text = "=0.12.1"

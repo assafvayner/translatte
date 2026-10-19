@@ -21,7 +21,7 @@ pub fn cer(expected: &str, got: &str) -> f64 {
     if e.is_empty() {
         return if g.is_empty() { 0.0 } else { 1.0 };
     }
-    let dist = strsim::generic_levenshtein(&e, &g);
+    let dist = strsim::generic_levenshtein::<Vec<char>, Vec<char>, &char, &char>(&e, &g);
     (dist as f64 / e.len() as f64).min(1.0)
 }
 

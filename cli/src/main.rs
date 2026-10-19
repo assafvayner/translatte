@@ -1,5 +1,6 @@
 mod draw;
 mod eval;
+mod fetch;
 mod setup;
 
 use std::path::PathBuf;
@@ -34,6 +35,16 @@ enum Command {
         /// Exit non-zero if mean CER exceeds this.
         #[arg(long)]
         max_cer: Option<f64>,
+        #[command(flatten)]
+        models: ModelArgs,
+    },
+    /// Download the core models (detector, translator) and OCR script packs from upstream.
+    Fetch {
+        /// Script packs to install, e.g. rec-latin,rec-cjk.
+        #[arg(long, value_delimiter = ',', conflicts_with = "all_packs")]
+        packs: Vec<String>,
+        #[arg(long)]
+        all_packs: bool,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -72,6 +83,14 @@ fn main() -> Result<()> {
             if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer)? {
                 std::process::exit(1);
             }
+        }
+        Command::Fetch {
+            packs,
+            all_packs,
+            models,
+        } => {
+            let store = setup::load_store(&models.manifest, &models.models)?;
+            fetch::run_fetch(&store, &packs, all_packs)?;
         }
         Command::Langs { models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
