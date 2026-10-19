@@ -4076,6 +4076,7 @@ dependencies = [
  "ndarray",
  "openssl",
  "ort",
+ "self_cell",
  "serde",
  "serde_json",
  "serde_yaml_ng",

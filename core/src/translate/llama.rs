@@ -3,11 +3,14 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::token::LlamaToken;
+use llama_cpp_2::vocab::LlamaVocab;
 
 use super::prompt::Prompt;
 use super::{Generation, TextGenerator};
@@ -34,10 +37,23 @@ fn backend() -> Result<&'static LlamaBackend> {
         .map_err(err)
 }
 
+self_cell::self_cell!(
+    /// The model and the one context borrowing it, kept together so the KV cache survives across calls.
+    struct ModelContext {
+        owner: LlamaModel,
+        #[covariant]
+        dependent: LlamaContext,
+    }
+);
+
 pub struct LlamaGenerator {
-    model: LlamaModel,
-    backend: &'static LlamaBackend,
+    inner: ModelContext,
     threads: i32,
+    /// Sliding-window attention width, if the model uses SWA.
+    n_swa: Option<usize>,
+    /// Tokens whose KV entries are in the context, at positions `0..cached.len()`.
+    cached: Vec<LlamaToken>,
+    prefix_cache: bool,
 }
 
 impl LlamaGenerator {
@@ -55,95 +71,205 @@ impl LlamaGenerator {
                     .map(|n| n.get().min(cap) as i32)
                     .unwrap_or(4)
             });
+        let n_swa = model
+            .meta_val_str("general.architecture")
+            .and_then(|arch| model.meta_val_str(&format!("{arch}.attention.sliding_window")))
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|&n| n > 0);
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(NonZeroU32::new(N_CTX))
+            .with_n_batch(N_CTX)
+            .with_n_threads(threads)
+            .with_n_threads_batch(threads);
+        let inner =
+            ModelContext::try_new(model, |m| m.new_context(backend, ctx_params)).map_err(err)?;
+        let prefix_cache = std::env::var("TRANSLATTE_PREFIX_CACHE").map_or(true, |v| v != "0");
         Ok(Self {
-            model,
-            backend,
+            inner,
             threads,
+            n_swa,
+            cached: Vec::new(),
+            prefix_cache,
         })
     }
+
+    /// Enables or disables reusing the KV entries of the token prefix shared with the previous call.
+    pub fn with_prefix_cache(mut self, enabled: bool) -> Self {
+        self.prefix_cache = enabled;
+        self
+    }
+}
+
+/// How many leading prompt tokens can keep their KV entries from the previous call. At least one
+/// prompt token is always decoded so the last position gets fresh logits. Once a sequence reaches
+/// the sliding attention window, llama.cpp may overwrite its early cells, so nothing is reused.
+fn reusable_prefix(cached: &[LlamaToken], tokens: &[LlamaToken], n_swa: Option<usize>) -> usize {
+    if n_swa.is_some_and(|w| cached.len() >= w) {
+        return 0;
+    }
+    let shared = cached
+        .iter()
+        .zip(tokens)
+        .take_while(|(a, b)| a == b)
+        .count();
+    shared.min(tokens.len().saturating_sub(1))
 }
 
 impl TextGenerator for LlamaGenerator {
     fn generate(&mut self, prompt: &Prompt, max_tokens: usize) -> Result<Generation> {
-        let vocab = self.model.vocab();
-        // The user text is OCR output: tokenizing it without special parsing keeps a literal
-        // "<end_of_turn>" in an image from becoming a control token.
-        let mut tokens = vocab.tokenize(prompt.prefix.as_bytes(), true, true);
-        tokens.extend(vocab.tokenize(prompt.text.as_bytes(), false, false));
-        tokens.extend(vocab.tokenize(prompt.suffix.as_bytes(), false, true));
-        let budget = max_tokens.min((N_CTX as usize).saturating_sub(tokens.len()));
-        if budget == 0 {
-            return Err(TranslatteError::Translate(format!(
-                "prompt ({} tokens) leaves no room for output in context {N_CTX}",
-                tokens.len()
-            )));
-        }
-        // A fresh context per call keeps the struct free of self-references; KV alloc is small next to decode time.
-        let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(N_CTX))
-            .with_n_batch(N_CTX)
-            .with_n_threads(self.threads)
-            .with_n_threads_batch(self.threads);
-        let mut ctx = self
-            .model
-            .new_context(self.backend, ctx_params)
-            .map_err(err)?;
-
-        let mut batch = LlamaBatch::new(N_CTX as usize, 1);
-        let last = tokens.len() as i32 - 1;
-        for (i, t) in (0_i32..).zip(tokens) {
-            batch.add(t, i, &[0], i == last).map_err(err)?;
-        }
-        let t0 = std::time::Instant::now();
-        let n_prompt = batch.n_tokens();
-        ctx.decode(&mut batch).map_err(err)?;
-        let prefill = t0.elapsed();
-
-        let mut sampler = LlamaSampler::greedy();
-        let mut decoder = encoding_rs::UTF_8.new_decoder();
-        let mut out = String::new();
-        let mut truncated = true;
-        let start = batch.n_tokens();
-        let mut n_gen = 0;
-        for pos in (start..).take(budget) {
-            let token = sampler.sample(&ctx, batch.n_tokens() - 1);
-            n_gen += 1;
-            sampler.accept(token);
-            if vocab.is_eog(token) {
-                truncated = false;
-                break;
+        let Self {
+            inner,
+            threads,
+            n_swa,
+            cached,
+            prefix_cache,
+        } = self;
+        inner.with_dependent_mut(|model, ctx| {
+            let vocab = model.vocab();
+            // The user text is OCR output: tokenizing it without special parsing keeps a literal
+            // "<end_of_turn>" in an image from becoming a control token.
+            let mut tokens = vocab.tokenize(prompt.prefix.as_bytes(), true, true);
+            tokens.extend(vocab.tokenize(prompt.text.as_bytes(), false, false));
+            tokens.extend(vocab.tokenize(prompt.suffix.as_bytes(), false, true));
+            let budget = max_tokens.min((N_CTX as usize).saturating_sub(tokens.len()));
+            if budget == 0 {
+                return Err(TranslatteError::Translate(format!(
+                    "prompt ({} tokens) leaves no room for output in context {N_CTX}",
+                    tokens.len()
+                )));
             }
-            let bytes = vocab.token_to_piece(token, true, None);
-            out.reserve(
-                decoder
-                    .max_utf8_buffer_length(bytes.len())
-                    .unwrap_or(bytes.len() * 4),
-            );
-            let _ = decoder.decode_to_string(&bytes, &mut out, false);
-            if out.ends_with("<end_of_turn>") {
-                truncated = false;
-                break;
+            let n_keep = if *prefix_cache {
+                reusable_prefix(cached, &tokens, *n_swa)
+            } else {
+                0
+            };
+            let result = generate_from(ctx, &vocab, &tokens, n_keep, cached, budget, *threads);
+            if result.is_err() {
+                ctx.clear_kv_cache();
+                cached.clear();
             }
-            batch.clear();
-            batch.add(token, pos, &[0], true).map_err(err)?;
-            ctx.decode(&mut batch).map_err(err)?;
-        }
-        out.reserve(decoder.max_utf8_buffer_length(0).unwrap_or(4));
-        let _ = decoder.decode_to_string(&[], &mut out, true);
-        if std::env::var_os("TRANSLATTE_PERF").is_some() {
-            let decode = t0.elapsed() - prefill;
-            eprintln!(
-                "llama: threads={} prefill {n_prompt} tok in {:.2}s ({:.1} tok/s), decode {n_gen} tok in {:.2}s ({:.1} tok/s)",
-                self.threads,
-                prefill.as_secs_f64(),
-                n_prompt as f64 / prefill.as_secs_f64(),
-                decode.as_secs_f64(),
-                n_gen as f64 / decode.as_secs_f64(),
-            );
-        }
-        Ok(Generation {
-            text: out,
-            truncated,
+            result
         })
+    }
+}
+
+/// Decodes `tokens[n_keep..]` on top of the first `n_keep` cached entries, then samples greedily,
+/// recording every token decoded into the context in `cached`.
+fn generate_from(
+    ctx: &mut LlamaContext,
+    vocab: &LlamaVocab,
+    tokens: &[LlamaToken],
+    n_keep: usize,
+    cached: &mut Vec<LlamaToken>,
+    budget: usize,
+    threads: i32,
+) -> Result<Generation> {
+    if n_keep == 0 {
+        ctx.clear_kv_cache();
+    } else {
+        ctx.kv_cache_seq_rm(0, Some(n_keep as u32), None)
+            .map_err(err)?;
+    }
+    cached.truncate(n_keep);
+
+    let mut batch = LlamaBatch::new(N_CTX as usize, 1);
+    let last = tokens.len() as i32 - 1;
+    for (i, &t) in (n_keep as i32..).zip(&tokens[n_keep..]) {
+        batch.add(t, i, &[0], i == last).map_err(err)?;
+    }
+    let t0 = std::time::Instant::now();
+    let n_prefill = batch.n_tokens();
+    ctx.decode(&mut batch).map_err(err)?;
+    cached.extend_from_slice(&tokens[n_keep..]);
+    let prefill = t0.elapsed();
+
+    let mut sampler = LlamaSampler::greedy();
+    let mut decoder = encoding_rs::UTF_8.new_decoder();
+    let mut out = String::new();
+    let mut truncated = true;
+    let mut n_gen = 0;
+    for pos in (tokens.len() as i32..).take(budget) {
+        let token = sampler.sample(ctx, batch.n_tokens() - 1);
+        n_gen += 1;
+        sampler.accept(token);
+        if vocab.is_eog(token) {
+            truncated = false;
+            break;
+        }
+        let bytes = vocab.token_to_piece(token, true, None);
+        out.reserve(
+            decoder
+                .max_utf8_buffer_length(bytes.len())
+                .unwrap_or(bytes.len() * 4),
+        );
+        let _ = decoder.decode_to_string(&bytes, &mut out, false);
+        if out.ends_with("<end_of_turn>") {
+            truncated = false;
+            break;
+        }
+        batch.clear();
+        batch.add(token, pos, &[0], true).map_err(err)?;
+        ctx.decode(&mut batch).map_err(err)?;
+        cached.push(token);
+    }
+    out.reserve(decoder.max_utf8_buffer_length(0).unwrap_or(4));
+    let _ = decoder.decode_to_string(&[], &mut out, true);
+    if std::env::var_os("TRANSLATTE_PERF").is_some() {
+        let decode = t0.elapsed() - prefill;
+        eprintln!(
+            "llama: threads={threads} prompt {} tok ({n_keep} reused), prefill {n_prefill} tok in {:.2}s ({:.1} tok/s), decode {n_gen} tok in {:.2}s ({:.1} tok/s)",
+            tokens.len(),
+            prefill.as_secs_f64(),
+            n_prefill as f64 / prefill.as_secs_f64(),
+            decode.as_secs_f64(),
+            n_gen as f64 / decode.as_secs_f64(),
+        );
+    }
+    Ok(Generation {
+        text: out,
+        truncated,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn toks(ids: &[i32]) -> Vec<LlamaToken> {
+        ids.iter().copied().map(LlamaToken).collect()
+    }
+
+    #[test]
+    fn reuses_longest_common_prefix() {
+        let cached = toks(&[1, 2, 3, 4, 5, 6]);
+        assert_eq!(reusable_prefix(&cached, &toks(&[1, 2, 3, 9, 9]), None), 3);
+        assert_eq!(reusable_prefix(&cached, &toks(&[7, 2, 3]), None), 0);
+        assert_eq!(reusable_prefix(&[], &toks(&[1, 2]), None), 0);
+    }
+
+    #[test]
+    fn always_leaves_a_token_to_decode() {
+        let cached = toks(&[1, 2, 3, 4]);
+        assert_eq!(reusable_prefix(&cached, &toks(&[1, 2, 3, 4]), None), 3);
+        assert_eq!(reusable_prefix(&cached, &toks(&[1, 2]), None), 1);
+        assert_eq!(reusable_prefix(&cached, &toks(&[1]), None), 0);
+    }
+
+    #[test]
+    fn extends_into_previous_output() {
+        let cached = toks(&[1, 2, 3, 4]);
+        assert_eq!(
+            reusable_prefix(&cached, &toks(&[1, 2, 3, 4, 5, 6]), None),
+            4
+        );
+    }
+
+    #[test]
+    fn nothing_reused_once_sliding_window_was_reached() {
+        let cached = toks(&[1, 2, 3, 4]);
+        let tokens = toks(&[1, 2, 3, 9]);
+        assert_eq!(reusable_prefix(&cached, &tokens, Some(5)), 3);
+        assert_eq!(reusable_prefix(&cached, &tokens, Some(4)), 0);
     }
 }

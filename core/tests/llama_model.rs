@@ -6,7 +6,8 @@ use common::store;
 use translatte_core::model_store::ModelStore;
 use translatte_core::translate::batch::BatchTranslator;
 use translatte_core::translate::llama::LlamaGenerator;
-use translatte_core::translate::Translator;
+use translatte_core::translate::prompt::build_prompt;
+use translatte_core::translate::{TextGenerator, Translator};
 
 fn translate(store: &ModelStore, blocks: &[&str], src: &str, tgt: &str) -> Vec<Option<String>> {
     let generator =
@@ -42,6 +43,40 @@ fn translates_with_translategemma() {
         "en",
     );
     assert!(lower(&fr[0]).contains("coffee"), "{fr:?}");
+}
+
+#[test]
+fn prefix_cache_matches_uncached_generation() {
+    let Some(store) = store() else {
+        eprintln!("TRANSLATTE_MODELS not set; skipping");
+        return;
+    };
+    let m = store.manifest();
+    let prompts: Vec<_> = [
+        ("ja", "en", "非常口"),
+        ("ja", "en", "非常口はこちらです"),
+        ("ko", "en", "1. 출구\n2. 화장실"),
+        ("ko", "en", "1. 출구\n2. 화장실"),
+        ("ko", "fr", "출구"),
+        ("ja", "en", "禁煙"),
+    ]
+    .iter()
+    .map(|(s, t, text)| build_prompt(m.language(s).unwrap(), m.language(t).unwrap(), text))
+    .collect();
+    let path = store.model_file("translator", "model.gguf").unwrap();
+    let run = |cache: bool| {
+        let mut g = LlamaGenerator::load(&path)
+            .unwrap()
+            .with_prefix_cache(cache);
+        prompts
+            .iter()
+            .map(|p| g.generate(p, 64).unwrap().text)
+            .collect::<Vec<_>>()
+    };
+    let uncached = run(false);
+    let cached = run(true);
+    eprintln!("{cached:?}");
+    assert_eq!(cached, uncached);
 }
 
 #[test]
