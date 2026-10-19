@@ -101,20 +101,20 @@ fn main() -> Result<()> {
             eprintln!("loaded models in {:.2?}", t0.elapsed());
             let img = image::open(&image)?.to_rgb8();
             let t1 = Instant::now();
-            let mut last = String::new();
-            let regions = pipeline.run(&img, src, tgt, &mut |s: Stage| {
-                let name = format!("{:?}", s)
-                    .split([' ', '{'])
-                    .next()
-                    .unwrap_or_default()
-                    .to_string();
+            let mut last = "";
+            let output_data = pipeline.run(&img, src, tgt, &mut |s: Stage| {
+                let name = s.name();
                 if name != last {
                     eprintln!("[{:>8.2?}] {name}", t1.elapsed());
                     last = name;
                 }
             })?;
+            let regions = &output_data.regions;
             eprintln!("[{:>8.2?}] done: {} regions", t1.elapsed(), regions.len());
-            let json_text = serde_json::to_string_pretty(&regions)?;
+            if let Some(e) = &output_data.translation_error {
+                eprintln!("translation failed: {e}");
+            }
+            let json_text = serde_json::to_string_pretty(&output_data)?;
             match json {
                 Some(p) => {
                     if let Some(dir) = p.parent() {
@@ -125,7 +125,7 @@ fn main() -> Result<()> {
                 None => println!("{json_text}"),
             }
             let mut rendered = img.clone();
-            draw::Renderer::new().draw_regions(&mut rendered, &regions);
+            draw::Renderer::new().draw_regions(&mut rendered, regions);
             if let Some(dir) = output.parent() {
                 std::fs::create_dir_all(dir)?;
             }

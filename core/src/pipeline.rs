@@ -28,6 +28,22 @@ pub enum Stage {
     Translating { done: usize, total: usize },
 }
 
+impl Stage {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Stage::Detecting => "Detecting",
+            Stage::Recognizing { .. } => "Recognizing",
+            Stage::Translating { .. } => "Translating",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PipelineOutput {
+    pub regions: Vec<TranslatedRegion>,
+    pub translation_error: Option<String>,
+}
+
 pub struct Pipeline<D, R, T> {
     detector: D,
     recognizer: R,
@@ -66,26 +82,30 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         src: &Language,
         tgt: &Language,
         on_stage: &mut dyn FnMut(Stage),
-    ) -> Result<Vec<TranslatedRegion>> {
+    ) -> Result<PipelineOutput> {
         let mut blocks = group_lines(self.ocr(img, on_stage)?, src);
         blocks.retain(|b| !b.text.trim().is_empty());
         let texts: Vec<String> = blocks.iter().map(|b| b.text.clone()).collect();
-        let translations = match &mut self.translator {
-            Some(t) => {
-                let ranges = chunk_ranges(&texts);
-                let mut out = Vec::with_capacity(texts.len());
-                for (i, range) in ranges.iter().enumerate() {
-                    on_stage(Stage::Translating {
-                        done: i,
-                        total: ranges.len(),
-                    });
-                    out.extend(t.translate(&texts[range.clone()], src, tgt)?);
+        let mut translation_error = None;
+        let mut translations = Vec::with_capacity(texts.len());
+        if let Some(t) = &mut self.translator {
+            let ranges = chunk_ranges(&texts);
+            for (i, range) in ranges.iter().enumerate() {
+                on_stage(Stage::Translating {
+                    done: i,
+                    total: ranges.len(),
+                });
+                match t.translate(&texts[range.clone()], src, tgt) {
+                    Ok(out) => translations.extend(out),
+                    Err(e) => {
+                        translation_error = Some(e.to_string());
+                        break;
+                    }
                 }
-                out
             }
-            None => vec![None; texts.len()],
-        };
-        Ok(blocks
+        }
+        translations.resize(texts.len(), None);
+        let regions = blocks
             .into_iter()
             .zip(translations)
             .map(|(b, translated_text)| {
@@ -99,7 +119,11 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
                     angle: hints.angle,
                 }
             })
-            .collect())
+            .collect();
+        Ok(PipelineOutput {
+            regions,
+            translation_error,
+        })
     }
 }
 
@@ -172,7 +196,8 @@ mod tests {
         let mut stages = Vec::new();
         let out = p
             .run(&img, &lang(), &lang(), &mut |s| stages.push(s))
-            .unwrap();
+            .unwrap()
+            .regions;
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].source_text, "sortie");
         assert_eq!(out[0].translated_text.as_deref(), Some("SORTIE"));
@@ -198,7 +223,7 @@ mod tests {
             FakeRec(vec![("   ", 0.9), ("sortie", 0.9)], 0),
             Some(Upper),
         );
-        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap().regions;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].source_text, "sortie");
     }
@@ -211,7 +236,41 @@ mod tests {
             FakeRec(vec![("sortie", 0.9)], 0),
             None,
         );
-        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap().regions;
         assert_eq!(out[0].translated_text, None);
+    }
+
+    struct FailAfter(usize);
+    impl Translator for FailAfter {
+        fn translate(
+            &mut self,
+            blocks: &[String],
+            _s: &Language,
+            _t: &Language,
+        ) -> Result<Vec<Option<String>>> {
+            if self.0 == 0 {
+                return Err(crate::TranslatteError::Translate("boom".into()));
+            }
+            self.0 -= 1;
+            Ok(blocks.iter().map(|b| Some(b.to_uppercase())).collect())
+        }
+    }
+
+    #[test]
+    fn translation_error_keeps_ocr_results() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let long = "x".repeat(500);
+        let long: &'static str = Box::leak(long.into_boxed_str());
+        let mut p = Pipeline::new(
+            FakeDet(vec![quad(10.0), quad(100.0), quad(200.0)]),
+            FakeRec(vec![(long, 0.9), (long, 0.9), (long, 0.9)], 0),
+            Some(FailAfter(1)),
+        );
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(out.regions.len(), 3);
+        assert!(out.regions[0].translated_text.is_some());
+        assert!(out.regions[1].translated_text.is_none());
+        assert!(out.regions[2].translated_text.is_none());
+        assert!(out.translation_error.unwrap().contains("boom"));
     }
 }
