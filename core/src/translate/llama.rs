@@ -70,8 +70,15 @@ impl LlamaGenerator {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(|| {
-                // On big.LITTLE phones extra threads land on little cores and stall the rest.
-                let cap = if cfg!(target_os = "android") { 5 } else { 8 };
+                // On big.LITTLE phones extra threads land on little cores and stall the rest. iPhones
+                // have only 2 P-cores; the simulator runs on the Mac's cores.
+                let cap = if cfg!(target_os = "android") {
+                    5
+                } else if cfg!(all(target_os = "ios", not(target_abi = "sim"))) {
+                    2
+                } else {
+                    8
+                };
                 std::thread::available_parallelism()
                     .map(|n| n.get().min(cap) as i32)
                     .unwrap_or(4)
