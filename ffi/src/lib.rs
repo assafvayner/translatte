@@ -83,6 +83,8 @@ pub struct ModelInfo {
     /// Core models are required and can't be deleted; the rest are script packs.
     pub core: bool,
     pub size_bytes: u64,
+    /// Bytes already on disk, including partial downloads that will resume.
+    pub downloaded_bytes: u64,
     pub state: ModelState,
     /// Names of the source languages this pack reads.
     pub languages: Vec<String>,
@@ -172,16 +174,44 @@ pub trait DownloadListener: Send + Sync {
     fn on_progress(&self, model_id: String, done: u64, total: u64);
 }
 
-/// Points the Hugging Face client caches at an app-writable directory. Call once at startup,
-/// before any other thread runs, as it sets process environment variables.
+/// Points the Hugging Face client caches at an app-writable directory and turns off hf-xet's
+/// transfer telemetry. hf-hub builds its Xet session from the environment with no way to pass a
+/// config, so this sets process environment variables: call it once, as early as possible (on
+/// Android, from `Application.attachBaseContext`, before content providers start threads).
 #[cfg(feature = "download")]
 #[uniffi::export]
-pub fn set_cache_dir(dir: String) {
-    let dir = PathBuf::from(dir);
-    for (key, sub) in [("HF_HOME", "hf"), ("HF_XET_CACHE", "xet")] {
+pub fn configure_downloads(cache_dir: String) {
+    let dir = PathBuf::from(cache_dir);
+    let vars = [
+        ("HF_HOME", dir.join("hf").into_os_string()),
+        ("HF_XET_CACHE", dir.join("xet").into_os_string()),
+        ("HF_HUB_DISABLE_TELEMETRY", "1".into()),
+    ];
+    for (key, value) in vars {
         if std::env::var_os(key).is_none() {
-            std::env::set_var(key, dir.join(sub));
+            std::env::set_var(key, value);
         }
+    }
+}
+
+/// Cancels the [`Engine::download`] call it was passed to. Create one per call, before starting
+/// it, so a cancel can't be lost or leak into the next download.
+#[cfg(feature = "download")]
+#[derive(Default, uniffi::Object)]
+pub struct DownloadToken {
+    cancelled: AtomicBool,
+}
+
+#[cfg(feature = "download")]
+#[uniffi::export]
+impl DownloadToken {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
     }
 }
 
@@ -199,8 +229,6 @@ pub struct Engine {
     cached: Mutex<Option<Cached>>,
     #[cfg(feature = "download")]
     downloading: Mutex<()>,
-    #[cfg(feature = "download")]
-    cancel: AtomicBool,
 }
 
 #[uniffi::export]
@@ -213,8 +241,6 @@ impl Engine {
             cached: Mutex::new(None),
             #[cfg(feature = "download")]
             downloading: Mutex::new(()),
-            #[cfg(feature = "download")]
-            cancel: AtomicBool::new(false),
         }))
     }
 
@@ -229,6 +255,7 @@ impl Engine {
                     display_name: m.display_name.clone(),
                     core: m.kind == ModelKind::Core,
                     size_bytes: m.total_size(),
+                    downloaded_bytes: self.store.downloaded_bytes(&m.id)?,
                     state: self.store.state(&m.id)?.into(),
                     languages: pack_languages(manifest, m),
                 })
@@ -236,13 +263,16 @@ impl Engine {
             .collect()
     }
 
-    /// Deletes a script pack, unloading it first if it is in use.
-    pub fn delete_model(&self, id: String) -> Result<(), FfiError> {
+    /// Deletes a script pack, including partial downloads. If the pack is in use, all loaded
+    /// models (the translator too) are freed first and this returns true.
+    pub fn delete_model(&self, id: String) -> Result<bool, FfiError> {
         let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
-        if cached.as_ref().is_some_and(|c| c.script_pack == id) {
+        let unloaded = cached.as_ref().is_some_and(|c| c.script_pack == id);
+        if unloaded {
             *cached = None;
         }
-        Ok(self.store.delete(&id)?)
+        self.store.delete(&id)?;
+        Ok(unloaded)
     }
 
     pub fn core_installed(&self) -> Result<bool, FfiError> {
@@ -314,26 +344,21 @@ impl Engine {
 #[uniffi::export]
 impl Engine {
     /// Downloads the given models one after another, skipping files already installed and
-    /// resuming partial ones. Blocking; call it off the main thread. Returns
-    /// [`FfiError::Cancelled`] after [`Self::cancel_download`].
+    /// resuming partial ones. Waits for a download already running (e.g. one still unwinding after
+    /// a cancel) to finish first. Blocking; call it off the main thread. Returns
+    /// [`FfiError::Cancelled`] once `token` is cancelled.
     pub fn download(
         &self,
         model_ids: Vec<String>,
         listener: Arc<dyn DownloadListener>,
+        token: Arc<DownloadToken>,
     ) -> Result<(), FfiError> {
-        let _guard = self.downloading.try_lock().map_err(|_| FfiError::Failed {
-            reason: "a download is already running".into(),
-        })?;
-        self.cancel.store(false, Ordering::SeqCst);
+        let _guard = self.downloading.lock().unwrap_or_else(|e| e.into_inner());
         let ids: Vec<&str> = model_ids.iter().map(String::as_str).collect();
-        Downloader::new(&self.store)?.download_models_blocking(&ids, &self.cancel, |p| {
+        Downloader::new(&self.store)?.download_models_blocking(&ids, &token.cancelled, |p| {
             listener.on_progress(p.model_id, p.model_bytes_done, p.model_bytes_total)
         })?;
         Ok(())
-    }
-
-    pub fn cancel_download(&self) {
-        self.cancel.store(true, Ordering::SeqCst);
     }
 }
 
@@ -483,7 +508,7 @@ mod tests {
         );
         assert!(models.iter().all(|m| m.state == ModelState::NotInstalled));
         assert!(engine.delete_model("det".into()).is_err());
-        engine.delete_model("rec-latin".into()).unwrap();
+        assert!(!engine.delete_model("rec-latin".into()).unwrap());
     }
 
     #[cfg(feature = "download")]
@@ -499,7 +524,33 @@ mod tests {
         let dir = tempfile_dir();
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         let err = engine
-            .download(vec!["nope".into()], Arc::new(NoProgress))
+            .download(
+                vec!["nope".into()],
+                Arc::new(NoProgress),
+                DownloadToken::new(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("unknown model"), "{err}");
+    }
+
+    #[cfg(feature = "download")]
+    #[test]
+    fn cancelled_token_stops_download() {
+        let dir = tempfile_dir();
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let token = DownloadToken::new();
+        token.cancel();
+        let err = engine
+            .download(vec!["rec-latin".into()], Arc::new(NoProgress), token)
+            .unwrap_err();
+        assert!(matches!(err, FfiError::Cancelled), "{err}");
+        // A fresh token isn't affected by the earlier cancel.
+        let err = engine
+            .download(
+                vec!["nope".into()],
+                Arc::new(NoProgress),
+                DownloadToken::new(),
+            )
             .unwrap_err();
         assert!(err.to_string().contains("unknown model"), "{err}");
     }
