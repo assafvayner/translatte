@@ -42,7 +42,7 @@ pub fn load_pipeline(
     } else {
         None
     };
-    Ok(Pipeline::new(detector, recognizer, translator))
+    Ok(Pipeline::new(detector, recognizer, translator).with_script_pack(pack.as_str()))
 }
 
 #[cfg(test)]

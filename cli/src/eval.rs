@@ -77,7 +77,7 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
             .with_context(|| format!("opening {}", image_path.display()))?
             .to_rgb8();
         let got: Vec<String> = pipeline
-            .ocr(&img, &mut |_| {})?
+            .ocr(&img, src, &mut |_| {})?
             .into_iter()
             .map(|l| l.text)
             .collect();
