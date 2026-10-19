@@ -1,5 +1,6 @@
 pub mod charset;
 pub mod ctc;
+pub mod det_post;
 pub mod preprocess;
 
 use image::RgbImage;
