@@ -4,3 +4,6 @@
 /.superpowers
 /fixtures-cache
 /models-variants
+/ios/Translatte.xcodeproj
+/ios/Frameworks
+/ios/Translatte/Generated
