@@ -61,3 +61,18 @@ cargo test --workspace                                                    # unit
 TRANSLATTE_MODELS=$PWD/models-cache cargo test --workspace --release \
   --features translatte-core/llama                                        # + real-model tests
 ```
+
+## Android (emulator) smoke test
+
+Cross-compiles the CLI for `aarch64-linux-android` (API 31) and runs the full pipeline on a device or emulator over `adb`. Requires the Android NDK (found under `$ANDROID_HOME/ndk/`, or set `ANDROID_NDK_HOME`), `rustup target add aarch64-linux-android`, `cmake`, and `adb`.
+
+```bash
+scripts/android/build.sh      # -> target/aarch64-linux-android/release/{translatte,libonnxruntime.so,libc++_shared.so}
+emulator -avd pixel8 -memory 8192 -cores 6 -no-snapshot-save -no-boot-anim &   # needs >2GB RAM for the GGUF
+scripts/android/run.sh core/tests/data/hello_world.png en fr     # <image> <from> <to|-> [name]; "-" = OCR only
+```
+
+- ONNX Runtime: `ort`'s prebuilt binaries don't cover Android, so `build.sh` downloads the official `com.microsoft.onnxruntime:onnxruntime-android` 1.22.0 AAR from Maven Central (sha256-checked, cached in `target/android-deps/`) and links its `libonnxruntime.so` dynamically. Desktop builds are unchanged.
+- llama.cpp builds CPU-only via the NDK CMake toolchain (llama-cpp-sys-2 turns OpenMP off on Android).
+- `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and the translator unless OCR-only; unchanged sizes are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
+- The CLI loads fonts from `/system/fonts` on Android and releases the ONNX Runtime environment before exiting (otherwise bionic aborts in ORT's static destructors).
