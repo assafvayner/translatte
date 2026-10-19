@@ -64,10 +64,15 @@ fn split_marker(line: &str) -> Option<(usize, &str)> {
     let rest = t[end..].trim_start_matches('*');
     let mut chars = rest.chars();
     let body = match chars.next()? {
-        // A dot glued to more text is a decimal ("2.50"), not a list marker.
+        // A dot followed by a digit is a decimal ("2.50"), not a list marker.
         '.' | '．' => {
             let after = chars.as_str().trim_start_matches('*');
-            starts_with_space_or_empty(after).then_some(after)?
+            after
+                .chars()
+                .next()
+                .and_then(digit)
+                .is_none()
+                .then_some(after)?
         }
         ')' | '）' | '、' | ':' | '：' => chars.as_str().trim_start_matches('*'),
         c if c.is_whitespace() => {
@@ -174,7 +179,7 @@ mod tests {
 
     #[test]
     fn parse_accepts_paren_and_fullwidth_markers_and_continuations() {
-        let out = "1) Today's special\n2． Soy sauce ramen\n   850 yen\n3、Cash only";
+        let out = "1) Today's special\n2．Soy sauce ramen\n   850 yen\n3、Cash only";
         assert_eq!(
             parse_numbered(out, 3),
             Some(vec![
@@ -224,12 +229,17 @@ mod tests {
     }
 
     #[test]
-    fn dot_marker_requires_whitespace_or_end_of_line() {
+    fn dot_marker_followed_by_digit_is_text() {
         assert_eq!(
             parse_numbered("1. Price list\n2.50 euro\n2. Water", 2),
             Some(vec!["Price list 2.50 euro".into(), "Water".into()])
         );
-        assert_eq!(parse_numbered("1.\nA\n2．B", 2), None);
+        assert_eq!(parse_numbered("1.\nA\n2．５０", 2), None);
+        assert_eq!(parse_numbered("1.\nA\n2．B", 2), ab());
+        assert_eq!(
+            parse_numbered("1.Hello\n2.World", 2),
+            Some(vec!["Hello".into(), "World".into()])
+        );
         assert_eq!(parse_numbered("1.\nA\n2． B", 2), ab());
     }
 
