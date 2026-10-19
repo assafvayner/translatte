@@ -1,9 +1,13 @@
 use std::path::PathBuf;
+#[cfg(feature = "download")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+#[cfg(feature = "download")]
+use translatte_core::download::Downloader;
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
-use translatte_core::manifest::{Language, Manifest};
-use translatte_core::model_store::ModelStore;
+use translatte_core::manifest::{Language, Manifest, ModelEntry, ModelKind};
+use translatte_core::model_store::{InstallState, ModelStore};
 use translatte_core::pipeline::{PipelineOutput, Stage};
 use translatte_core::TranslatteError;
 
@@ -11,14 +15,20 @@ uniffi::setup_scaffolding!();
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum FfiError {
-    #[error("{message}")]
-    Failed { message: String },
+    // Not `message`: in Kotlin that would clash with `Throwable.message`.
+    #[error("{reason}")]
+    Failed { reason: String },
+    #[error("cancelled")]
+    Cancelled,
 }
 
 impl From<TranslatteError> for FfiError {
     fn from(e: TranslatteError) -> Self {
-        Self::Failed {
-            message: e.to_string(),
+        match e {
+            TranslatteError::Cancelled => Self::Cancelled,
+            e => Self::Failed {
+                reason: e.to_string(),
+            },
         }
     }
 }
@@ -26,7 +36,7 @@ impl From<TranslatteError> for FfiError {
 impl From<image::ImageError> for FfiError {
     fn from(e: image::ImageError) -> Self {
         Self::Failed {
-            message: format!("could not decode image: {e}"),
+            reason: format!("could not decode image: {e}"),
         }
     }
 }
@@ -46,6 +56,36 @@ impl From<&Language> for LanguageInfo {
             rtl: l.rtl,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ModelState {
+    NotInstalled,
+    Installed,
+    /// Some files are missing or have the wrong size, e.g. after an interrupted download.
+    Incomplete,
+}
+
+impl From<InstallState> for ModelState {
+    fn from(s: InstallState) -> Self {
+        match s {
+            InstallState::NotInstalled => Self::NotInstalled,
+            InstallState::Installed => Self::Installed,
+            InstallState::Corrupt => Self::Incomplete,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ModelInfo {
+    pub id: String,
+    pub display_name: String,
+    /// Core models are required and can't be deleted; the rest are script packs.
+    pub core: bool,
+    pub size_bytes: u64,
+    pub state: ModelState,
+    /// Names of the source languages this pack reads.
+    pub languages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
@@ -125,6 +165,26 @@ fn report(listener: &Option<Arc<dyn ProgressListener>>, stage: Stage) {
     l.on_stage(stage.name().to_string(), done, total);
 }
 
+#[cfg(feature = "download")]
+#[uniffi::export(with_foreign)]
+pub trait DownloadListener: Send + Sync {
+    /// Byte progress within one model; `done` can drop back to 0 if a file restarts.
+    fn on_progress(&self, model_id: String, done: u64, total: u64);
+}
+
+/// Points the Hugging Face client caches at an app-writable directory. Call once at startup,
+/// before any other thread runs, as it sets process environment variables.
+#[cfg(feature = "download")]
+#[uniffi::export]
+pub fn set_cache_dir(dir: String) {
+    let dir = PathBuf::from(dir);
+    for (key, sub) in [("HF_HOME", "hf"), ("HF_XET_CACHE", "xet")] {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, dir.join(sub));
+        }
+    }
+}
+
 struct Cached {
     script_pack: String,
     translate: bool,
@@ -137,6 +197,10 @@ struct Cached {
 pub struct Engine {
     store: ModelStore,
     cached: Mutex<Option<Cached>>,
+    #[cfg(feature = "download")]
+    downloading: Mutex<()>,
+    #[cfg(feature = "download")]
+    cancel: AtomicBool,
 }
 
 #[uniffi::export]
@@ -147,7 +211,38 @@ impl Engine {
         Ok(Arc::new(Self {
             store: ModelStore::new(manifest, PathBuf::from(models_dir)),
             cached: Mutex::new(None),
+            #[cfg(feature = "download")]
+            downloading: Mutex::new(()),
+            #[cfg(feature = "download")]
+            cancel: AtomicBool::new(false),
         }))
+    }
+
+    pub fn models(&self) -> Result<Vec<ModelInfo>, FfiError> {
+        let manifest = self.store.manifest();
+        manifest
+            .models
+            .iter()
+            .map(|m| {
+                Ok(ModelInfo {
+                    id: m.id.clone(),
+                    display_name: m.display_name.clone(),
+                    core: m.kind == ModelKind::Core,
+                    size_bytes: m.total_size(),
+                    state: self.store.state(&m.id)?.into(),
+                    languages: pack_languages(manifest, m),
+                })
+            })
+            .collect()
+    }
+
+    /// Deletes a script pack, unloading it first if it is in use.
+    pub fn delete_model(&self, id: String) -> Result<(), FfiError> {
+        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        if cached.as_ref().is_some_and(|c| c.script_pack == id) {
+            *cached = None;
+        }
+        Ok(self.store.delete(&id)?)
     }
 
     pub fn core_installed(&self) -> Result<bool, FfiError> {
@@ -215,6 +310,33 @@ impl Engine {
     }
 }
 
+#[cfg(feature = "download")]
+#[uniffi::export]
+impl Engine {
+    /// Downloads the given models one after another, skipping files already installed and
+    /// resuming partial ones. Blocking; call it off the main thread. Returns
+    /// [`FfiError::Cancelled`] after [`Self::cancel_download`].
+    pub fn download(
+        &self,
+        model_ids: Vec<String>,
+        listener: Arc<dyn DownloadListener>,
+    ) -> Result<(), FfiError> {
+        let _guard = self.downloading.try_lock().map_err(|_| FfiError::Failed {
+            reason: "a download is already running".into(),
+        })?;
+        self.cancel.store(false, Ordering::SeqCst);
+        let ids: Vec<&str> = model_ids.iter().map(String::as_str).collect();
+        Downloader::new(&self.store)?.download_models_blocking(&ids, &self.cancel, |p| {
+            listener.on_progress(p.model_id, p.model_bytes_done, p.model_bytes_total)
+        })?;
+        Ok(())
+    }
+
+    pub fn cancel_download(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+}
+
 impl Engine {
     /// A panic mid-run can leave the cached pipeline in a bad state (e.g. llama.cpp's KV cache
     /// half-updated), so a poisoned lock drops it rather than reusing it.
@@ -246,6 +368,44 @@ impl Engine {
             });
         }
         Ok(&mut cached.as_mut().expect("pipeline loaded above").pipeline)
+    }
+}
+
+fn pack_languages(manifest: &Manifest, model: &ModelEntry) -> Vec<String> {
+    manifest
+        .languages
+        .iter()
+        .filter(|l| l.script_pack.as_deref() == Some(model.id.as_str()))
+        .map(|l| l.name.clone())
+        .collect()
+}
+
+/// JNI entry points for the Android app, outside UniFFI.
+#[cfg(target_os = "android")]
+mod android {
+    use jni::errors::ThrowRuntimeExAndDefault;
+    use jni::objects::{JClass, JObject};
+    use jni::{jni_mangle, EnvUnowned};
+
+    /// Routes Rust `tracing` output to logcat and hands the app context to
+    /// rustls-platform-verifier, which checks TLS certificates through Android's trust manager.
+    /// Must run once, before the first download.
+    #[jni_mangle("co.huggingface.translatte.Platform")]
+    pub fn init<'caller>(
+        mut env: EnvUnowned<'caller>,
+        _class: JClass<'caller>,
+        context: JObject<'caller>,
+    ) {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(paranoid_android::layer("translatte"))
+            .try_init();
+        env.with_env(|env| rustls_platform_verifier::android::init_with_env(env, context))
+            .resolve::<ThrowRuntimeExAndDefault>();
     }
 }
 
@@ -305,6 +465,43 @@ mod tests {
         assert!(!engine.core_installed().unwrap());
         assert!(engine.source_languages().unwrap().is_empty());
         assert!(engine.target_languages().iter().any(|l| l.code == "en"));
+    }
+
+    #[test]
+    fn lists_models_with_pack_languages() {
+        let dir = tempfile_dir();
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let models = engine.models().unwrap();
+        let det = models.iter().find(|m| m.id == "det").unwrap();
+        assert!(det.core && det.languages.is_empty());
+        let latin = models.iter().find(|m| m.id == "rec-latin").unwrap();
+        assert!(!latin.core);
+        assert!(
+            latin.languages.iter().any(|l| l == "French"),
+            "{:?}",
+            latin.languages
+        );
+        assert!(models.iter().all(|m| m.state == ModelState::NotInstalled));
+        assert!(engine.delete_model("det".into()).is_err());
+        engine.delete_model("rec-latin".into()).unwrap();
+    }
+
+    #[cfg(feature = "download")]
+    struct NoProgress;
+    #[cfg(feature = "download")]
+    impl DownloadListener for NoProgress {
+        fn on_progress(&self, _: String, _: u64, _: u64) {}
+    }
+
+    #[cfg(feature = "download")]
+    #[test]
+    fn download_reports_unknown_models() {
+        let dir = tempfile_dir();
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let err = engine
+            .download(vec!["nope".into()], Arc::new(NoProgress))
+            .unwrap_err();
+        assert!(err.to_string().contains("unknown model"), "{err}");
     }
 
     #[test]

@@ -62,7 +62,7 @@ final class TranslatorModel: ObservableObject {
     func reload() {
         do {
             guard let url = Bundle.main.url(forResource: "manifest", withExtension: "json") else {
-                throw FfiError.Failed(message: "manifest.json missing from app bundle")
+                throw FfiError.Failed(reason: "manifest.json missing from app bundle")
             }
             try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
             if !usesHostModels {
