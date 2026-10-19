@@ -32,4 +32,4 @@ Not covered (no suitable real-photo dataset with transcriptions found on the Hub
 
 Because the images and ground truth are third-party and the Nexdata/Hindi terms are unclear, nothing from them is committed; only the downloader is.
 
-Known limits: word-level sources (ar, hi, en) make the score sensitive to how the detector splits or merges words, and `interfaze-ai/hindi-scene-text` images are squashed to 512x512.
+Known limits: Arabic CER is currently invalid because of a known recognizer visual-order bug (output is reversed; being fixed in core), and `pt` and `ja` have too few samples to be meaningful. Also, word-level sources (ar, hi, en) make the score sensitive to how the detector splits or merges words, and `interfaze-ai/hindi-scene-text` images are squashed to 512x512.

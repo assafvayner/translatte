@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import io
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -133,6 +134,7 @@ def bbox(points):
 
 
 def save(img, name, lang, lines, out_dir):
+    name = re.sub(r"[^\w.-]", "_", name)
     img = ImageOps.exif_transpose(img).convert("RGB")
     img.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
     img.save(out_dir / f"{name}.jpg", quality=90)
@@ -244,7 +246,10 @@ def main():
     ap.add_argument("--out", type=Path, default=ROOT / "fixtures-cache")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    for stale in [*args.out.glob("*.jpg"), *args.out.glob("*.png"), *args.out.glob("*.json")]:
+        stale.unlink()
     quotas = {lang: PER_LANG.get(lang, DEFAULT_PER_LANG) for lang in NEXDATA_LANGS.values()}
+    # Nexdata supplies at most 4 Hindi images; the rest of the hi quota is filled from hindi-scene-text.
     quotas["hi"] = 4
     totals = fetch_nexdata(args.out, quotas)
     totals["hi"] = totals.get("hi", 0) + fetch_hindi(args.out, PER_LANG["hi"] - totals.get("hi", 0))
