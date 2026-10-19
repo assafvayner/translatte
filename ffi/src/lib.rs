@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 #[cfg(feature = "download")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "download")]
+use std::sync::TryLockError;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 #[cfg(feature = "download")]
@@ -264,9 +266,20 @@ impl Engine {
     }
 
     /// Deletes a script pack, including partial downloads. If the pack is in use, all loaded
-    /// models (the translator too) are freed first and this returns true.
+    /// models (the translator too) are freed first and this returns true. Fails while a download
+    /// is running, which could otherwise write the pack again.
     pub fn delete_model(&self, id: String) -> Result<bool, FfiError> {
-        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(feature = "download")]
+        let _downloading = match self.downloading.try_lock() {
+            Ok(guard) => guard,
+            Err(TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                return Err(FfiError::Failed {
+                    reason: "Can't delete while a download is running. Cancel it first.".into(),
+                })
+            }
+        };
+        let mut cached = self.lock_cached();
         let unloaded = cached.as_ref().is_some_and(|c| c.script_pack == id);
         if unloaded {
             *cached = None;
@@ -516,6 +529,18 @@ mod tests {
     #[cfg(feature = "download")]
     impl DownloadListener for NoProgress {
         fn on_progress(&self, _: String, _: u64, _: u64) {}
+    }
+
+    #[cfg(feature = "download")]
+    #[test]
+    fn delete_is_refused_while_downloading() {
+        let dir = tempfile_dir();
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let downloading = engine.downloading.lock().unwrap();
+        let err = engine.delete_model("rec-latin".into()).unwrap_err();
+        assert!(err.to_string().contains("download is running"), "{err}");
+        drop(downloading);
+        assert!(!engine.delete_model("rec-latin".into()).unwrap());
     }
 
     #[cfg(feature = "download")]

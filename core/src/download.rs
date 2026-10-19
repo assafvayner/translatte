@@ -122,6 +122,10 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Xet-backed files arrive in order while many byte ranges download in parallel, so the first chunk
 /// can take minutes on a slow link even though data is flowing; restarting then throws that away.
 const FIRST_CHUNK_TIMEOUT: Duration = Duration::from_secs(600);
+/// Attempts in a row without progress that wait [`FIRST_CHUNK_TIMEOUT`] for the first chunk; later
+/// ones wait [`IDLE_TIMEOUT`], so a link that's dead from the start fails in about 20 minutes rather
+/// than 50.
+const LONG_FIRST_CHUNK_ATTEMPTS: u32 = 2;
 const CANCEL_POLL: Duration = Duration::from_millis(200);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 /// Upper bound on a source file that is parsed rather than stored (e.g. `inference.yml`).
@@ -242,9 +246,14 @@ impl<'a> Downloader<'a> {
         loop {
             check_cancel(cancel)?;
             let before = part_len(&part)?;
+            let first_chunk_timeout = if stalled < LONG_FIRST_CHUNK_ATTEMPTS {
+                self.first_chunk_timeout
+            } else {
+                self.idle_timeout
+            };
             let failure = if before < f.size {
                 match self
-                    .transfer(entry, f, &part, before, cancel, reporter)
+                    .transfer(entry, f, &part, first_chunk_timeout, cancel, reporter)
                     .await
                 {
                     Ok(()) => None,
@@ -275,17 +284,18 @@ impl<'a> Downloader<'a> {
         }
     }
 
-    /// Requests `have..size` and appends it to the `.part`, or rewrites the `.part` from the
-    /// start when the server ignores the range.
+    /// Requests the rest of the file after the `.part` and appends it, or rewrites the `.part` from
+    /// the start when the server ignores the range.
     async fn transfer(
         &self,
         entry: &ModelEntry,
         f: &ModelFile,
         part: &Path,
-        mut have: u64,
+        first_chunk_timeout: Duration,
         cancel: &AtomicBool,
         reporter: &mut Reporter<'_>,
     ) -> Result<()> {
+        let mut have = part_len(part)?;
         let opened = self
             .watch(
                 self.source
@@ -301,7 +311,7 @@ impl<'a> Downloader<'a> {
         } else {
             OpenOptions::new().create(true).append(true).open(part)?
         };
-        let mut timeout = self.first_chunk_timeout;
+        let mut timeout = first_chunk_timeout;
         while have < f.size {
             let Some(chunk) = self.watch_for(stream.next(), timeout, cancel).await? else {
                 break;
@@ -1030,8 +1040,11 @@ PostProcess:
         assert!(matches!(r, Err(TranslatteError::Download(_))), "{r:?}");
         assert_eq!(requests(&fx).len(), MAX_STALLED_ATTEMPTS as usize);
         let waited = rt.block_on(async move { start.elapsed() });
+        let timeouts = FIRST_CHUNK_TIMEOUT * LONG_FIRST_CHUNK_ATTEMPTS
+            + IDLE_TIMEOUT * (MAX_STALLED_ATTEMPTS - LONG_FIRST_CHUNK_ATTEMPTS);
+        assert!(waited >= timeouts, "{waited:?}");
         assert!(
-            waited >= FIRST_CHUNK_TIMEOUT * MAX_STALLED_ATTEMPTS,
+            waited < timeouts + RETRY_DELAY * MAX_STALLED_ATTEMPTS.pow(2),
             "{waited:?}"
         );
     }
