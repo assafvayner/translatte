@@ -45,7 +45,9 @@ fi
 export ORT_LIB_LOCATION="$ORT_DIR/lib" ORT_PREFER_DYNAMIC_LINK=1
 
 cd "$ROOT"
-cargo build -p translatte-cli --release --target "$TARGET" "$@"
+# OpenSSL-backed TLS: the default rustls verifier needs JNI, which a bare `adb shell` binary lacks.
+# Test-only; the app keeps rustls (see README "Android"). OpenSSL is built from source (perl, make).
+cargo build -p translatte-cli --release --target "$TARGET" --no-default-features --features tls-native "$@"
 
 OUT="$ROOT/target/$TARGET/release"
 cp "$ORT_DIR/lib/libonnxruntime.so" "$OUT/"
