@@ -12,7 +12,8 @@
         android:name=".TranslatteApp"
         android:label="@string/app_name"
         android:icon="@android:drawable/ic_menu_camera"
-        android:largeHeap="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity

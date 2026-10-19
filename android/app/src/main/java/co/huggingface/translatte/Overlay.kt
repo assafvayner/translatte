@@ -39,7 +39,7 @@ fun OverlayImage(
     modifier: Modifier = Modifier,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
-    val regions = result?.regions.orEmpty().filter { it.translatedText != null }.map(::Box)
+    val regions = remember(result) { result?.regions.orEmpty().filter { it.translatedText != null }.map(::Box) }
     Canvas(
         modifier.pointerInput(regions) {
             detectTapGestures { tap ->
@@ -75,7 +75,17 @@ private class Box(val region: Region) {
     val cx = c.sumOf { it.x.toDouble() }.toFloat() / c.size
     val cy = c.sumOf { it.y.toDouble() }.toFloat() / c.size
 
+    private val background = Paint().apply { color = region.background.argb() }
+
+    /** The fitted text for the last on-screen box size; refitting only happens on resize. */
+    private var layout: Pair<Pair<Float, Float>, StaticLayout>? = null
+
     private fun dist(a: Int, b: Int) = hypot(c[a].x - c[b].x, c[a].y - c[b].y)
+
+    private fun layoutFor(w: Float, h: Float): StaticLayout {
+        layout?.let { (size, l) -> if (size == (w to h)) return l }
+        return fitText(region.translatedText.orEmpty(), region.foreground.argb(), w, h).also { layout = (w to h) to it }
+    }
 
     fun contains(p: Offset): Boolean {
         val dx = p.x - cx
@@ -93,8 +103,8 @@ private class Box(val region: Region) {
         canvas.save()
         canvas.translate(fit.left + cx * fit.scale, fit.top + cy * fit.scale)
         canvas.rotate(Math.toDegrees(region.angle.toDouble()).toFloat())
-        canvas.drawRect(-w / 2, -h / 2, w / 2, h / 2, Paint().apply { color = region.background.argb() })
-        val layout = fitText(region.translatedText.orEmpty(), region.foreground.argb(), w - 2 * pad, h - 2 * pad)
+        canvas.drawRect(-w / 2, -h / 2, w / 2, h / 2, background)
+        val layout = layoutFor(w - 2 * pad, h - 2 * pad)
         canvas.translate(-w / 2 + pad, -layout.height / 2f)
         layout.draw(canvas)
         canvas.restore()
