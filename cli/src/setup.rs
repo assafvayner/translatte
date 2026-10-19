@@ -22,7 +22,7 @@ pub fn build_pipeline(
 ) -> Result<LoadedPipeline> {
     load_pipeline(store, src, translate).map_err(|e| match e {
         TranslatteError::ModelNotInstalled(id) => anyhow::anyhow!(
-            "model {id} is not installed in {}; run `uv run scripts/fetch_models.py`",
+            "model {id} is not installed in {}; run `translatte fetch`",
             store.root().display()
         ),
         e => e.into(),
