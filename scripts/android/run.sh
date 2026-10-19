@@ -25,7 +25,7 @@ print(next((l.get("script_pack") or "" for l in m["languages"] if l["code"] == s
 IDS=(det "$PACK")
 [[ "$TO" == "-" ]] || IDS+=(translator)
 for id in "${IDS[@]}"; do
-  [[ -d "$MODELS/$id" ]] || { echo "model dir missing: $MODELS/$id (run scripts/fetch_models.py)" >&2; exit 1; }
+  [[ -d "$MODELS/$id" ]] || { echo "model dir missing: $MODELS/$id (run: translatte fetch)" >&2; exit 1; }
 done
 
 push() {
