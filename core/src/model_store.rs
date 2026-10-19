@@ -97,11 +97,28 @@ impl ModelStore {
         PathBuf::from(p)
     }
 
-    /// Verifies `<file>.part` and atomically renames it into place; a corrupt `.part` is deleted.
+    /// Verifies `<file>.part` and atomically renames it into place.
+    ///
+    /// A `.part` shorter than expected is kept (`Incomplete`) so the download can resume; a
+    /// full-size or oversize `.part` that fails the hash is deleted. Assumes a single writer per
+    /// file (one download job per model); concurrent commits of the same file are not supported.
     pub fn commit_download(&self, file: &ModelFile) -> Result<()> {
         let part = self.part_path(file);
-        if !part.exists() {
-            return Err(TranslatteError::ModelNotInstalled(file.path.clone()));
+        let have = match std::fs::metadata(&part) {
+            Ok(m) => m.len(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(TranslatteError::PartMissing {
+                    path: file.path.clone(),
+                })
+            }
+            Err(e) => return Err(e.into()),
+        };
+        if have < file.size {
+            return Err(TranslatteError::Incomplete {
+                path: file.path.clone(),
+                have,
+                want: file.size,
+            });
         }
         if !self.verify_file(file, &part)? {
             std::fs::remove_file(&part)?;
@@ -113,7 +130,15 @@ impl ModelStore {
         if let Some(dir) = dest.parent() {
             std::fs::create_dir_all(dir)?;
         }
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&part)?
+            .sync_all()?;
         std::fs::rename(&part, &dest)?;
+        #[cfg(unix)]
+        if let Some(dir) = dest.parent() {
+            File::open(dir)?.sync_all()?;
+        }
         Ok(())
     }
 
@@ -298,8 +323,36 @@ mod tests {
         let f = file(&s, "rec-latin", "dict.txt");
         assert!(matches!(
             s.commit_download(f),
-            Err(TranslatteError::ModelNotInstalled(_))
+            Err(TranslatteError::PartMissing { .. })
         ));
+    }
+
+    #[test]
+    fn commit_download_keeps_short_part_for_resume() {
+        let (_d, s) = store();
+        let f = file(&s, "rec-latin", "dict.txt");
+        write(&s, "rec-latin/dict.txt.part", "ab");
+        assert!(matches!(
+            s.commit_download(f),
+            Err(TranslatteError::Incomplete {
+                have: 2,
+                want: 3,
+                ..
+            })
+        ));
+        assert_eq!(std::fs::read_to_string(s.part_path(f)).unwrap(), "ab");
+    }
+
+    #[test]
+    fn commit_download_deletes_oversize_part() {
+        let (_d, s) = store();
+        let f = file(&s, "rec-latin", "dict.txt");
+        write(&s, "rec-latin/dict.txt.part", "abcd");
+        assert!(matches!(
+            s.commit_download(f),
+            Err(TranslatteError::ChecksumMismatch { .. })
+        ));
+        assert!(!s.part_path(f).exists());
     }
 
     #[test]
