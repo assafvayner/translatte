@@ -1,4 +1,6 @@
 pub mod batch;
+#[cfg(feature = "llama")]
+pub mod llama;
 pub mod prompt;
 
 use crate::manifest::Language;
