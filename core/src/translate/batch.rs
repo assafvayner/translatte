@@ -126,6 +126,7 @@ mod tests {
             script_pack: None,
             rtl: false,
             spaced: true,
+            prompt_name: None,
         }
     }
 

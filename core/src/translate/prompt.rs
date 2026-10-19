@@ -9,9 +9,13 @@ pub struct Prompt {
     pub suffix: String,
 }
 
+fn prompt_name(l: &Language) -> &str {
+    l.prompt_name.as_deref().unwrap_or(&l.name)
+}
+
 /// Renders TranslateGemma's chat template (see the model's chat_template.jinja). BOS is added by the tokenizer.
 pub fn build_prompt(src: &Language, tgt: &Language, text: &str) -> Prompt {
-    let (s, sc, t, tc) = (&src.name, &src.code, &tgt.name, &tgt.code);
+    let (s, sc, t, tc) = (prompt_name(src), &src.code, prompt_name(tgt), &tgt.code);
     Prompt {
         prefix: format!(
             "<start_of_turn>user\nYou are a professional {s} ({sc}) to {t} ({tc}) translator. Your goal is to \
@@ -123,6 +127,7 @@ mod tests {
             script_pack: None,
             rtl: false,
             spaced: true,
+            prompt_name: None,
         }
     }
 
@@ -142,6 +147,19 @@ mod tests {
              additional explanations or commentary. Please translate the following Japanese text into English:\n\n\n\
              こんにちは<end_of_turn>\n<start_of_turn>model\n"
         );
+    }
+
+    #[test]
+    fn prompt_uses_translategemma_language_name_when_set() {
+        let src = Language {
+            prompt_name: Some("Chinese".into()),
+            ..lang("zh-TW", "Chinese (Traditional)")
+        };
+        let p = build_prompt(&src, &lang("en", "English"), "出口");
+        assert!(p
+            .prefix
+            .contains("professional Chinese (zh-TW) to English (en)"));
+        assert!(!p.prefix.contains("Traditional"));
     }
 
     #[test]

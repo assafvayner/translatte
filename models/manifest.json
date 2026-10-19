@@ -412,7 +412,8 @@
       "name": "Chinese (Traditional)",
       "script_pack": "rec-cjk",
       "rtl": false,
-      "spaced": false
+      "spaced": false,
+      "prompt_name": "Chinese"
     },
     {
       "code": "ja",

@@ -50,6 +50,9 @@ pub struct Language {
     /// False for scripts written without spaces between words (zh, ja, th); controls how OCR lines are joined.
     #[serde(default = "default_true")]
     pub spaced: bool,
+    /// Name TranslateGemma's template uses for this language, when it differs from the display `name`.
+    #[serde(default)]
+    pub prompt_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +194,7 @@ pub(crate) mod tests {
         assert!(he.rtl);
         assert!(he.spaced);
         assert_eq!(he.script_pack, None);
+        assert_eq!(he.prompt_name, None);
     }
 
     #[test]
@@ -276,5 +280,10 @@ pub(crate) mod tests {
         let m = Manifest::from_json(&s).unwrap();
         assert!(m.model("rec-cjk").is_some());
         assert!(m.language("ja").unwrap().script_pack.is_some());
+        assert_eq!(
+            m.language("zh-TW").unwrap().prompt_name.as_deref(),
+            Some("Chinese")
+        );
+        assert_eq!(m.language("ja").unwrap().prompt_name, None);
     }
 }

@@ -55,6 +55,9 @@ REVISIONS = {
     "PaddlePaddle/te_PP-OCRv5_mobile_rec_onnx": "f1197c83430241c58c64b0952b3a80366d04eeba",
 }
 
+# Names TranslateGemma's chat template uses where they differ from our display name.
+PROMPT_NAMES = {"zh-TW": "Chinese"}
+
 # (code, name, script pack or None for target-only, rtl, spaced)
 LATIN = [
     ("fr", "French"), ("de", "German"), ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"),
@@ -156,6 +159,7 @@ def main() -> None:
                        "files": [file_entry(out, f"{pack}/inference.onnx"), file_entry(out, f"{pack}/dict.txt")]})
 
     languages = [{"code": c, "name": n, "script_pack": p, "rtl": rtl, "spaced": sp}
+                 | ({"prompt_name": PROMPT_NAMES[c]} if c in PROMPT_NAMES else {})
                  for c, n, p, rtl, sp in LANGUAGES]
     manifest = {"version": 1, "base_url": args.base_url, "models": models, "languages": languages}
     args.manifest.parent.mkdir(parents=True, exist_ok=True)

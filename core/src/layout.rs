@@ -241,6 +241,7 @@ mod tests {
             script_pack: None,
             rtl,
             spaced,
+            prompt_name: None,
         }
     }
 
