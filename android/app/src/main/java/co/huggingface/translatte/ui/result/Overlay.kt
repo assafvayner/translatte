@@ -7,7 +7,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,27 +17,36 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.toSize
 import uniffi.translatte_ffi.Region
 import uniffi.translatte_ffi.Rgb
 import uniffi.translatte_ffi.TranslationResult
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Draws the photo with each translated region painted over its source text. Regions whose index is
- * in [flipped] are left unpainted, showing the original. With [onToggle], each region is also a
- * tappable, accessible node: its label is the translation and its state the original text.
+ * in [flipped] are left unpainted, showing the original. With [onToggle], tapping a region toggles
+ * it, and each region is an accessible node: its label is the translation and its state the
+ * original text. Taps and [onDoubleTap] (in this layout's own coordinates) share one detector, so
+ * double-tapping on a region doesn't toggle it.
  */
 @Composable
 fun OverlayImage(
@@ -47,10 +56,28 @@ fun OverlayImage(
     modifier: Modifier = Modifier,
     flipped: Set<Int> = emptySet(),
     onToggle: ((Int) -> Unit)? = null,
+    onDoubleTap: ((Offset) -> Unit)? = null,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val boxes = remember(result) { result?.regions.orEmpty().filter { it.translatedText != null }.map(::RegionBox) }
-    BoxWithConstraints(modifier) {
+    val taps = if (onToggle == null && onDoubleTap == null) {
+        Modifier
+    } else {
+        Modifier.pointerInput(boxes, showOriginal, onToggle, onDoubleTap) {
+            detectTapGestures(
+                onDoubleTap = onDoubleTap,
+                onTap = { tap ->
+                    if (onToggle != null && !showOriginal) {
+                        val fit = Fit(bitmap, size.toSize())
+                        val p = Offset((tap.x - fit.left) / fit.scale, (tap.y - fit.top) / fit.scale)
+                        val i = boxes.indexOfLast { it.contains(p) }
+                        if (i >= 0) onToggle(i)
+                    }
+                },
+            )
+        }
+    }
+    BoxWithConstraints(modifier.then(taps)) {
         Canvas(Modifier.fillMaxSize()) {
             val fit = Fit(bitmap, size)
             drawImage(
@@ -83,12 +110,11 @@ fun OverlayImage(
                         .semantics {
                             contentDescription = box.region.translatedText.orEmpty()
                             stateDescription = box.region.sourceText
-                        }
-                        .clickable(
-                            interactionSource = null,
-                            indication = null,
-                            onClickLabel = if (i in flipped) "Show translation" else "Show original",
-                        ) { onToggle(i) },
+                            onClick(if (i in flipped) "Show translation" else "Show original") {
+                                onToggle(i)
+                                true
+                            }
+                        },
                 )
             }
         }
@@ -116,6 +142,15 @@ private class RegionBox(val region: Region) {
     private var layout: Pair<Pair<Float, Float>, StaticLayout>? = null
 
     private fun dist(a: Int, b: Int) = hypot(c[a].x - c[b].x, c[a].y - c[b].y)
+
+    fun contains(p: Offset): Boolean {
+        val dx = p.x - cx
+        val dy = p.y - cy
+        val a = -region.angle
+        val x = dx * cos(a) - dy * sin(a)
+        val y = dx * sin(a) + dy * cos(a)
+        return abs(x) <= width / 2 && abs(y) <= height / 2
+    }
 
     private fun layoutFor(w: Float, h: Float): StaticLayout {
         layout?.let { (size, l) -> if (size == (w to h)) return l }

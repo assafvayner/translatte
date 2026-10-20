@@ -3,7 +3,6 @@ package co.huggingface.translatte.ui.result
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -89,12 +88,6 @@ fun ResultScreen(
                             zoom.transform(centroid, pan, z)
                             gestured()
                         }
-                    }
-                    .pointerInput(image) {
-                        detectTapGestures(onDoubleTap = {
-                            zoom.doubleTap(it)
-                            gestured()
-                        })
                     },
             ) {
                 val viewport = Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
@@ -113,6 +106,10 @@ fun ResultScreen(
                     flipped = flipped,
                     onToggle = { i ->
                         flipped = if (i in flipped) flipped - i else flipped + i
+                        gestured()
+                    },
+                    onDoubleTap = { local ->
+                        zoom.doubleTap(local * zoom.scale + zoom.offset)
                         gestured()
                     },
                 )
