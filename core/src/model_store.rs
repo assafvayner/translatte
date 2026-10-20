@@ -348,12 +348,6 @@ impl ModelStore {
         Ok(false)
     }
 
-    pub fn target_languages(&self) -> Vec<&Language> {
-        let mut out: Vec<_> = self.manifest.languages.iter().collect();
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        out
-    }
-
     /// Model files are addressed by their file name inside the model's directory, e.g. ("rec-latin", "dict.txt").
     pub fn model_file(&self, id: &str, file_name: &str) -> Result<PathBuf> {
         let entry = self.entry(id)?;
