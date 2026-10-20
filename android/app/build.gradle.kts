@@ -76,7 +76,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("net.java.dev.jna:jna:5.15.0@aar")
+    implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("org.rustls:rustls-platform-verifier:$rustlsVerifierVersion")
 
     testImplementation("junit:junit:4.13.2")
