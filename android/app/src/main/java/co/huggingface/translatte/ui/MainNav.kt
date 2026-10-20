@@ -1,17 +1,11 @@
 package co.huggingface.translatte.ui
 
-import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,10 +14,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import co.huggingface.translatte.MainViewModel
 import co.huggingface.translatte.Phase
+import co.huggingface.translatte.ui.camera.CameraAccess
 import co.huggingface.translatte.ui.camera.CameraScreen
+import co.huggingface.translatte.ui.camera.cameraGranted
 import co.huggingface.translatte.ui.home.HomeScreen
 import co.huggingface.translatte.ui.home.LanguageBar
 import co.huggingface.translatte.ui.home.directionLabel
@@ -44,12 +39,9 @@ fun MainNav(
 ) {
     val context = LocalContext.current
     val hasCamera = remember { context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
-    fun cameraGranted() =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-
-    var screen by rememberSaveable { mutableStateOf(Nav.landing(hasCamera, cameraGranted(), prefs.cameraAsked)) }
+    var screen by rememberSaveable { mutableStateOf(Nav.landing(hasCamera, cameraGranted(context), prefs.cameraAsked)) }
     var resultOrigin by rememberSaveable { mutableStateOf(Screen.Home) }
-    var cameraHelp by rememberSaveable { mutableStateOf(false) }
+    var hintSeen by remember { mutableStateOf(prefs.resultHintSeen) }
     LaunchedEffect(screen) { onScreenChange(screen) }
     val back: () -> Unit = { Nav.back(screen, resultOrigin)?.let { screen = it } }
 
@@ -59,10 +51,6 @@ fun MainNav(
             resultOrigin = Screen.Home
             screen = Screen.Result
         }
-    }
-    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        prefs.cameraAsked = true
-        if (ok) screen = Screen.Camera else cameraHelp = true
     }
 
     val direction = directionLabel(vm.sourceLanguages, vm.targetLanguages, vm.sourceCode, vm.targetCode)
@@ -93,26 +81,27 @@ fun MainNav(
                 if (!ok) screen = Screen.Home
             },
         )
-        Screen.Home -> HomeScreen(
-            languageBar = languageBar,
-            lastImage = vm.image,
-            lastResult = vm.result,
-            working = vm.phase is Phase.Working,
-            memoryWarning = vm.memoryWarning,
-            hasCamera = hasCamera,
-            onCamera = {
-                if (cameraGranted()) screen = Screen.Camera else cameraPermission.launch(Manifest.permission.CAMERA)
-            },
-            onPhotos = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            onOpenResult = {
-                resultOrigin = Screen.Home
-                screen = Screen.Result
-            },
-            onLanguages = { screen = Screen.Languages },
-            onSettings = { screen = Screen.Settings },
-        )
+        Screen.Home -> CameraAccess(prefs, onOpen = { screen = Screen.Camera }) { onCamera ->
+            HomeScreen(
+                languageBar = languageBar,
+                lastImage = vm.lastSuccess?.image,
+                lastResult = vm.lastSuccess?.result,
+                working = vm.phase is Phase.Working,
+                memoryWarning = vm.memoryWarning,
+                hasCamera = hasCamera,
+                onCamera = onCamera,
+                onPhotos = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onOpenResult = {
+                    vm.reopenLast()
+                    resultOrigin = Screen.Home
+                    screen = Screen.Result
+                },
+                onLanguages = { screen = Screen.Languages },
+                onSettings = { screen = Screen.Settings },
+            )
+        }
         Screen.Result -> {
-            if (vm.image == null && vm.phase !is Phase.Working) {
+            if (!Nav.hasResult(vm.phase)) {
                 LaunchedEffect(Unit) { back() }
             } else {
                 ResultScreen(
@@ -120,8 +109,11 @@ fun MainNav(
                     result = vm.result,
                     phase = vm.phase,
                     direction = direction,
-                    hintSeen = prefs.resultHintSeen,
-                    onHintSeen = { prefs.resultHintSeen = true },
+                    hintSeen = hintSeen,
+                    onHintSeen = {
+                        hintSeen = true
+                        prefs.resultHintSeen = true
+                    },
                     onRetry = vm::retry,
                     onBack = back,
                 )
@@ -132,22 +124,5 @@ fun MainNav(
             languagesScreen(back)
         }
         Screen.Settings -> SettingsScreen(theme, onTheme, onBack = back)
-    }
-
-    if (cameraHelp) {
-        AlertDialog(
-            onDismissRequest = { cameraHelp = false },
-            title = { Text("Camera access is off") },
-            text = { Text("translatte needs the camera to photograph text. Allow it in Settings, or choose a photo instead.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    cameraHelp = false
-                    context.startActivity(
-                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
-                    )
-                }) { Text("Open Settings") }
-            },
-            dismissButton = { TextButton(onClick = { cameraHelp = false }) { Text("Not now") } },
-        )
     }
 }
