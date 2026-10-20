@@ -11,15 +11,21 @@ struct ModelsView: View {
 
     var body: some View {
         let free = model.freeBytes
-        List {
-            if setup {
-                Text("Translatte works offline once its models are on the phone. The text reader and translator are required; pick the scripts you want to read.")
+        ScrollView {
+            VStack(spacing: 16) {
+                if setup { hero }
+                Card(title: "Always included") {
+                    ForEach(model.models.filter(\.core), id: \.id) { row($0, free: free) }
+                }
+                Card(title: "Scripts to read") {
+                    ForEach(model.models.filter { !$0.core }, id: \.id) { row($0, free: free) }
+                }
             }
-            ForEach(model.models, id: \.id) { m in
-                row(m, free: free)
-            }
+            .padding(16)
         }
-        .navigationTitle(setup ? "Set up Translatte" : "Languages")
+        .background(Palette.background.ignoresSafeArea())
+        .tint(Palette.primary)
+        .navigationTitle(setup ? "" : "Languages")
         .safeAreaInset(edge: .bottom) { bottomBar(free: free) }
         .alert(
             "Download on cellular data?",
@@ -32,6 +38,22 @@ struct ModelsView: View {
         } message: { ids in
             Text("This downloads \(formatSize(model.bytesToDownload(ids))) over a metered connection.")
         }
+    }
+
+    private var hero: some View {
+        VStack(spacing: 8) {
+            LogoCup(size: 92)
+            Text("Welcome to translatte")
+                .font(.display(26))
+                .foregroundStyle(Palette.text)
+                .accessibilityAddTraits(.isHeader)
+            Text("Download the languages you read. After that, everything runs on your phone, with no internet needed.")
+                .font(.callout)
+                .foregroundStyle(Palette.textMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+        }
+        .padding(.top, 12)
     }
 
     private var wanted: [ModelInfo] {
@@ -57,36 +79,36 @@ struct ModelsView: View {
         if setup || downloads.busy || error != nil {
             VStack(spacing: 8) {
                 if let error {
-                    Text(error).foregroundStyle(.red)
+                    NoticeBanner(message: error)
                 }
                 if waiting {
-                    Text("Waiting for Wi-Fi to download.")
+                    Text("Waiting for Wi-Fi to download.").foregroundStyle(Palette.textMuted)
                 } else if queued {
-                    Text("Download queued.")
+                    Text("Download queued.").foregroundStyle(Palette.textMuted)
                 }
                 if downloads.busy {
-                    Button(role: .cancel, action: downloads.cancel) {
-                        Text("Cancel download").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
+                    Button("Cancel download", role: .cancel, action: downloads.cancel)
+                        .buttonStyle(BigButtonStyle(kind: .tonal))
                 } else if setup {
                     if needed > free {
-                        Text("Needs \(formatSize(needed)), only \(formatSize(free)) free").foregroundStyle(.red)
+                        Text("Needs \(formatSize(needed)), only \(formatSize(free)) free").foregroundStyle(Palette.error)
                     }
-                    Button {
+                    Button(needed > 0 ? "Download \(formatSize(needed))" : "Download") {
                         startDownload(wanted.map(\.id))
-                    } label: {
-                        Text(needed > 0 ? "Download (\(formatSize(needed)))" : "Download").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(BigButtonStyle(kind: .primary))
                     .disabled(wanted.isEmpty || !hasPack || needed > free)
+                    if free != .max {
+                        Text("Wi-Fi recommended · \(formatSize(free)) free on this phone")
+                            .font(.caption)
+                            .foregroundStyle(Palette.textMuted)
+                    }
                 }
             }
             .font(.callout)
             .multilineTextAlignment(.center)
-            .controlSize(.large)
-            .padding()
-            .background(.bar)
+            .padding(16)
+            .background(Palette.background.ignoresSafeArea(edges: .bottom))
         }
     }
 
@@ -100,7 +122,7 @@ struct ModelsView: View {
                 let label = HStack(spacing: 12) {
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                         .imageScale(.large)
-                        .foregroundStyle(toggleable ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(checked || toggleable ? Palette.primary : Palette.textMuted)
                     ModelLabel(model: m)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -136,11 +158,13 @@ struct ModelsView: View {
                     .controlSize(.small)
                 }
             }
+            .frame(minHeight: 44)
             if let progress {
                 ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                    .tint(Palette.primary)
                 Text(progress.done == 0 ? "Waiting for data…" : "\(formatSize(progress.done)) of \(formatSize(progress.total))")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.textMuted)
             }
         }
     }
@@ -151,14 +175,18 @@ private struct ModelLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(model.displayName).font(.headline)
-            Text(model.status).font(.caption).foregroundStyle(.secondary)
+            Text(model.displayName)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Palette.text)
             if !model.languages.isEmpty {
                 Text(model.languages.joined(separator: ", "))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.textMuted)
                     .lineLimit(2)
             }
+            Text(model.status)
+                .font(.caption)
+                .foregroundStyle(Palette.textMuted)
         }
     }
 }
