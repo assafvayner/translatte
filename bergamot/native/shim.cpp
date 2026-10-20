@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "common/logging.h"
+#include "translator/batch.h"
 #include "translator/parser.h"
 #include "translator/response_options.h"
 #include "translator/service.h"
@@ -48,6 +49,14 @@ char *copy(const std::string &s) {
 
 void fail(char **err, const char *message) {
   if (err != nullptr) *err = copy(message);
+}
+
+// A call that throws leaves the rest of its sentences queued on the model, holding callbacks into that
+// call's stack frame. Drop them so the next call on the model doesn't run them.
+void discard_pending(TranslationModel &model) {
+  Batch batch;
+  while (model.generateBatch(batch) > 0) {
+  }
 }
 
 // A YAML double-quoted scalar, so paths with spaces, colons or quotes survive the config parser.
@@ -96,7 +105,12 @@ extern "C" int bg_translate(bg_model *model, const char *const *texts, size_t n,
     std::vector<Response> responses;
     {
       std::lock_guard<std::mutex> lock(engine_mutex);
-      responses = engine().translateMultiple(model->model, std::move(sources), options);
+      try {
+        responses = engine().translateMultiple(model->model, std::move(sources), options);
+      } catch (...) {
+        discard_pending(*model->model);
+        throw;
+      }
     }
     if (responses.size() != n) {
       fail(err, "the translator returned a different number of texts");
