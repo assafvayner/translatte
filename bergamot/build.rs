@@ -57,8 +57,12 @@ fn main() {
             let min = std::env::var("IPHONEOS_DEPLOYMENT_TARGET").unwrap_or_else(|_| "17.0".into());
             cfg.define("CMAKE_SYSTEM_NAME", "iOS")
                 .define("CMAKE_OSX_ARCHITECTURES", "arm64")
+                // ruy's cpuinfo picks its ARM sources from this, and CMake leaves it empty for iOS.
+                .define("CMAKE_SYSTEM_PROCESSOR", "arm64")
                 .define("CMAKE_OSX_SYSROOT", sysroot)
                 .define("CMAKE_OSX_DEPLOYMENT_TARGET", min)
+                // Upstream installs its (unbuilt) CLI tools without a bundle destination.
+                .define("CMAKE_MACOSX_BUNDLE", "OFF")
                 // iOS 17 still runs on A12 phones, which lack the dot-product extension.
                 .define("BUILD_ARCH", arch.as_deref().unwrap_or("armv8-a"));
         }

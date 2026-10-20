@@ -29,8 +29,9 @@ if(SSPLIT_USE_INTERNAL_PCRE2)
   endif()
 
   # Set configure options for internal pcre2 depeding on compiler
-  if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    # jit compilation isn't supported by wasm, and iOS apps may not map executable memory
+  if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$" OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
+    # jit compilation isn't supported by wasm, iOS apps may not map executable memory, and on Android
+    # the JIT needs compiler-rt's __clear_cache, which Rust's linker invocation leaves out
     set(PCRE2_JIT_OPTION  "-DPCRE2_SUPPORT_JIT=OFF")
   else()
     set(PCRE2_JIT_OPTION  "-DPCRE2_SUPPORT_JIT=ON")
@@ -48,6 +49,8 @@ if(SSPLIT_USE_INTERNAL_PCRE2)
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
     ${PCRE2_JIT_OPTION}
+    -DPCRE2_BUILD_PCRE2GREP=OFF # Only the library is used; on iOS the tools would be app bundles
+    -DPCRE2_BUILD_TESTS=OFF
     -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} # Necessary for proper MacOS compilation
     -DCMAKE_CROSSCOMPILING_EMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR_WITH_SEMICOLON} # Necessary for proper MacOS compilation
     -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=true # Added for pybind11
