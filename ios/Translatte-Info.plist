@@ -21,6 +21,8 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Fraunces-SemiBold.ttf</string>
+		<string>Fraunces9pt-Regular.ttf</string>
+		<string>Fraunces9pt-SemiBold.ttf</string>
 	</array>
 </dict>
 </plist>

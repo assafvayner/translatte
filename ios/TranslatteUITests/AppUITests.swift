@@ -18,20 +18,20 @@ final class AppUITests: XCTestCase {
     func testThemeChoicePersistsAcrossLaunches() throws {
         var app = try XCUIApplication.withModels()
         app.buttons["settings-button"].tap()
-        var picker = app.segmentedControls["theme-picker"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 10))
-        picker.buttons["System"].tap()
-        picker.buttons["americano"].tap()
-        XCTAssertTrue(picker.buttons["americano"].isSelected)
+        XCTAssertTrue(app.buttons["theme-system"].waitForExistence(timeout: 10))
+        app.buttons["theme-system"].tap()
+        XCTAssertTrue(app.buttons["theme-system"].isSelected)
+        app.buttons["theme-americano"].tap()
+        XCTAssertTrue(app.waitUntil(app.buttons["theme-americano"], "isSelected == true"))
+        XCTAssertFalse(app.buttons["theme-system"].isSelected, "only the chosen row is checked")
         app.terminate()
 
         app = try XCUIApplication.withModels()
         app.buttons["settings-button"].tap()
-        picker = app.segmentedControls["theme-picker"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 10))
-        XCTAssertTrue(picker.buttons["americano"].isSelected)
-        picker.buttons["System"].tap()
-        XCTAssertTrue(app.staticTexts["About"].exists || app.staticTexts["ABOUT"].exists)
+        XCTAssertTrue(app.buttons["theme-americano"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["theme-americano"].isSelected)
+        app.buttons["theme-system"].tap()
+        XCTAssertTrue(app.staticTexts["ABOUT"].exists)
     }
 
     func testCameraShutterOpensTheResultAndBackReturnsToWhereItCameFrom() throws {
@@ -87,6 +87,29 @@ final class AppUITests: XCTestCase {
         XCTAssertTrue(app.element("from-picker").waitForExistence(timeout: 5))
         XCTAssertTrue(app.element("to-picker").exists)
         XCTAssertTrue(app.element("swap-languages").exists)
+        app.buttons["to-picker"].tap()
+        XCTAssertTrue(app.staticTexts["TRANSLATE TO"].waitForExistence(timeout: 5))
+    }
+
+    func testLanguagePickersAreDropdownsAndCloseOnSelect() throws {
+        let app = try XCUIApplication.withModels(["-source", "en", "-target", "de"])
+        XCTAssertTrue(app.element("home").waitForExistence(timeout: 30))
+        app.buttons["from-picker"].tap()
+        XCTAssertTrue(app.staticTexts["TRANSLATE FROM"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["language-en"].isSelected, "the current source is checked")
+        XCTAssertFalse(app.buttons["language-he"].exists, "From lists installed sources only (no Hebrew pack)")
+        app.buttons["language-en"].tap()
+        XCTAssertTrue(app.waitUntil(app.staticTexts["TRANSLATE FROM"], "exists == false"), "choosing closes the dropdown")
+
+        app.buttons["to-picker"].tap()
+        XCTAssertTrue(app.staticTexts["TRANSLATE TO"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["language-de"].isSelected)
+        XCTAssertTrue(app.buttons["language-he"].exists, "To lists every language")
+        let french = app.buttons["language-fr"]
+        if !french.isHittable { app.swipeUp() }
+        french.tap()
+        XCTAssertTrue(app.waitUntil(app.staticTexts["TRANSLATE TO"], "exists == false"))
+        XCTAssertEqual(app.buttons["to-picker"].value as? String, "French")
     }
 
     func testOriginalModeShowsThePhotoTextAndTranslatedBringsTheBoxesBack() throws {
@@ -96,14 +119,14 @@ final class AppUITests: XCTestCase {
         let region = app.element("region-0")
         XCTAssertTrue(region.waitForExistence(timeout: 300))
 
-        let mode = app.segmentedControls["result-mode"]
-        mode.buttons["Original"].tap()
+        app.buttons["result-mode-original"].tap()
+        XCTAssertTrue(app.buttons["result-mode-original"].isSelected)
         XCTAssertTrue(app.waitUntil(region, "exists == false"))
         let original = app.element("original-0")
         XCTAssertTrue(original.exists, "the original text stays readable by VoiceOver")
         XCTAssertFalse(original.label.isEmpty)
 
-        mode.buttons["Translated"].tap()
+        app.buttons["result-mode-translated"].tap()
         XCTAssertTrue(region.waitForExistence(timeout: 5))
         XCTAssertFalse(app.element("original-0").exists)
     }
@@ -140,12 +163,19 @@ final class AppUITests: XCTestCase {
         app.buttons["settings-button"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '0.1.0'")).firstMatch.exists)
-        XCTAssertTrue(app.staticTexts["System uses translatte in light mode and americano in dark mode."].exists)
+        XCTAssertTrue(app.staticTexts["THEME"].exists)
+        XCTAssertTrue(app.element("theme-system").label.contains("translatte in light mode, americano in dark mode"))
         XCTAssertTrue(app.element("credit-ocr").label.contains("PP-OCRv5 by PaddlePaddle · Apache License 2.0"))
         XCTAssertTrue(app.element("credit-translation").label.contains("TranslateGemma 4B by Google · Gemma Terms of Use"))
         let font = app.element("credit-font")
         XCTAssertTrue(font.label.contains("Fraunces · SIL Open Font License 1.1"), font.label)
+        XCTAssertTrue(font.label.contains("Font"), font.label)
         font.tap()
-        XCTAssertTrue(app.navigationBars["License"].waitForExistence(timeout: 5))
+        let dialog = app.element("license-dialog")
+        XCTAssertTrue(dialog.waitForExistence(timeout: 5), "the license opens in the app's own dialog")
+        XCTAssertTrue(app.staticTexts["SIL Open Font License 1.1"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SIL OPEN FONT LICENSE Version 1.1'")).firstMatch.exists)
+        app.buttons["Close"].tap()
+        XCTAssertTrue(app.waitUntil(dialog, "exists == false"))
     }
 }

@@ -15,13 +15,21 @@ struct CameraScreen: View {
             Color.black.ignoresSafeArea()
             viewfinder
             VStack(spacing: 0) {
+                LinearGradient(colors: [CameraStyle.edge, .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 96)
+                    .ignoresSafeArea(edges: .top)
+                Spacer()
+            }
+            .allowsHitTesting(false)
+            VStack(spacing: 0) {
                 topBar
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, Metrics.gutter)
                     .padding(.top, 8)
                 Spacer()
                 bottomBar
             }
         }
+
         .foregroundStyle(CameraStyle.foreground)
         .buttonStyle(.plain)
         .accessibilityElement(children: .contain)
@@ -64,14 +72,15 @@ struct CameraScreen: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             ScrimButton(systemImage: "chevron.left", label: "Back to Home", action: navigator.closeCamera)
                 .accessibilityIdentifier("camera-close")
             Button { pickingLanguages = true } label: {
                 Text(model.directionLabel)
-                    .font(.subheadline.weight(.semibold))
+                    .font(Typography.label)
+                    .lineLimit(1)
                     .padding(.horizontal, 16)
-                    .frame(height: 44)
+                    .frame(height: Metrics.chipHeight)
                     .background(CameraStyle.control, in: Capsule())
             }
             .accessibilityIdentifier("camera-language-chip")
@@ -92,7 +101,8 @@ struct CameraScreen: View {
             Button(action: shoot) {
                 Circle()
                     .fill(Palette.primary)
-                    .overlay(Circle().strokeBorder(CameraStyle.foreground, lineWidth: 5))
+                    .padding(11)
+                    .overlay(Circle().strokeBorder(CameraStyle.foreground, lineWidth: 4))
                     .frame(width: 80, height: 80)
             }
             .accessibilityLabel("Take photo")
@@ -100,7 +110,7 @@ struct CameraScreen: View {
             Spacer()
             Button(action: camera.toggleZoom) {
                 Text(camera.zoomed ? "2×" : "1×")
-                    .font(.subheadline.weight(.semibold))
+                    .font(Typography.label)
                     .frame(width: 52, height: 52)
                     .background(CameraStyle.control, in: Circle())
             }
@@ -110,8 +120,13 @@ struct CameraScreen: View {
         }
         .padding(.horizontal, 28)
         .frame(maxWidth: .infinity)
-        .frame(height: 170)
-        .background(CameraStyle.scrim.ignoresSafeArea(edges: .bottom))
+        .padding(.bottom, 24)
+        .background(alignment: .bottom) {
+            LinearGradient(colors: [.clear, CameraStyle.edge], startPoint: .top, endPoint: .bottom)
+                .frame(height: 160)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
+        }
     }
 
     private func shoot() {
@@ -130,7 +145,7 @@ struct CameraScreen: View {
 private enum CameraStyle {
     static let foreground = Color(red: 0xF1 / 255, green: 0xE6 / 255, blue: 0xD8 / 255)
     static let control = Color(red: 0x16 / 255, green: 0x11 / 255, blue: 0x0E / 255).opacity(0.6)
-    static let scrim = Color(red: 0x16 / 255, green: 0x11 / 255, blue: 0x0E / 255).opacity(0.55)
+    static let edge = Color(red: 0x16 / 255, green: 0x11 / 255, blue: 0x0E / 255).opacity(0.55)
 }
 
 private struct ScrimButton: View {
@@ -141,7 +156,7 @@ private struct ScrimButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.body.weight(.semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .frame(width: 44, height: 44)
                 .background(CameraStyle.control, in: Circle())
         }
