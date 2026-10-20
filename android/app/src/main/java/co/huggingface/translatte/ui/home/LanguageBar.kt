@@ -3,6 +3,7 @@ package co.huggingface.translatte.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,15 +22,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import co.huggingface.translatte.canSwap
-import co.huggingface.translatte.ui.common.PickerSheet
+import co.huggingface.translatte.ui.common.PickerDropdown
 import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.CardShape
 import co.huggingface.translatte.ui.theme.InnerShape
@@ -43,7 +48,7 @@ fun directionLabel(sources: List<LanguageInfo>, targets: List<LanguageInfo>, sou
 
 private enum class Side { From, To }
 
-/** From lists installed source packs only; To lists every language. Each opens a picker sheet. */
+/** From lists installed source packs only; To lists every language. Each opens a dropdown under its chip. */
 @Composable
 fun LanguageBar(
     sources: List<LanguageInfo>,
@@ -62,7 +67,18 @@ fun LanguageBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LanguageTile("From", sources, source, { picking = Side.From }, Modifier.weight(1f))
+            LanguageTile("From", sources, source, { picking = Side.From }, Modifier.weight(1f)) { width ->
+                PickerDropdown(
+                    expanded = picking == Side.From,
+                    onDismiss = { picking = null },
+                    title = "Translate from",
+                    options = sources,
+                    selected = sources.firstOrNull { it.code == source },
+                    label = { it.name },
+                    onSelect = { onSource(it.code) },
+                    anchorWidth = width,
+                )
+            }
             FilledIconButton(
                 onClick = onSwap,
                 enabled = canSwap(sources, target),
@@ -75,27 +91,20 @@ fun LanguageBar(
             ) {
                 Icon(Icons.Filled.SwapHoriz, contentDescription = "Swap languages")
             }
-            LanguageTile("To", targets, target, { picking = Side.To }, Modifier.weight(1f))
+            LanguageTile("To", targets, target, { picking = Side.To }, Modifier.weight(1f)) { width ->
+                PickerDropdown(
+                    expanded = picking == Side.To,
+                    onDismiss = { picking = null },
+                    title = "Translate to",
+                    options = targets,
+                    selected = targets.firstOrNull { it.code == target },
+                    label = { it.name },
+                    onSelect = { onTarget(it.code) },
+                    anchorWidth = width,
+                    alignEnd = true,
+                )
+            }
         }
-    }
-    when (picking) {
-        Side.From -> PickerSheet(
-            title = "Translate from",
-            options = sources,
-            selected = sources.firstOrNull { it.code == source },
-            label = { it.name },
-            onSelect = { onSource(it.code) },
-            onDismiss = { picking = null },
-        )
-        Side.To -> PickerSheet(
-            title = "Translate to",
-            options = targets,
-            selected = targets.firstOrNull { it.code == target },
-            label = { it.name },
-            onSelect = { onTarget(it.code) },
-            onDismiss = { picking = null },
-        )
-        null -> {}
     }
 }
 
@@ -106,25 +115,31 @@ private fun LanguageTile(
     selected: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    dropdown: @Composable (anchorWidth: Dp) -> Unit,
 ) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(InnerShape)
-            .background(MaterialTheme.colorScheme.background)
-            .clickable(onClickLabel = "Choose $label language", onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Text(overlineText(label), style = AppType.overline, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                languages.firstOrNull { it.code == selected }?.name ?: "—",
-                style = AppType.headline,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(20.dp))
+    val density = LocalDensity.current
+    var width by remember { mutableStateOf(0.dp) }
+    Box(modifier.onSizeChanged { width = with(density) { it.width.toDp() } }) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(InnerShape)
+                .background(MaterialTheme.colorScheme.background)
+                .clickable(onClickLabel = "Choose $label language", onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(overlineText(label), style = AppType.overline, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    languages.firstOrNull { it.code == selected }?.name ?: "—",
+                    style = AppType.headline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
         }
+        dropdown(width)
     }
 }

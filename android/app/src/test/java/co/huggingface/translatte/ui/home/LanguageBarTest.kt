@@ -69,7 +69,7 @@ class LanguageBarTest {
             }
         }
         compose.onNodeWithText("FROM").performClick()
-        compose.onNodeWithText("Translate from").assertExists()
+        compose.onNodeWithText("TRANSLATE FROM").assertExists()
         compose.onNodeWithText("English").assertExists()
         compose.onAllNodesWithText("Japanese").assertCountEquals(1)
         compose.onNode(hasText("French") and isSelectable()).assertIsSelected()
@@ -77,7 +77,7 @@ class LanguageBarTest {
         compose.onNodeWithText("English").performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
         assertEquals("en", source)
-        compose.onNodeWithText("Translate from").assertDoesNotExist()
+        compose.onNodeWithText("TRANSLATE FROM").assertDoesNotExist()
     }
 
     @Test
@@ -89,11 +89,11 @@ class LanguageBarTest {
             }
         }
         compose.onNodeWithText("TO").performClick()
-        compose.onNodeWithText("Translate to").assertExists()
+        compose.onNodeWithText("TRANSLATE TO").assertExists()
         compose.onNode(hasText("Japanese") and isSelectable()).assertIsNotSelected()
             .performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
         assertEquals("ja", target)
-        compose.onNodeWithText("Translate to").assertDoesNotExist()
+        compose.onNodeWithText("TRANSLATE TO").assertDoesNotExist()
     }
 }

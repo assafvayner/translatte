@@ -12,36 +12,30 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,9 +51,7 @@ import co.huggingface.translatte.ui.theme.CardShape
 import co.huggingface.translatte.ui.theme.DialogShape
 import co.huggingface.translatte.ui.theme.Dimens
 import co.huggingface.translatte.ui.theme.LocalGlass
-import co.huggingface.translatte.ui.theme.SheetShape
 import co.huggingface.translatte.ui.theme.overlineText
-import kotlinx.coroutines.launch
 
 @Composable
 fun GlassSurface(
@@ -124,18 +116,18 @@ fun NoticeBanner(message: String, modifier: Modifier = Modifier, icon: ImageVect
     }
 }
 
-/** Settings and Languages: a centered title over the page background, with a back arrow. */
+/** Settings and Languages: a leading title (as on iOS) over the page background, with a back arrow. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppTopBar(title: String, onBack: () -> Unit) {
-    CenterAlignedTopAppBar(
+    TopAppBar(
         title = { Text(title) },
         navigationIcon = {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
         },
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
     )
 }
 
@@ -193,43 +185,6 @@ fun CheckRow(title: String, selected: Boolean, onClick: () -> Unit, subtitle: St
             }
         },
     )
-}
-
-/** A bottom sheet with a title and a list of [CheckRow]s; choosing one closes it. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun <T> PickerSheet(
-    title: String,
-    options: List<T>,
-    selected: T?,
-    label: (T) -> String,
-    onSelect: (T) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val state = rememberModalBottomSheetState(skipPartiallyExpanded = options.size <= 8)
-    val scope = rememberCoroutineScope()
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = state,
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Column(Modifier.navigationBarsPadding()) {
-            Text(
-                title,
-                style = AppType.title,
-                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp).semantics { heading() },
-            )
-            Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup().padding(bottom = 16.dp)) {
-                options.forEach { option ->
-                    CheckRow(label(option), selected = option == selected, onClick = {
-                        onSelect(option)
-                        scope.launch { state.hide() }.invokeOnCompletion { onDismiss() }
-                    })
-                }
-            }
-        }
-    }
 }
 
 /** One dialog look for every prompt: sheet color, 28dp corners, title/body tokens, text buttons. */

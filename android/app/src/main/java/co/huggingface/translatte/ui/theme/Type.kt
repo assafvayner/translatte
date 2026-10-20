@@ -77,6 +77,11 @@ object Dimens {
     val smallButtonHeight = 36.dp
     val chipHeight = 44.dp
     val rowMinHeight = 52.dp
+    val dropdownRadius = 16.dp
+    val dropdownRowHeight = 48.dp
+    val dropdownMinWidth = 220.dp
+    val dropdownMaxWidth = 280.dp
+    val dropdownGap = 6.dp
     val gutter = 16.dp
     val spacing = 16.dp
 }
