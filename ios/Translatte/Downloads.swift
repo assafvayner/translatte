@@ -58,6 +58,8 @@ final class Downloads: ObservableObject {
     var queued: Bool { !pending.isEmpty }
     /// A download is running or pending: it can be cancelled, and starting or deleting would race it.
     var busy: Bool { running || queued }
+    /// Models in a running or queued download.
+    var pendingIDs: Set<String> { Set(pending.flatMap(\.ids)) }
     var waitingForUnmetered: Bool {
         !running && pending.first.map { !$0.allowMetered && isMetered } ?? false
     }

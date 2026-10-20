@@ -5,25 +5,35 @@ struct SettingsScreen: View {
 
     var body: some View {
         Form {
-            Section("Theme") {
+            Section {
                 Picker("Theme", selection: $theme) {
                     ForEach(AppTheme.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("theme-picker")
+            } header: {
+                Text("Theme")
+            } footer: {
+                Text("System uses translatte in light mode and americano in dark mode.")
+                    .foregroundStyle(Palette.textMuted)
             }
             .listRowBackground(Palette.surface)
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.appVersion)
-                Link(destination: URL(string: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx")!) {
-                    LabeledContent("Text reading", value: "PP-OCRv5 · Apache 2.0")
+                Link(destination: URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!) {
+                    AboutRow(title: "Text detection and recognition", subtitle: "PP-OCRv5 by PaddlePaddle · Apache License 2.0")
                 }
-                Link(destination: URL(string: "https://huggingface.co/google/translategemma-4b-it")!) {
-                    LabeledContent("Translation", value: "TranslateGemma · Gemma Terms")
+                .accessibilityIdentifier("credit-ocr")
+                Link(destination: URL(string: "https://ai.google.dev/gemma/terms")!) {
+                    AboutRow(title: "Translation", subtitle: "TranslateGemma 4B by Google · Gemma Terms of Use")
                 }
-                Link("Apache License 2.0", destination: URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!)
-                Link("Gemma Terms of Use", destination: URL(string: "https://ai.google.dev/gemma/terms")!)
-                NavigationLink("Fraunces font · SIL Open Font License") { LicenseText(resource: "OFL") }
+                .accessibilityIdentifier("credit-translation")
+                NavigationLink {
+                    LicenseText(resource: "OFL")
+                } label: {
+                    AboutRow(title: "Wordmark font", subtitle: "Fraunces · SIL Open Font License 1.1", external: false)
+                }
+                .accessibilityIdentifier("credit-font")
             }
             .listRowBackground(Palette.surface)
         }
@@ -32,6 +42,30 @@ struct SettingsScreen: View {
         .foregroundStyle(Palette.text)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct AboutRow: View {
+    let title: String
+    let subtitle: String
+    var external = true
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).foregroundStyle(Palette.text)
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(Palette.textMuted)
+            }
+            if external {
+                Spacer()
+                Image(systemName: "arrow.up.right.square")
+                    .foregroundStyle(Palette.textMuted)
+                    .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -59,8 +93,6 @@ private struct LicenseText: View {
 
 extension Bundle {
     var appVersion: String {
-        let version = object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-        let build = object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        return "\(version) (\(build))"
+        object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     }
 }

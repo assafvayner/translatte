@@ -23,6 +23,8 @@ targets:
     info:
       path: Translatte-Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIAppFonts: [Fraunces-SemiBold.ttf]
     dependencies:
       - framework: Frameworks/TranslatteFFI.xcframework
@@ -41,7 +43,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: co.huggingface.translatte
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        MARKETING_VERSION: "1.0"
+        MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Translatte

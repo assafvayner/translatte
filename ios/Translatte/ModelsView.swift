@@ -76,7 +76,7 @@ struct ModelsView: View {
         let hasPack = model.models.contains { !$0.core && ($0.state == .installed || selected.contains($0.id)) }
         let waiting = downloads.waitingForUnmetered
         let queued = downloads.queued && !downloads.running && downloads.error == nil
-        if setup || downloads.busy || error != nil {
+        if setup || waiting || queued || error != nil {
             VStack(spacing: 8) {
                 if let error {
                     NoticeBanner(message: error)
@@ -86,7 +86,7 @@ struct ModelsView: View {
                 } else if queued {
                     Text("Download queued.").foregroundStyle(Palette.textMuted)
                 }
-                if downloads.busy {
+                if downloads.busy && setup {
                     Button("Cancel download", role: .cancel, action: downloads.cancel)
                         .buttonStyle(BigButtonStyle(kind: .tonal))
                 } else if setup {
@@ -141,15 +141,21 @@ struct ModelsView: View {
                         .accessibilityAddTraits(checked ? .isSelected : [])
                         .accessibilityIdentifier("model-\(m.id)")
                 }
-                if !setup && !m.core && !downloads.busy {
+                if !setup && !m.core {
                     VStack(alignment: .trailing, spacing: 6) {
-                        if !installed {
+                        if downloads.busy {
+                            if !installed && downloads.pendingIDs.contains(m.id) {
+                                Button("Cancel", action: downloads.cancel)
+                                    .buttonStyle(.bordered)
+                                    .accessibilityIdentifier("cancel-\(m.id)")
+                            }
+                        } else if !installed {
                             Button(m.state == .incomplete ? "Resume" : "Download") { startDownload([m.id]) }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(m.remainingBytes > free)
                                 .accessibilityIdentifier("download-\(m.id)")
                         }
-                        if m.state != .notInstalled || m.downloadedBytes > 0 {
+                        if !downloads.busy && (m.state != .notInstalled || m.downloadedBytes > 0) {
                             Button("Delete", role: .destructive) { model.deleteModel(m.id) }
                                 .buttonStyle(.bordered)
                                 .accessibilityIdentifier("delete-\(m.id)")
@@ -205,6 +211,20 @@ extension ModelInfo {
     }
 }
 
+/// Decimal units, as on Android: MB below 1000 MB, else GB; under 10 one decimal for MB and two for
+/// GB, under 100 one decimal, from 100 none ("4.8 MB", "2.49 GB", "16.6 MB", "512 MB", "207 GB").
 func formatSize(_ bytes: UInt64) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    func digits(_ value: Double, gb: Bool) -> Int {
+        value < 10 ? (gb ? 2 : 1) : value < 100 ? 1 : 0
+    }
+    func rounded(_ value: Double, _ digits: Int) -> Double {
+        let p = pow(10, Double(digits))
+        return (value * p).rounded() / p
+    }
+    let mb = Double(bytes) / 1_000_000
+    if rounded(mb, digits(mb, gb: false)) < 1000 {
+        return "\(mb.formatted(.number.precision(.fractionLength(digits(mb, gb: false))).grouping(.never))) MB"
+    }
+    let gb = Double(bytes) / 1_000_000_000
+    return "\(gb.formatted(.number.precision(.fractionLength(digits(gb, gb: true))).grouping(.never))) GB"
 }

@@ -157,10 +157,10 @@ final class DownloadsTests: XCTestCase {
         func info(core: Bool = false, state: ModelState, downloaded: UInt64 = 0) -> ModelInfo {
             ModelInfo(id: "x", displayName: "X", core: core, sizeBytes: 8_000_000, downloadedBytes: downloaded, state: state, languages: [])
         }
-        XCTAssertEqual(info(core: true, state: .notInstalled).status, "Required · 8 MB")
-        XCTAssertEqual(info(state: .installed, downloaded: 8_000_000).status, "Installed · 8 MB")
-        XCTAssertEqual(info(state: .incomplete, downloaded: 3_000_000).status, "Incomplete · 8 MB")
-        XCTAssertEqual(info(state: .notInstalled).status, "8 MB")
+        XCTAssertEqual(info(core: true, state: .notInstalled).status, "Required · 8.0 MB")
+        XCTAssertEqual(info(state: .installed, downloaded: 8_000_000).status, "Installed · 8.0 MB")
+        XCTAssertEqual(info(state: .incomplete, downloaded: 3_000_000).status, "Incomplete · 8.0 MB")
+        XCTAssertEqual(info(state: .notInstalled).status, "8.0 MB")
         XCTAssertEqual(info(state: .incomplete, downloaded: 3_000_000).remainingBytes, 5_000_000)
     }
 }
