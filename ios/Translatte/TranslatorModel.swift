@@ -97,7 +97,7 @@ final class TranslatorModel: ObservableObject {
             if sourceLanguages.contains(where: { $0.code == sourceCode }) {
                 prepare()
             } else {
-                sourceCode = sourceLanguages.first?.code ?? ""
+                sourceCode = (sourceLanguages.first { $0.code == "en" } ?? sourceLanguages.first)?.code ?? ""
             }
         } catch {
             setupError = errorMessage(error)

@@ -176,11 +176,14 @@ impl ModelStore {
                 }
             }
         }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
     }
 
     pub fn target_languages(&self) -> Vec<&Language> {
-        self.manifest.languages.iter().collect()
+        let mut out: Vec<_> = self.manifest.languages.iter().collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
     }
 
     /// Model files are addressed by their file name inside the model's directory, e.g. ("rec-latin", "dict.txt").
@@ -368,6 +371,21 @@ mod tests {
             .collect();
         assert_eq!(codes, vec!["fr"]);
         assert_eq!(s.target_languages().len(), 2);
+    }
+
+    #[test]
+    fn languages_are_sorted_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = ModelStore::new(
+            Manifest::from_json(&SAMPLE.replace("Hebrew", "Arabic")).unwrap(),
+            dir.path().to_path_buf(),
+        );
+        let codes: Vec<_> = s
+            .target_languages()
+            .iter()
+            .map(|l| l.code.as_str())
+            .collect();
+        assert_eq!(codes, vec!["he", "fr"]);
     }
 
     #[test]
