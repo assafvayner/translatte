@@ -139,10 +139,3 @@ private struct RegionDetail: View {
 extension Region: Identifiable {
     public var id: String { "\(corners.first?.x ?? 0),\(corners.first?.y ?? 0),\(sourceText)" }
 }
-
-extension TranslatorModel.Phase {
-    var isWorking: Bool {
-        if case .working = self { return true }
-        return false
-    }
-}

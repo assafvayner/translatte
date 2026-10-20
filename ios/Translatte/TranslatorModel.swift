@@ -34,6 +34,8 @@ final class TranslatorModel: ObservableObject {
     @Published private(set) var image: UIImage?
     @Published private(set) var result: TranslationResult?
     @Published private(set) var phase: Phase = .idle
+    /// Shown on Home, e.g. when there isn't enough free memory to load the translator.
+    @Published private(set) var notice: String?
 
     let modelsDirectory: URL
     let downloads = Downloads()
@@ -41,6 +43,8 @@ final class TranslatorModel: ObservableObject {
     private var engine: Engine?
     private let worker = DispatchQueue(label: "translatte.engine", qos: .userInitiated)
     private var settingLanguages = false
+    /// The photo the last translation ran on, so a failed run can be retried.
+    private var lastPhoto: UIImage?
     /// Only touched on `worker`.
     private nonisolated(unsafe) var modelsLoaded = false
 
@@ -124,6 +128,8 @@ final class TranslatorModel: ObservableObject {
 
     func translate(_ picked: UIImage) async {
         guard let engine else { return }
+        lastPhoto = picked
+        image = nil
         result = nil
         phase = .working("Loading photo…")
         let (source, target) = (sourceCode, targetCode)
@@ -139,6 +145,7 @@ final class TranslatorModel: ObservableObject {
                 return (prepared, jpeg)
             }
             image = prepared
+            lastPhoto = prepared
             phase = .working("Starting…")
             let output = try await onWorker { [self] in
                 try checkMemory()
@@ -147,6 +154,7 @@ final class TranslatorModel: ObservableObject {
                 return output
             }
             result = output
+            notice = nil
             if let error = output.translationError {
                 phase = .failed("Translation failed: \(error)")
             } else if output.regions.isEmpty {
@@ -160,8 +168,25 @@ final class TranslatorModel: ObservableObject {
     }
 
     func photoFailedToLoad() {
+        lastPhoto = nil
+        image = nil
         result = nil
         phase = .failed("Could not open the photo")
+    }
+
+    var canRetry: Bool { lastPhoto != nil }
+
+    /// Re-runs the last translation on the same photo.
+    func retry() async {
+        if let lastPhoto { await translate(lastPhoto) }
+    }
+
+    func swapLanguages() {
+        setLanguages(source: targetCode, target: sourceCode)
+    }
+
+    var hasAutotestImage: Bool {
+        UserDefaults.standard.string(forKey: "autotest-image") != nil
     }
 
     /// Loads the models and prefills the translator's prompt prefix for the picked languages on the
@@ -174,10 +199,9 @@ final class TranslatorModel: ObservableObject {
                 try checkMemory()
                 try engine.prepare(source: source, target: target)
                 modelsLoaded = true
+                Task { @MainActor in self.notice = nil }
             } catch let error as AppError {
-                Task { @MainActor in
-                    if !self.phase.isWorking { self.phase = .failed(error.localizedDescription) }
-                }
+                Task { @MainActor in self.notice = error.localizedDescription }
             } catch {
                 NSLog("translatte: prepare failed: %@", errorMessage(error))
             }
@@ -294,5 +318,12 @@ extension UIImage {
         return UIGraphicsImageRenderer(size: target, format: format).image { _ in
             draw(in: CGRect(origin: .zero, size: target))
         }
+    }
+}
+
+extension TranslatorModel.Phase {
+    var isWorking: Bool {
+        if case .working = self { return true }
+        return false
     }
 }
