@@ -13,9 +13,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,6 +24,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import co.huggingface.translatte.ui.MainNav
 import co.huggingface.translatte.ui.Screen
+import co.huggingface.translatte.ui.common.AppDialog
 import co.huggingface.translatte.ui.settings.AppTheme
 import co.huggingface.translatte.ui.settings.UiPrefs
 import co.huggingface.translatte.ui.setup.ModelsScreen
@@ -78,27 +76,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 meteredPrompt?.let { ids ->
-                    AlertDialog(
-                        onDismissRequest = { meteredPrompt = null },
-                        title = { Text("Download on mobile data?") },
-                        text = {
-                            Text(
-                                "This downloads ${formatSize(vm.bytesToDownload(ids))} " +
-                                    "over a metered connection.",
-                            )
+                    AppDialog(
+                        title = "Download on mobile data?",
+                        message = "This downloads ${formatSize(vm.bytesToDownload(ids))} over a metered connection.",
+                        onDismiss = { meteredPrompt = null },
+                        confirm = "Download now" to {
+                            meteredPrompt = null
+                            download(ids, true)
                         },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                meteredPrompt = null
-                                download(ids, true)
-                            }) { Text("Download now") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = {
+                        dismiss = listOf(
+                            "Cancel" to { meteredPrompt = null },
+                            "Wait for Wi-Fi" to {
                                 meteredPrompt = null
                                 download(ids, false)
-                            }) { Text("Wait for Wi-Fi") }
-                        },
+                            },
+                        ),
                     )
                 }
                 val modelsScreen = @Composable { setup: Boolean, onBack: (() -> Unit)? ->

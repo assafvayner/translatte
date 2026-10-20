@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBars
@@ -21,14 +22,9 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,6 +46,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import co.huggingface.translatte.Phase
 import co.huggingface.translatte.ui.common.GlassCard
+import co.huggingface.translatte.ui.common.GlassChip
+import co.huggingface.translatte.ui.common.SegmentedToggle
+import co.huggingface.translatte.ui.common.SmallButton
+import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.common.GlassIconButton
 import co.huggingface.translatte.ui.common.GlassSurface
 import co.huggingface.translatte.ui.theme.LocalGlass
@@ -57,7 +57,6 @@ import uniffi.translatte_ffi.TranslationResult
 import kotlin.math.roundToInt
 
 /** [image] is null only while a new photo is still loading. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultScreen(
     image: Bitmap?,
@@ -123,41 +122,33 @@ fun ResultScreen(
 
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(LocalGlass.current))
         Row(
-            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
+            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             GlassIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack)
-            GlassSurface {
-                Text(
-                    direction,
-                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
+            GlassChip(direction, Modifier.weight(1f, fill = false))
             Spacer(Modifier.weight(1f))
             if (zoom.zoomed) {
                 GlassSurface {
-                    Text(
-                        "${(zoom.scale * 100).roundToInt()}%",
-                        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+                    Box(Modifier.height(32.dp).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Text("${(zoom.scale * 100).roundToInt()}%", style = AppType.caption)
+                    }
                 }
             }
         }
 
         when (phase) {
             is Phase.Working -> GlassCard(Modifier.align(Alignment.Center)) {
-                Text(phase.label, style = MaterialTheme.typography.titleMedium)
+                Text(phase.label, style = AppType.headline)
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
             is Phase.Failed -> GlassCard(Modifier.align(Alignment.Center)) {
                 Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                Text(phase.message, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(phase.message, textAlign = TextAlign.Center, style = AppType.body)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onBack) { Text("Back") }
-                    if (phase.retryable) Button(onClick = onRetry) { Text("Retry") }
+                    if (phase.retryable) SmallButton("Retry", onClick = onRetry)
                 }
             }
             else -> {}
@@ -169,26 +160,17 @@ fun ResultScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                GlassSurface {
-                    SingleChoiceSegmentedButtonRow(Modifier.padding(4.dp)) {
-                        SegmentedButton(
-                            selected = !showOriginal,
-                            onClick = { showOriginal = false },
-                            shape = SegmentedButtonDefaults.itemShape(0, 2),
-                        ) { Text("Translated") }
-                        SegmentedButton(
-                            selected = showOriginal,
-                            onClick = { showOriginal = true },
-                            shape = SegmentedButtonDefaults.itemShape(1, 2),
-                        ) { Text("Original") }
-                    }
-                }
+                SegmentedToggle(
+                    listOf("Translated", "Original"),
+                    selected = if (showOriginal) 1 else 0,
+                    onSelect = { showOriginal = it == 1 },
+                )
                 if (hint) {
                     GlassSurface {
                         Text(
                             "Pinch to zoom · tap a box to see the original",
                             Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelMedium,
+                            style = AppType.caption,
                         )
                     }
                 }

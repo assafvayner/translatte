@@ -1,21 +1,12 @@
 package co.huggingface.translatte.ui.theme
 
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TopAppBarColors
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import co.huggingface.translatte.R
 
 private val LatteBackground = Color(0xFFFBF6EE)
 private val LatteSurface = Color(0xFFF3E8D9)
@@ -117,30 +108,17 @@ private val AmericanoGlass = Color(0xC716110E)
 /** Translucent fill for controls floating over a photo. */
 val LocalGlass = staticCompositionLocalOf { TranslatteGlass }
 
-/** Fraunces is only for the wordmark and display titles; everything else uses the system font. */
-val Fraunces = FontFamily(Font(R.font.fraunces_semibold, FontWeight.SemiBold))
-
-val WordmarkStyle = TextStyle(fontFamily = Fraunces, fontWeight = FontWeight.SemiBold, fontSize = 24.sp)
-
-val DisplayTitleStyle = TextStyle(
-    fontFamily = Fraunces,
-    fontWeight = FontWeight.SemiBold,
-    fontSize = 24.sp,
-    lineHeight = 30.sp,
-)
-
 /** The window background drawn before Compose's first frame. */
 fun windowBackground(dark: Boolean): Color = if (dark) AmericanoBackground else LatteBackground
 
 @Composable
 fun TranslatteTheme(dark: Boolean, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalGlass provides if (dark) AmericanoGlass else TranslatteGlass) {
-        MaterialTheme(colorScheme = if (dark) AmericanoColors else TranslatteColors, content = content)
+        MaterialTheme(
+            colorScheme = if (dark) AmericanoColors else TranslatteColors,
+            typography = AppTypography,
+            content = content,
+        )
     }
 }
 
-/** Top bars sit on the page background rather than the darker M3 surface. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun appBarColors(): TopAppBarColors =
-    TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)

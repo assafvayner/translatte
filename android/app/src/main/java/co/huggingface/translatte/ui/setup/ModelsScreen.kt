@@ -1,39 +1,32 @@
 package co.huggingface.translatte.ui.setup
 
 import android.os.StatFs
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,17 +39,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import co.huggingface.translatte.DownloadState
 import co.huggingface.translatte.R
 import co.huggingface.translatte.formatSize
-import co.huggingface.translatte.ui.theme.DisplayTitleStyle
-import co.huggingface.translatte.ui.theme.appBarColors
+import co.huggingface.translatte.ui.common.AppTopBar
+import co.huggingface.translatte.ui.common.NoticeBanner
+import co.huggingface.translatte.ui.common.SectionCard
+import co.huggingface.translatte.ui.common.SmallButton
+import co.huggingface.translatte.ui.common.SmallOutlinedButton
+import co.huggingface.translatte.ui.theme.AppType
+import co.huggingface.translatte.ui.theme.Dimens
 import uniffi.translatte_ffi.ModelInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,7 +68,6 @@ internal fun packChecked(core: Boolean, installed: Boolean, setup: Boolean, sele
  * First-run setup ([setup] = true: core models plus chosen packs, one Download button) and the
  * Languages screen (per-pack download and delete).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelsScreen(
     models: List<ModelInfo>,
@@ -107,7 +104,7 @@ fun ModelsScreen(
             actions = when {
                 setup || m.core -> null
                 downloads.busy -> if (m.id in downloads.progress && m.state != ModelState.INSTALLED) {
-                    { SmallOutlinedButton("Cancel", onCancel) }
+                    { SmallOutlinedButton("Cancel", onClick = onCancel) }
                 } else {
                     null
                 }
@@ -131,67 +128,59 @@ fun ModelsScreen(
     }
 
     Scaffold(
-        topBar = {
-            if (onBack != null) {
-                TopAppBar(
-                    title = { Text("Languages") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    colors = appBarColors(),
-                )
-            }
-        },
+        topBar = { if (onBack != null) AppTopBar("Languages", onBack) },
         bottomBar = {
             Column(
-                Modifier.navigationBarsPadding().padding(16.dp),
+                Modifier.navigationBarsPadding().padding(Dimens.gutter),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                (error ?: downloads.error)?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp))
-                }
+                (error ?: downloads.error)?.let { NoticeBanner(it) }
+                val muted = MaterialTheme.colorScheme.onSurfaceVariant
                 if (downloads.waitingForUnmetered) {
-                    Text("Waiting for Wi-Fi to download.", modifier = Modifier.padding(bottom = 8.dp))
+                    Text("Waiting for Wi-Fi to download.", color = muted, textAlign = TextAlign.Center)
                 } else if (downloads.queued && !downloads.running && downloads.error == null) {
-                    Text("Download queued.", modifier = Modifier.padding(bottom = 8.dp))
+                    Text("Download queued.", color = muted, textAlign = TextAlign.Center)
                 }
                 if (downloads.busy && setup) {
-                    OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                        Text("Cancel download")
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.fillMaxWidth().height(Dimens.buttonHeight),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    ) {
+                        Text("Cancel download", color = MaterialTheme.colorScheme.onBackground)
                     }
                 } else if (setup) {
                     if (needed > free) {
                         Text(
                             "Needs ${formatSize(needed)}, only ${formatSize(free)} free",
                             color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(bottom = 8.dp),
+                            textAlign = TextAlign.Center,
                         )
                     }
                     Button(
                         onClick = { onDownload(wanted.map { it.id }) },
                         enabled = wanted.isNotEmpty() && hasPack && needed <= free,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        modifier = Modifier.fillMaxWidth().height(Dimens.buttonHeight),
                     ) { Text(if (needed > 0) "Download ${formatSize(needed)}" else "Download") }
-                    Text(
-                        if (free == Long.MAX_VALUE) "Wi-Fi recommended" else "Wi-Fi recommended · ${formatSize(free)} free on this phone",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+                    if (free != Long.MAX_VALUE) {
+                        Text(
+                            "Wi-Fi recommended · ${formatSize(free)} free on this phone",
+                            style = AppType.caption,
+                            color = muted,
+                        )
+                    }
                 }
             }
         },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(Dimens.gutter),
+            verticalArrangement = Arrangement.spacedBy(Dimens.spacing),
         ) {
             if (setup) Hero()
             SectionCard("Always included") { models.filter { it.core }.forEach { row(it) } }
             SectionCard("Scripts to read") { models.filter { !it.core }.forEach { row(it) } }
-            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -199,33 +188,24 @@ fun ModelsScreen(
 @Composable
 private fun Hero() {
     Column(
-        Modifier.fillMaxWidth().padding(top = 24.dp),
+        Modifier.fillMaxWidth().padding(top = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Image(painterResource(R.drawable.logo_cup), contentDescription = null, modifier = Modifier.size(96.dp))
-        Text("Welcome to translatte", style = DisplayTitleStyle, color = MaterialTheme.colorScheme.onBackground)
+        Text(
+            "Welcome to translatte",
+            style = AppType.display,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.semantics { heading() },
+        )
         Text(
             "Download the languages you read. After that, everything runs on your phone, with no internet needed.",
-            style = MaterialTheme.typography.bodyMedium,
+            style = AppType.body,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 300.dp),
         )
-    }
-}
-
-@Composable
-private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-            Text(
-                title.uppercase(),
-                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp).semantics { heading() },
-            )
-            content()
-        }
     }
 }
 
@@ -240,37 +220,43 @@ private fun ModelRow(
     checked: Boolean,
     actions: (@Composable () -> Unit)?,
 ) {
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (onCheck != null) {
-                Checkbox(checked = checked, onCheckedChange = onCheck)
-            } else {
+    val toggle = if (onCheck != null) {
+        Modifier.toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheck)
+    } else {
+        Modifier.semantics(mergeDescendants = true) {}
+    }
+    Column(Modifier.heightIn(min = Dimens.rowMinHeight).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                toggle.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Icon(
                     if (checked) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
-                    contentDescription = if (checked) "Installed" else "Not installed",
-                    tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(12.dp).size(24.dp),
+                    contentDescription = if (onCheck != null) null else if (checked) "Installed" else "Not installed",
+                    tint = if (checked || onCheck != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(24.dp),
                 )
-            }
-            Spacer(Modifier.width(4.dp))
-            Column(Modifier.weight(1f)) {
-                Text(model.displayName, style = MaterialTheme.typography.titleMedium)
-                if (model.languages.isNotEmpty()) {
-                    Text(
-                        model.languages.joinToString(", "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                Column(Modifier.weight(1f)) {
+                    Text(model.displayName, style = AppType.headline)
+                    if (model.languages.isNotEmpty()) {
+                        Text(
+                            model.languages.joinToString(", "),
+                            style = AppType.caption,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    val status = when {
+                        model.core -> "Required · $size"
+                        model.state == ModelState.INSTALLED -> "Installed · $size"
+                        model.state == ModelState.INCOMPLETE -> "Incomplete · $size"
+                        else -> size
+                    }
+                    Text(status, style = AppType.caption, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                val status = when {
-                    model.core -> "Required · $size"
-                    model.state == ModelState.INSTALLED -> "Installed · $size"
-                    model.state == ModelState.INCOMPLETE -> "Incomplete · $size"
-                    else -> size
-                }
-                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             actions?.invoke()
         }
@@ -278,7 +264,7 @@ private fun ModelRow(
             val (done, total) = progress
             LinearProgressIndicator(
                 progress = { if (total > 0) done.toFloat() / total else 0f },
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             Text(
                 if (done == 0L) {
@@ -286,20 +272,10 @@ private fun ModelRow(
                 } else {
                     "${formatSize(done)} of ${formatSize(total)}"
                 },
-                style = MaterialTheme.typography.bodySmall,
+                style = AppType.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
             )
         }
     }
-}
-
-private val SmallButtonPadding = PaddingValues(horizontal = 14.dp)
-
-@Composable
-private fun SmallButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(onClick, Modifier.height(34.dp), enabled = enabled, contentPadding = SmallButtonPadding) { Text(label) }
-}
-
-@Composable
-private fun SmallOutlinedButton(label: String, onClick: () -> Unit) {
-    OutlinedButton(onClick, Modifier.height(34.dp), contentPadding = SmallButtonPadding) { Text(label) }
 }

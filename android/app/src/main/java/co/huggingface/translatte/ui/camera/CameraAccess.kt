@@ -10,9 +10,6 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +20,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import co.huggingface.translatte.ui.CameraTap
 import co.huggingface.translatte.ui.Nav
+import co.huggingface.translatte.ui.common.AppDialog
 import co.huggingface.translatte.ui.settings.UiPrefs
 
 fun cameraGranted(context: Context): Boolean =
@@ -52,19 +50,17 @@ fun CameraAccess(prefs: UiPrefs, onOpen: () -> Unit, content: @Composable (onCam
         }
     }
     if (help) {
-        AlertDialog(
-            onDismissRequest = { help = false },
-            title = { Text("Camera access is off") },
-            text = { Text("translatte needs the camera to photograph text. Allow it in Settings, or choose a photo instead.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    help = false
-                    context.startActivity(
-                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
-                    )
-                }) { Text("Open Settings") }
+        AppDialog(
+            title = "Camera access is off",
+            message = "translatte needs the camera to photograph text. Allow it in Settings, or choose a photo instead.",
+            onDismiss = { help = false },
+            confirm = "Open Settings" to {
+                help = false
+                context.startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
+                )
             },
-            dismissButton = { TextButton(onClick = { help = false }) { Text("Not now") } },
+            dismiss = listOf("Not now" to { help = false }),
         )
     }
 }
