@@ -1,7 +1,9 @@
 package co.huggingface.translatte.ui.home
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,9 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -28,11 +32,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
@@ -78,13 +84,13 @@ fun HomeScreen(
             memoryWarning?.let { NoticeBanner(it) }
             Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (hasCamera) {
-                    Button(onClick = onCamera, enabled = !working, modifier = Modifier.weight(1f).height(56.dp)) {
+                    Button(onClick = onCamera, modifier = Modifier.weight(1f).height(56.dp)) {
                         Icon(Icons.Filled.PhotoCamera, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text("Camera")
                     }
                 }
-                FilledTonalButton(onClick = onPhotos, enabled = !working, modifier = Modifier.weight(1f).height(56.dp)) {
+                FilledTonalButton(onClick = onPhotos, modifier = Modifier.weight(1f).height(56.dp)) {
                     Icon(Icons.Outlined.PhotoLibrary, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Photos")
@@ -105,9 +111,11 @@ private fun Header(working: Boolean, onLanguages: () -> Unit, onSettings: () -> 
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f),
         )
-        FilledTonalButton(
+        OutlinedButton(
             onClick = onLanguages,
             enabled = !working,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onBackground),
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
         ) {
             Icon(Icons.Outlined.Language, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -163,13 +171,25 @@ private fun LastResultCard(
 ) {
     Card(
         onClick = onOpen,
-        modifier = modifier.semantics { contentDescription = "Last result" },
+        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = "Last translation" },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Box(Modifier.fillMaxSize()) {
-            OverlayImage(image, result, showOriginal = false, modifier = Modifier.fillMaxSize())
-            if (working) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.BottomCenter))
+        Column(Modifier.fillMaxSize().padding(12.dp)) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                OverlayImage(image, result, showOriginal = false, modifier = Modifier.fillMaxSize())
+                if (working) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.BottomCenter))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Last translation", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Icon(Icons.Outlined.OpenInFull, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
         }
     }
 }

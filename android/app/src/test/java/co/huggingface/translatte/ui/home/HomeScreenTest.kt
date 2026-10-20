@@ -54,7 +54,7 @@ class HomeScreenTest {
     fun lastResultReplacesTheEmptyStateAndReopens() {
         show(lastImage = Bitmap.createBitmap(40, 30, Bitmap.Config.ARGB_8888))
         compose.onNodeWithText("Point at a sign, menu or label").assertDoesNotExist()
-        compose.onNodeWithContentDescription("Last result").performClick()
+        compose.onNodeWithContentDescription("Last translation").performClick()
         assertEquals(1, opened)
     }
 

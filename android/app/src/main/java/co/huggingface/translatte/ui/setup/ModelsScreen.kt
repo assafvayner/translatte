@@ -1,11 +1,11 @@
 package co.huggingface.translatte.ui.setup
 
 import android.os.StatFs
-import android.text.format.Formatter
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +37,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,14 +46,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import co.huggingface.translatte.DownloadState
 import co.huggingface.translatte.R
+import co.huggingface.translatte.formatSize
 import co.huggingface.translatte.ui.theme.DisplayTitleStyle
 import co.huggingface.translatte.ui.theme.appBarColors
 import uniffi.translatte_ffi.ModelInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import uniffi.translatte_ffi.ModelState
 
 /** Setup's selection only counts during setup; in manage mode a pack is checked only once installed. */
@@ -80,33 +88,41 @@ fun ModelsScreen(
     val wanted = if (setup) pending.filter { it.core || it.id in selected } else emptyList()
     val needed = wanted.sumOf { it.remainingBytes() }
     val hasPack = models.any { !it.core && (it.state == ModelState.INSTALLED || it.id in selected) }
-    val free = remember(downloads.finished, models) { StatFs(context.filesDir.path).availableBytes }
-    fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
+    var free by remember { mutableLongStateOf(Long.MAX_VALUE) }
+    LaunchedEffect(downloads.finished, models) {
+        free = withContext(Dispatchers.IO) { StatFs(context.filesDir.path).availableBytes }
+    }
 
     val row: @Composable (ModelInfo) -> Unit = { m ->
         ModelRow(
             model = m,
             progress = downloads.progress[m.id].takeIf { downloads.running && m.state != ModelState.INSTALLED },
-            size = size(m.sizeBytes.toLong()),
+            size = formatSize(m.sizeBytes.toLong()),
             onCheck = if (setup && !m.core && m.state != ModelState.INSTALLED) {
                 { checked: Boolean -> selected = if (checked) selected + m.id else selected - m.id }
             } else {
                 null
             },
             checked = packChecked(m.core, m.state == ModelState.INSTALLED, setup, m.id in selected),
-            actions = if (setup || m.core || downloads.busy) {
-                null
-            } else {
-                {
-                    Column(horizontalAlignment = Alignment.End) {
-                        if (m.state != ModelState.INSTALLED) {
-                            Button(
-                                onClick = { onDownload(listOf(m.id)) },
-                                enabled = m.remainingBytes() <= free,
-                            ) { Text(if (m.state == ModelState.INCOMPLETE) "Resume" else "Download") }
-                        }
-                        if (m.state != ModelState.NOT_INSTALLED || m.downloadedBytes > 0u) {
-                            OutlinedButton(onClick = { onDelete(m.id) }) { Text("Delete") }
+            actions = when {
+                setup || m.core -> null
+                downloads.busy -> if (m.id in downloads.progress && m.state != ModelState.INSTALLED) {
+                    { SmallOutlinedButton("Cancel", onCancel) }
+                } else {
+                    null
+                }
+                else -> {
+                    {
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (m.state != ModelState.INSTALLED) {
+                                SmallButton(
+                                    if (m.state == ModelState.INCOMPLETE) "Resume" else "Download",
+                                    enabled = m.remainingBytes() <= free,
+                                ) { onDownload(listOf(m.id)) }
+                            }
+                            if (m.state != ModelState.NOT_INSTALLED || m.downloadedBytes > 0u) {
+                                SmallOutlinedButton("Delete") { onDelete(m.id) }
+                            }
                         }
                     }
                 }
@@ -141,14 +157,14 @@ fun ModelsScreen(
                 } else if (downloads.queued && !downloads.running && downloads.error == null) {
                     Text("Download queued.", modifier = Modifier.padding(bottom = 8.dp))
                 }
-                if (downloads.busy) {
+                if (downloads.busy && setup) {
                     OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                         Text("Cancel download")
                     }
                 } else if (setup) {
                     if (needed > free) {
                         Text(
-                            "Needs ${size(needed)}, only ${size(free)} free",
+                            "Needs ${formatSize(needed)}, only ${formatSize(free)} free",
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(bottom = 8.dp),
                         )
@@ -157,9 +173,9 @@ fun ModelsScreen(
                         onClick = { onDownload(wanted.map { it.id }) },
                         enabled = wanted.isNotEmpty() && hasPack && needed <= free,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
-                    ) { Text(if (needed > 0) "Download ${size(needed)}" else "Download") }
+                    ) { Text(if (needed > 0) "Download ${formatSize(needed)}" else "Download") }
                     Text(
-                        "Wi-Fi recommended · ${size(free)} free on this phone",
+                        if (free == Long.MAX_VALUE) "Wi-Fi recommended" else "Wi-Fi recommended · ${formatSize(free)} free on this phone",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
@@ -174,7 +190,7 @@ fun ModelsScreen(
         ) {
             if (setup) Hero()
             SectionCard("Always included") { models.filter { it.core }.forEach { row(it) } }
-            SectionCard(if (setup) "Scripts to read" else "Scripts") { models.filter { !it.core }.forEach { row(it) } }
+            SectionCard("Scripts to read") { models.filter { !it.core }.forEach { row(it) } }
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -190,7 +206,7 @@ private fun Hero() {
         Image(painterResource(R.drawable.logo_cup), contentDescription = null, modifier = Modifier.size(96.dp))
         Text("Welcome to translatte", style = DisplayTitleStyle, color = MaterialTheme.colorScheme.onBackground)
         Text(
-            "Everything runs on this phone. Download the models once, then translate offline.",
+            "Download the languages you read. After that, everything runs on your phone, with no internet needed.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -200,15 +216,15 @@ private fun Hero() {
 
 @Composable
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
-        )
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), content = content)
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            Text(
+                title.uppercase(),
+                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp).semantics { heading() },
+            )
+            content()
         }
     }
 }
@@ -239,13 +255,6 @@ private fun ModelRow(
             Spacer(Modifier.width(4.dp))
             Column(Modifier.weight(1f)) {
                 Text(model.displayName, style = MaterialTheme.typography.titleMedium)
-                val status = when {
-                    model.core -> size
-                    model.state == ModelState.INSTALLED -> "Installed · $size"
-                    model.state == ModelState.INCOMPLETE -> "Incomplete · $size"
-                    else -> size
-                }
-                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (model.languages.isNotEmpty()) {
                     Text(
                         model.languages.joinToString(", "),
@@ -255,12 +264,18 @@ private fun ModelRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                val status = when {
+                    model.core -> "Required · $size"
+                    model.state == ModelState.INSTALLED -> "Installed · $size"
+                    model.state == ModelState.INCOMPLETE -> "Incomplete · $size"
+                    else -> size
+                }
+                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             actions?.invoke()
         }
         if (progress != null) {
             val (done, total) = progress
-            val context = LocalContext.current
             LinearProgressIndicator(
                 progress = { if (total > 0) done.toFloat() / total else 0f },
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -269,10 +284,22 @@ private fun ModelRow(
                 if (done == 0L) {
                     "Waiting for data…"
                 } else {
-                    "${Formatter.formatShortFileSize(context, done)} of ${Formatter.formatShortFileSize(context, total)}"
+                    "${formatSize(done)} of ${formatSize(total)}"
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
         }
     }
+}
+
+private val SmallButtonPadding = PaddingValues(horizontal = 14.dp)
+
+@Composable
+private fun SmallButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Button(onClick, Modifier.height(34.dp), enabled = enabled, contentPadding = SmallButtonPadding) { Text(label) }
+}
+
+@Composable
+private fun SmallOutlinedButton(label: String, onClick: () -> Unit) {
+    OutlinedButton(onClick, Modifier.height(34.dp), contentPadding = SmallButtonPadding) { Text(label) }
 }
