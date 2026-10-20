@@ -153,8 +153,9 @@ struct ResultScreen: View {
                 if !hintSeen {
                     Text("Pinch to zoom · drag to pan · double-tap to fit")
                         .font(.caption)
-                        .foregroundStyle(Color(red: 0xF1 / 255, green: 0xE6 / 255, blue: 0xD8 / 255))
-                        .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Palette.glass, in: Capsule())
                         .accessibilityIdentifier("result-hint")
                 }
             }

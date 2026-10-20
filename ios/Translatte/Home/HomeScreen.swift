@@ -75,6 +75,8 @@ struct HomeScreen: View {
             Button { path.append(.languages) } label: {
                 Label("Languages", systemImage: "globe")
                     .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .fixedSize()
                     .padding(.horizontal, 14)
                     .frame(height: 44)
                     .foregroundStyle(Palette.text)
