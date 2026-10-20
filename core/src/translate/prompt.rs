@@ -13,30 +13,26 @@ fn prompt_name(l: &Language) -> &str {
     l.prompt_name.as_deref().unwrap_or(&l.name)
 }
 
-fn prompt_name_zh(l: &Language) -> &str {
-    l.prompt_name_zh
-        .as_deref()
-        .unwrap_or_else(|| prompt_name(l))
-}
-
 /// Hy-MT2's default translation instruction (model card), naming the source language too, which
 /// makes the model translate short Latin-script signs it otherwise copies. Pairs with a Chinese
 /// variety, or a language it only writes when asked in Chinese, get the Chinese instruction with
-/// Chinese language names, as the model card prescribes.
+/// Chinese language names, as the model card prescribes; without a Chinese name for either side
+/// the whole instruction stays English rather than mixing languages.
 fn instruction(src: &Language, tgt: &Language) -> String {
-    if src.zh_instruction || tgt.zh_instruction {
-        format!(
-            "将以下{}文本翻译为{}，注意只需要输出翻译后的结果，不要额外解释：\n\n",
-            prompt_name_zh(src),
-            prompt_name_zh(tgt)
-        )
-    } else {
-        format!(
+    let zh_names = src
+        .prompt_name_zh
+        .as_deref()
+        .zip(tgt.prompt_name_zh.as_deref());
+    match zh_names {
+        Some((s, t)) if src.zh_instruction || tgt.zh_instruction => {
+            format!("将以下{s}文本翻译为{t}，注意只需要输出翻译后的结果，不要额外解释：\n\n")
+        }
+        _ => format!(
             "Translate the following {} text into {}. Note that you should only output the \
              translated result without any additional explanation:\n\n",
             prompt_name(src),
             prompt_name(tgt)
-        )
+        ),
     }
 }
 
@@ -224,13 +220,15 @@ mod tests {
     }
 
     #[test]
-    fn chinese_instruction_falls_back_to_english_names() {
+    fn missing_chinese_name_keeps_the_instruction_english() {
         let p = build_prompt(
             &lang("fr", "French"),
             &zh_lang("zh", "Chinese", "中文"),
             "Sortie",
         );
-        assert!(p.prefix.contains("将以下French文本翻译为中文"));
+        assert!(p
+            .prefix
+            .ends_with("Translate the following French text into Chinese. Note that you should only output the translated result without any additional explanation:\n\n"));
     }
 
     #[test]
