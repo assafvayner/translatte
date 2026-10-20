@@ -209,6 +209,7 @@ mod tests {
             code: "fr".into(),
             name: "French".into(),
             script_pack: None,
+            pair_model: None,
             rtl: false,
             spaced: true,
             prompt_name: None,

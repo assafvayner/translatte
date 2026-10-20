@@ -39,14 +39,14 @@ enum Command {
         #[command(flatten)]
         models: ModelArgs,
     },
-    /// Download the core models (detector, translator) and OCR script packs from upstream.
+    /// Download the core models and the packs (OCR script pack and translation model) of source languages.
     Fetch {
-        /// Script packs to install, e.g. rec-latin,rec-cjk.
-        #[arg(long, value_delimiter = ',', conflicts_with = "all_packs")]
-        packs: Vec<String>,
-        /// Install every script pack in the manifest.
+        /// Source languages to install, e.g. fr,ja.
+        #[arg(long, value_delimiter = ',', conflicts_with = "all")]
+        langs: Vec<String>,
+        /// Install every source language in the manifest.
         #[arg(long)]
-        all_packs: bool,
+        all: bool,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -109,13 +109,9 @@ fn real_main() -> Result<i32> {
                 return Ok(1);
             }
         }
-        Command::Fetch {
-            packs,
-            all_packs,
-            models,
-        } => {
+        Command::Fetch { langs, all, models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
-            fetch::run_fetch(&store, &packs, all_packs)?;
+            fetch::run_fetch(&store, &langs, all)?;
         }
         Command::Langs { models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;

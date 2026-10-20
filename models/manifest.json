@@ -18,22 +18,6 @@
       ]
     },
     {
-      "id": "translator",
-      "kind": "core",
-      "display_name": "Translator (Hy-MT2 1.8B)",
-      "source": {
-        "repo": "tencent/Hy-MT2-1.8B-GGUF",
-        "revision": "a0c709d9fac510f2c807aa3af52872340dc37a4a"
-      },
-      "files": [
-        {
-          "path": "translator/model.gguf",
-          "size": 1133080448,
-          "source_path": "Hy-MT2-1.8B-Q4_K_M.gguf"
-        }
-      ]
-    },
-    {
       "id": "rec-cjk",
       "kind": "script_pack",
       "display_name": "Chinese / Japanese",
@@ -50,28 +34,6 @@
         {
           "path": "rec-cjk/dict.txt",
           "size": 74012,
-          "source_path": "inference.yml",
-          "derive": "paddle_dict"
-        }
-      ]
-    },
-    {
-      "id": "rec-en",
-      "kind": "script_pack",
-      "display_name": "English",
-      "source": {
-        "repo": "PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx",
-        "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b"
-      },
-      "files": [
-        {
-          "path": "rec-en/inference.onnx",
-          "size": 7848423,
-          "source_path": "inference.onnx"
-        },
-        {
-          "path": "rec-en/dict.txt",
-          "size": 1416,
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -252,322 +214,946 @@
           "derive": "paddle_dict"
         }
       ]
+    },
+    {
+      "id": "pair-fr-en",
+      "kind": "pair_model",
+      "display_name": "French → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-fr-en/lex.bin",
+          "size": 4824120,
+          "source_path": "fr-en/lex.50.50.fren.s2t.bin"
+        },
+        {
+          "path": "pair-fr-en/model.bin",
+          "size": 31561787,
+          "source_path": "fr-en/model.fren.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-fr-en/vocab.spm",
+          "size": 814404,
+          "source_path": "fr-en/vocab.fren.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-de-en",
+      "kind": "pair_model",
+      "display_name": "German → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-de-en/lex.bin",
+          "size": 4945796,
+          "source_path": "de-en/lex.50.50.deen.s2t.bin"
+        },
+        {
+          "path": "pair-de-en/model.bin",
+          "size": 31561787,
+          "source_path": "de-en/model.deen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-de-en/vocab.spm",
+          "size": 810073,
+          "source_path": "de-en/vocab.deen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-es-en",
+      "kind": "pair_model",
+      "display_name": "Spanish → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-es-en/lex.bin",
+          "size": 4636248,
+          "source_path": "es-en/lex.50.50.esen.s2t.bin"
+        },
+        {
+          "path": "pair-es-en/model.bin",
+          "size": 31561787,
+          "source_path": "es-en/model.esen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-es-en/vocab.spm",
+          "size": 816054,
+          "source_path": "es-en/vocab.esen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-it-en",
+      "kind": "pair_model",
+      "display_name": "Italian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-it-en/lex.bin",
+          "size": 4713616,
+          "source_path": "it-en/lex.50.50.iten.s2t.bin"
+        },
+        {
+          "path": "pair-it-en/model.bin",
+          "size": 31561787,
+          "source_path": "it-en/model.iten.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-it-en/vocab.spm",
+          "size": 812724,
+          "source_path": "it-en/vocab.iten.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-pt-en",
+      "kind": "pair_model",
+      "display_name": "Portuguese → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-pt-en/lex.bin",
+          "size": 4634492,
+          "source_path": "pt-en/lex.50.50.pten.s2t.bin"
+        },
+        {
+          "path": "pair-pt-en/model.bin",
+          "size": 31561787,
+          "source_path": "pt-en/model.pten.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-pt-en/vocab.spm",
+          "size": 816726,
+          "source_path": "pt-en/vocab.pten.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-nl-en",
+      "kind": "pair_model",
+      "display_name": "Dutch → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-nl-en/lex.bin",
+          "size": 4862412,
+          "source_path": "nl-en/lex.50.50.nlen.s2t.bin"
+        },
+        {
+          "path": "pair-nl-en/model.bin",
+          "size": 31561787,
+          "source_path": "nl-en/model.nlen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-nl-en/vocab.spm",
+          "size": 807708,
+          "source_path": "nl-en/vocab.nlen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-pl-en",
+      "kind": "pair_model",
+      "display_name": "Polish → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-pl-en/lex.bin",
+          "size": 4964208,
+          "source_path": "pl-en/lex.50.50.plen.s2t.bin"
+        },
+        {
+          "path": "pair-pl-en/model.bin",
+          "size": 31561787,
+          "source_path": "pl-en/model.plen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-pl-en/vocab.spm",
+          "size": 821612,
+          "source_path": "pl-en/vocab.plen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-cs-en",
+      "kind": "pair_model",
+      "display_name": "Czech → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-cs-en/lex.bin",
+          "size": 4990588,
+          "source_path": "cs-en/lex.50.50.csen.s2t.bin"
+        },
+        {
+          "path": "pair-cs-en/model.bin",
+          "size": 31561787,
+          "source_path": "cs-en/model.csen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-cs-en/vocab.spm",
+          "size": 815154,
+          "source_path": "cs-en/vocab.csen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-tr-en",
+      "kind": "pair_model",
+      "display_name": "Turkish → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-tr-en/lex.bin",
+          "size": 4662492,
+          "source_path": "tr-en/lex.50.50.tren.s2t.bin"
+        },
+        {
+          "path": "pair-tr-en/model.bin",
+          "size": 17140836,
+          "source_path": "tr-en/model.tren.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-tr-en/vocab.spm",
+          "size": 811353,
+          "source_path": "tr-en/vocab.tren.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-id-en",
+      "kind": "pair_model",
+      "display_name": "Indonesian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-id-en/lex.bin",
+          "size": 4050348,
+          "source_path": "id-en/lex.50.50.iden.s2t.bin"
+        },
+        {
+          "path": "pair-id-en/model.bin",
+          "size": 17141051,
+          "source_path": "id-en/model.iden.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-id-en/vocab.spm",
+          "size": 772941,
+          "source_path": "id-en/vocab.iden.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ms-en",
+      "kind": "pair_model",
+      "display_name": "Malay → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ms-en/lex.bin",
+          "size": 4371896,
+          "source_path": "ms-en/lex.50.50.msen.s2t.bin"
+        },
+        {
+          "path": "pair-ms-en/model.bin",
+          "size": 17141051,
+          "source_path": "ms-en/model.msen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ms-en/vocab.spm",
+          "size": 802191,
+          "source_path": "ms-en/vocab.msen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-tl-en",
+      "kind": "pair_model",
+      "display_name": "Filipino → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-tl-en/lex.bin",
+          "size": 4952652,
+          "source_path": "tl-en/lex.50.50.tlen.s2t.bin"
+        },
+        {
+          "path": "pair-tl-en/model.bin",
+          "size": 31561787,
+          "source_path": "tl-en/model.tlen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-tl-en/vocab.spm",
+          "size": 814564,
+          "source_path": "tl-en/vocab.tlen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-zh-en",
+      "kind": "pair_model",
+      "display_name": "Chinese → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-zh-en/lex.bin",
+          "size": 9219192,
+          "source_path": "zh-en/lex.50.50.zhen.s2t.bin"
+        },
+        {
+          "path": "pair-zh-en/model.bin",
+          "size": 43977787,
+          "source_path": "zh-en/model.zhen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-zh-en/vocab.spm",
+          "size": 1359697,
+          "source_path": "zh-en/vocab.zhen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-zh-Hant-en",
+      "kind": "pair_model",
+      "display_name": "Chinese (Traditional) → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-zh-Hant-en/lex.bin",
+          "size": 6385944,
+          "source_path": "zh-Hant-en/lex.50.50.zhen.s2t.bin"
+        },
+        {
+          "path": "pair-zh-Hant-en/model.bin",
+          "size": 43849787,
+          "source_path": "zh-Hant-en/model.zhen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-zh-Hant-en/srcvocab.spm",
+          "size": 769669,
+          "source_path": "zh-Hant-en/srcvocab.zhen.spm"
+        },
+        {
+          "path": "pair-zh-Hant-en/trgvocab.spm",
+          "size": 812572,
+          "source_path": "zh-Hant-en/trgvocab.zhen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ja-en",
+      "kind": "pair_model",
+      "display_name": "Japanese → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ja-en/lex.bin",
+          "size": 9348172,
+          "source_path": "ja-en/lex.50.50.jaen.s2t.bin"
+        },
+        {
+          "path": "pair-ja-en/model.bin",
+          "size": 43977787,
+          "source_path": "ja-en/model.jaen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ja-en/vocab.spm",
+          "size": 1443222,
+          "source_path": "ja-en/vocab.jaen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ko-en",
+      "kind": "pair_model",
+      "display_name": "Korean → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ko-en/lex.bin",
+          "size": 8617516,
+          "source_path": "ko-en/lex.50.50.koen.s2t.bin"
+        },
+        {
+          "path": "pair-ko-en/model.bin",
+          "size": 43977787,
+          "source_path": "ko-en/model.koen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ko-en/vocab.spm",
+          "size": 1410063,
+          "source_path": "ko-en/vocab.koen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ru-en",
+      "kind": "pair_model",
+      "display_name": "Russian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ru-en/lex.bin",
+          "size": 4397908,
+          "source_path": "ru-en/lex.50.50.ruen.s2t.bin"
+        },
+        {
+          "path": "pair-ru-en/model.bin",
+          "size": 31561787,
+          "source_path": "ru-en/model.ruen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ru-en/vocab.spm",
+          "size": 952371,
+          "source_path": "ru-en/vocab.ruen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-uk-en",
+      "kind": "pair_model",
+      "display_name": "Ukrainian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-uk-en/lex.bin",
+          "size": 3914120,
+          "source_path": "uk-en/lex.50.50.uken.s2t.bin"
+        },
+        {
+          "path": "pair-uk-en/model.bin",
+          "size": 17141051,
+          "source_path": "uk-en/model.uken.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-uk-en/vocab.spm",
+          "size": 886410,
+          "source_path": "uk-en/vocab.uken.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ar-en",
+      "kind": "pair_model",
+      "display_name": "Arabic → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ar-en/lex.bin",
+          "size": 4627200,
+          "source_path": "ar-en/lex.50.50.aren.s2t.bin"
+        },
+        {
+          "path": "pair-ar-en/model.bin",
+          "size": 31561787,
+          "source_path": "ar-en/model.aren.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ar-en/vocab.spm",
+          "size": 860035,
+          "source_path": "ar-en/vocab.aren.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-fa-en",
+      "kind": "pair_model",
+      "display_name": "Persian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-fa-en/lex.bin",
+          "size": 3896420,
+          "source_path": "fa-en/lex.50.50.faen.s2t.bin"
+        },
+        {
+          "path": "pair-fa-en/model.bin",
+          "size": 17141051,
+          "source_path": "fa-en/model.faen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-fa-en/vocab.spm",
+          "size": 843153,
+          "source_path": "fa-en/vocab.faen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ur-en",
+      "kind": "pair_model",
+      "display_name": "Urdu → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ur-en/lex.bin",
+          "size": 3518528,
+          "source_path": "ur-en/lex.50.50.uren.s2t.bin"
+        },
+        {
+          "path": "pair-ur-en/model.bin",
+          "size": 31561787,
+          "source_path": "ur-en/model.uren.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ur-en/vocab.spm",
+          "size": 843115,
+          "source_path": "ur-en/vocab.uren.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ug-en",
+      "kind": "pair_model",
+      "display_name": "Uyghur → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ug-en/lex.bin",
+          "size": 3452416,
+          "source_path": "ug-en/lex.50.50.ugen.s2t.bin"
+        },
+        {
+          "path": "pair-ug-en/model.bin",
+          "size": 31561635,
+          "source_path": "ug-en/model.ugen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ug-en/vocab.spm",
+          "size": 869060,
+          "source_path": "ug-en/vocab.ugen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-hi-en",
+      "kind": "pair_model",
+      "display_name": "Hindi → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-hi-en/lex.bin",
+          "size": 4605984,
+          "source_path": "hi-en/lex.50.50.hien.s2t.bin"
+        },
+        {
+          "path": "pair-hi-en/model.bin",
+          "size": 17141051,
+          "source_path": "hi-en/model.hien.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-hi-en/vocab.spm",
+          "size": 925436,
+          "source_path": "hi-en/vocab.hien.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-mr-en",
+      "kind": "pair_model",
+      "display_name": "Marathi → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-mr-en/lex.bin",
+          "size": 4534544,
+          "source_path": "mr-en/lex.50.50.mren.s2t.bin"
+        },
+        {
+          "path": "pair-mr-en/model.bin",
+          "size": 31561787,
+          "source_path": "mr-en/model.mren.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-mr-en/vocab.spm",
+          "size": 1009482,
+          "source_path": "mr-en/vocab.mren.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-th-en",
+      "kind": "pair_model",
+      "display_name": "Thai → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-th-en/lex.bin",
+          "size": 4487056,
+          "source_path": "th-en/lex.50.50.then.s2t.bin"
+        },
+        {
+          "path": "pair-th-en/model.bin",
+          "size": 31561787,
+          "source_path": "th-en/model.then.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-th-en/vocab.spm",
+          "size": 995429,
+          "source_path": "th-en/vocab.then.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ta-en",
+      "kind": "pair_model",
+      "display_name": "Tamil → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-ta-en/lex.bin",
+          "size": 4940884,
+          "source_path": "ta-en/lex.50.50.taen.s2t.bin"
+        },
+        {
+          "path": "pair-ta-en/model.bin",
+          "size": 31561787,
+          "source_path": "ta-en/model.taen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ta-en/vocab.spm",
+          "size": 1104678,
+          "source_path": "ta-en/vocab.taen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-te-en",
+      "kind": "pair_model",
+      "display_name": "Telugu → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+      },
+      "files": [
+        {
+          "path": "pair-te-en/lex.bin",
+          "size": 4815756,
+          "source_path": "te-en/lex.50.50.teen.s2t.bin"
+        },
+        {
+          "path": "pair-te-en/model.bin",
+          "size": 17141051,
+          "source_path": "te-en/model.teen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-te-en/vocab.spm",
+          "size": 1056197,
+          "source_path": "te-en/vocab.teen.spm"
+        }
+      ]
     }
   ],
   "languages": [
     {
       "code": "en",
       "name": "English",
-      "script_pack": "rec-en",
+      "script_pack": null,
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "英语"
+      "spaced": true
     },
     {
       "code": "fr",
       "name": "French",
       "script_pack": "rec-latin",
+      "pair_model": "pair-fr-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "法语"
+      "spaced": true
     },
     {
       "code": "de",
       "name": "German",
       "script_pack": "rec-latin",
+      "pair_model": "pair-de-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "德语"
+      "spaced": true
     },
     {
       "code": "es",
       "name": "Spanish",
       "script_pack": "rec-latin",
+      "pair_model": "pair-es-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "西班牙语"
+      "spaced": true
     },
     {
       "code": "it",
       "name": "Italian",
       "script_pack": "rec-latin",
+      "pair_model": "pair-it-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "意大利语"
+      "spaced": true
     },
     {
       "code": "pt",
       "name": "Portuguese",
       "script_pack": "rec-latin",
+      "pair_model": "pair-pt-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "葡萄牙语"
+      "spaced": true
     },
     {
       "code": "nl",
       "name": "Dutch",
       "script_pack": "rec-latin",
+      "pair_model": "pair-nl-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "荷兰语"
+      "spaced": true
     },
     {
       "code": "pl",
       "name": "Polish",
       "script_pack": "rec-latin",
+      "pair_model": "pair-pl-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "波兰语"
+      "spaced": true
     },
     {
       "code": "cs",
       "name": "Czech",
       "script_pack": "rec-latin",
+      "pair_model": "pair-cs-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "捷克语"
+      "spaced": true
     },
     {
       "code": "tr",
       "name": "Turkish",
       "script_pack": "rec-latin",
+      "pair_model": "pair-tr-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "土耳其语"
+      "spaced": true
     },
     {
       "code": "id",
       "name": "Indonesian",
       "script_pack": "rec-latin",
+      "pair_model": "pair-id-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "印尼语"
+      "spaced": true
     },
     {
       "code": "ms",
       "name": "Malay",
       "script_pack": "rec-latin",
+      "pair_model": "pair-ms-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "马来语"
+      "spaced": true
     },
     {
       "code": "tl",
       "name": "Filipino",
       "script_pack": "rec-latin",
+      "pair_model": "pair-tl-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "菲律宾语"
+      "spaced": true
     },
     {
       "code": "zh",
       "name": "Chinese",
       "script_pack": "rec-cjk",
+      "pair_model": "pair-zh-en",
       "rtl": false,
-      "spaced": false,
-      "prompt_name_zh": "中文",
-      "zh_instruction": true
+      "spaced": false
     },
     {
       "code": "zh-TW",
       "name": "Chinese (Traditional)",
       "script_pack": "rec-cjk",
+      "pair_model": "pair-zh-Hant-en",
       "rtl": false,
-      "spaced": false,
-      "prompt_name": "Traditional Chinese",
-      "prompt_name_zh": "繁体中文",
-      "zh_instruction": true
+      "spaced": false
     },
     {
       "code": "yue",
       "name": "Cantonese",
       "script_pack": "rec-cjk",
+      "pair_model": "pair-zh-Hant-en",
       "rtl": false,
-      "spaced": false,
-      "prompt_name_zh": "粤语",
-      "zh_instruction": true
+      "spaced": false
     },
     {
       "code": "ja",
       "name": "Japanese",
       "script_pack": "rec-cjk",
+      "pair_model": "pair-ja-en",
       "rtl": false,
-      "spaced": false,
-      "prompt_name_zh": "日语"
+      "spaced": false
     },
     {
       "code": "ko",
       "name": "Korean",
       "script_pack": "rec-korean",
+      "pair_model": "pair-ko-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "韩语"
+      "spaced": true
     },
     {
       "code": "ru",
       "name": "Russian",
       "script_pack": "rec-eslav",
+      "pair_model": "pair-ru-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "俄语"
+      "spaced": true
     },
     {
       "code": "uk",
       "name": "Ukrainian",
       "script_pack": "rec-eslav",
+      "pair_model": "pair-uk-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "乌克兰语"
+      "spaced": true
     },
     {
       "code": "ar",
       "name": "Arabic",
       "script_pack": "rec-arabic",
+      "pair_model": "pair-ar-en",
       "rtl": true,
-      "spaced": true,
-      "prompt_name_zh": "阿拉伯语"
+      "spaced": true
     },
     {
       "code": "fa",
       "name": "Persian",
       "script_pack": "rec-arabic",
+      "pair_model": "pair-fa-en",
       "rtl": true,
-      "spaced": true,
-      "prompt_name_zh": "波斯语"
+      "spaced": true
     },
     {
       "code": "ur",
       "name": "Urdu",
       "script_pack": "rec-arabic",
+      "pair_model": "pair-ur-en",
       "rtl": true,
-      "spaced": true,
-      "prompt_name_zh": "乌尔都语"
+      "spaced": true
     },
     {
       "code": "ug",
       "name": "Uyghur",
       "script_pack": "rec-arabic",
+      "pair_model": "pair-ug-en",
       "rtl": true,
-      "spaced": true,
-      "prompt_name_zh": "维吾尔语",
-      "zh_instruction": true
+      "spaced": true
     },
     {
       "code": "hi",
       "name": "Hindi",
       "script_pack": "rec-devanagari",
+      "pair_model": "pair-hi-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "印地语"
+      "spaced": true
     },
     {
       "code": "mr",
       "name": "Marathi",
       "script_pack": "rec-devanagari",
+      "pair_model": "pair-mr-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "马拉地语"
+      "spaced": true
     },
     {
       "code": "th",
       "name": "Thai",
       "script_pack": "rec-th",
+      "pair_model": "pair-th-en",
       "rtl": false,
-      "spaced": false,
-      "prompt_name_zh": "泰语"
+      "spaced": false
     },
     {
       "code": "ta",
       "name": "Tamil",
       "script_pack": "rec-ta",
+      "pair_model": "pair-ta-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "泰米尔语"
+      "spaced": true
     },
     {
       "code": "te",
       "name": "Telugu",
       "script_pack": "rec-te",
+      "pair_model": "pair-te-en",
       "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "泰卢固语"
-    },
-    {
-      "code": "he",
-      "name": "Hebrew",
-      "script_pack": null,
-      "rtl": true,
-      "spaced": true,
-      "prompt_name_zh": "希伯来语"
-    },
-    {
-      "code": "vi",
-      "name": "Vietnamese",
-      "script_pack": null,
-      "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "越南语"
-    },
-    {
-      "code": "kk",
-      "name": "Kazakh (Arabic script)",
-      "script_pack": null,
-      "rtl": true,
-      "spaced": true,
-      "prompt_name": "Kazakh",
-      "prompt_name_zh": "哈萨克语",
-      "zh_instruction": true
-    },
-    {
-      "code": "mn",
-      "name": "Mongolian (traditional script)",
-      "script_pack": null,
-      "rtl": false,
-      "spaced": true,
-      "prompt_name": "Mongolian",
-      "prompt_name_zh": "蒙古语",
-      "zh_instruction": true
-    },
-    {
-      "code": "bo",
-      "name": "Tibetan",
-      "script_pack": null,
-      "rtl": false,
-      "spaced": false,
-      "prompt_name_zh": "藏语",
-      "zh_instruction": true
-    },
-    {
-      "code": "km",
-      "name": "Khmer",
-      "script_pack": null,
-      "rtl": false,
-      "spaced": false,
-      "prompt_name_zh": "高棉语"
-    },
-    {
-      "code": "my",
-      "name": "Burmese",
-      "script_pack": null,
-      "rtl": false,
-      "spaced": false,
-      "prompt_name_zh": "缅甸语"
-    },
-    {
-      "code": "bn",
-      "name": "Bengali",
-      "script_pack": null,
-      "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "孟加拉语"
-    },
-    {
-      "code": "gu",
-      "name": "Gujarati",
-      "script_pack": null,
-      "rtl": false,
-      "spaced": true,
-      "prompt_name_zh": "古吉拉特语"
+      "spaced": true
     }
   ]
 }

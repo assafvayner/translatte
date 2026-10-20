@@ -150,6 +150,7 @@ mod tests {
             code: code.into(),
             name: code.into(),
             script_pack: None,
+            pair_model: None,
             rtl: false,
             spaced: true,
             prompt_name: None,

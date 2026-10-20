@@ -19,8 +19,8 @@ fn detects_and_reads_hello_world() {
     .to_rgb8();
     let mut det = Detector::load(&store.model_file("det", "inference.onnx").unwrap()).unwrap();
     let mut rec = Recognizer::load(
-        &store.model_file("rec-en", "inference.onnx").unwrap(),
-        &store.model_file("rec-en", "dict.txt").unwrap(),
+        &store.model_file("rec-latin", "inference.onnx").unwrap(),
+        &store.model_file("rec-latin", "dict.txt").unwrap(),
     )
     .unwrap();
 

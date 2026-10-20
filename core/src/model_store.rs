@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::manifest::{
-    Language, Manifest, ModelEntry, ModelFile, ModelKind, ModelSource, DETECTOR_ID, TRANSLATOR_ID,
+    Language, Manifest, ModelEntry, ModelFile, ModelKind, ModelSource, DETECTOR_ID,
 };
 use crate::{Result, TranslatteError};
 
@@ -17,7 +17,7 @@ pub enum InstallState {
 
 /// Models earlier manifests shipped and later dropped; [`ModelStore::prune`] deletes their
 /// directories. Add an id here whenever the manifest drops a model.
-pub const RETIRED_MODEL_IDS: &[&str] = &["rec-el", "rec-cyrillic"];
+pub const RETIRED_MODEL_IDS: &[&str] = &["rec-el", "rec-cyrillic", "rec-en", "translator"];
 
 pub struct ModelStore {
     manifest: Manifest,
@@ -209,7 +209,7 @@ impl ModelStore {
         Ok(total)
     }
 
-    /// Removes a script pack's files, including partial downloads.
+    /// Removes a script pack's or pair model's files, including partial downloads.
     pub fn delete(&self, id: &str) -> Result<()> {
         let entry = self.entry(id)?;
         if entry.kind == ModelKind::Core {
@@ -230,24 +230,109 @@ impl ModelStore {
     }
 
     pub fn core_installed(&self) -> Result<bool> {
-        Ok(self.state(DETECTOR_ID)? == InstallState::Installed
-            && self.state(TRANSLATOR_ID)? == InstallState::Installed)
+        Ok(self.state(DETECTOR_ID)? == InstallState::Installed)
     }
 
+    /// Languages that can be read and translated (they have a script pack and a pair model),
+    /// installed or not, sorted by name.
+    pub fn source_languages(&self) -> Vec<&Language> {
+        let mut out: Vec<_> = self
+            .manifest
+            .languages
+            .iter()
+            .filter(|l| l.script_pack.is_some() && l.pair_model.is_some())
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+
+    /// Source languages whose pack is installed, once the core models are.
     pub fn available_source_languages(&self) -> Result<Vec<&Language>> {
         if !self.core_installed()? {
             return Ok(Vec::new());
         }
         let mut out = Vec::new();
-        for l in &self.manifest.languages {
-            if let Some(pack) = &l.script_pack {
-                if self.state(pack)? == InstallState::Installed {
-                    out.push(l);
-                }
+        for l in self.source_languages() {
+            if self.language_state(&l.code)? == InstallState::Installed {
+                out.push(l);
             }
         }
-        out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
+    }
+
+    /// The models of a source language's pack: its script pack, then its pair model.
+    pub fn language_models<'a>(&self, l: &'a Language) -> Vec<&'a str> {
+        l.script_pack
+            .iter()
+            .chain(&l.pair_model)
+            .map(String::as_str)
+            .collect()
+    }
+
+    /// Installed once the script pack and the pair model are. Not installed while the pair model
+    /// isn't, even if another language installed the shared script pack; otherwise partial.
+    pub fn language_state(&self, code: &str) -> Result<InstallState> {
+        let l = self.manifest.language(code)?;
+        let (Some(pack), Some(pair)) = (&l.script_pack, &l.pair_model) else {
+            return Err(TranslatteError::Manifest(format!(
+                "{code} is not a source language"
+            )));
+        };
+        Ok(match (self.state(pack)?, self.state(pair)?) {
+            (InstallState::Installed, InstallState::Installed) => InstallState::Installed,
+            (InstallState::NotInstalled | InstallState::Installed, InstallState::NotInstalled) => {
+                InstallState::NotInstalled
+            }
+            _ => InstallState::Corrupt,
+        })
+    }
+
+    /// Deleting `code` would free space: its pair model, or a script pack no other language needs,
+    /// is at least partly on disk.
+    pub fn language_deletable(&self, code: &str) -> Result<bool> {
+        let l = self.manifest.language(code)?;
+        let mut bytes = 0;
+        if let Some(pair) = &l.pair_model {
+            bytes += self.downloaded_bytes(pair)?;
+        }
+        if let Some(pack) = &l.script_pack {
+            if !self.script_pack_shared(l)? {
+                bytes += self.downloaded_bytes(pack)?;
+            }
+        }
+        Ok(bytes > 0)
+    }
+
+    /// Deletes a source language's pair model, and its script pack unless another language with a
+    /// pair model on disk reads with it.
+    pub fn delete_language(&self, code: &str) -> Result<()> {
+        let l = self.manifest.language(code)?;
+        if let Some(pair) = &l.pair_model {
+            self.delete(pair)?;
+        }
+        if let Some(pack) = &l.script_pack {
+            if !self.script_pack_shared(l)? {
+                self.delete(pack)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a language with another pair model that is at least partly on disk reads with `l`'s
+    /// script pack.
+    fn script_pack_shared(&self, l: &Language) -> Result<bool> {
+        for other in &self.manifest.languages {
+            let Some(pair) = &other.pair_model else {
+                continue;
+            };
+            if other.script_pack != l.script_pack || Some(pair) == l.pair_model.as_ref() {
+                continue;
+            }
+            if self.downloaded_bytes(pair)? > 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn target_languages(&self) -> Vec<&Language> {
@@ -295,6 +380,7 @@ fn part_tag(source: Option<&ModelSource>, file: &ModelFile) -> String {
 mod tests {
     use super::*;
     use crate::manifest::tests::SAMPLE;
+    use crate::manifest::TARGET_LANGUAGE;
 
     fn store() -> (tempfile::TempDir, ModelStore) {
         let dir = tempfile::tempdir().unwrap();
@@ -317,9 +403,14 @@ mod tests {
         std::fs::write(p, contents).unwrap();
     }
 
+    fn install(store: &ModelStore, id: &str) {
+        for f in &store.manifest().model(id).unwrap().files {
+            write(store, &f.path, "abc");
+        }
+    }
+
     fn install_core(store: &ModelStore) {
-        write(store, "det/inference.onnx", "abc");
-        write(store, "translator/model.gguf", "abc");
+        install(store, "det");
     }
 
     #[test]
@@ -381,13 +472,16 @@ mod tests {
         assert_ne!(other.part_path(file(&other, "rec-latin", "dict.txt")), part);
     }
 
-    /// The translator file as an older manifest had it: same path, another upstream file and size.
-    fn old_translator(s: &ModelStore) -> ModelStore {
+    /// pair-fr-en's model as an older manifest had it: same path, another upstream file and size.
+    fn old_pair(s: &ModelStore) -> ModelStore {
         let old = SAMPLE
-            .replace("acme/translator-GGUF", "acme/old-translator-GGUF")
             .replace(
-                r#""path": "translator/model.gguf", "size": 3"#,
-                r#""path": "translator/model.gguf", "size": 5"#,
+                "fr-en/model.fren.intgemm.alphas.bin",
+                "fr-en/model.fren.v1.bin",
+            )
+            .replace(
+                r#""path": "pair-fr-en/model.bin", "size": 3"#,
+                r#""path": "pair-fr-en/model.bin", "size": 5"#,
             );
         ModelStore::new(Manifest::from_json(&old).unwrap(), s.root().to_path_buf())
     }
@@ -395,32 +489,35 @@ mod tests {
     #[test]
     fn replaced_model_needs_download_and_its_old_files_are_pruned() {
         let (_d, s) = store();
-        let old = old_translator(&s);
-        write(&s, "det/inference.onnx", "abc");
-        write(&s, "translator/model.gguf", "abcde");
-        assert_eq!(old.state("translator").unwrap(), InstallState::Installed);
-        assert_eq!(s.state("translator").unwrap(), InstallState::Corrupt);
-        assert!(!s.core_installed().unwrap());
-        assert_eq!(s.downloaded_bytes("translator").unwrap(), 0);
+        let old = old_pair(&s);
+        install_core(&s);
+        write(&s, "pair-fr-en/model.bin", "abcde");
+        write(&s, "pair-fr-en/vocab.spm", "abc");
+        write(&s, "pair-fr-en/lex.bin", "abc");
+        assert_eq!(old.state("pair-fr-en").unwrap(), InstallState::Installed);
+        assert_eq!(s.state("pair-fr-en").unwrap(), InstallState::Corrupt);
+        assert_eq!(s.downloaded_bytes("pair-fr-en").unwrap(), 6);
 
         let removed = s.prune().unwrap();
-        assert_eq!(removed, vec![s.root().join("translator/model.gguf")]);
-        assert_eq!(s.state("translator").unwrap(), InstallState::NotInstalled);
+        assert_eq!(removed, vec![s.root().join("pair-fr-en/model.bin")]);
+        assert!(!s
+            .is_file_installed(file(&s, "pair-fr-en", "model.bin"))
+            .unwrap());
         assert_eq!(s.state("det").unwrap(), InstallState::Installed);
     }
 
     #[test]
     fn prune_drops_partial_downloads_of_other_upstream_files() {
         let (_d, s) = store();
-        let old = old_translator(&s);
-        let f = file(&s, "translator", "model.gguf");
-        let stale = old.part_path(file(&old, "translator", "model.gguf"));
-        let legacy = s.root().join("translator/model.gguf.part");
+        let old = old_pair(&s);
+        let f = file(&s, "pair-fr-en", "model.bin");
+        let stale = old.part_path(file(&old, "pair-fr-en", "model.bin"));
+        let legacy = s.root().join("pair-fr-en/model.bin.part");
         std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
         std::fs::write(&stale, "ab").unwrap();
         std::fs::write(&legacy, "ab").unwrap();
         std::fs::write(s.part_path(f), "ab").unwrap();
-        assert_eq!(s.downloaded_bytes("translator").unwrap(), 2);
+        assert_eq!(s.downloaded_bytes("pair-fr-en").unwrap(), 2);
 
         let mut removed = s.prune().unwrap();
         removed.sort();
@@ -434,10 +531,21 @@ mod tests {
     fn prune_removes_dirs_of_retired_models_only() {
         let (_d, s) = store();
         write(&s, "rec-el/inference.onnx", "abc");
+        write(&s, "rec-en/inference.onnx", "abc");
+        write(&s, "translator/model.gguf", "abc");
         write(&s, "rec-latin/inference.onnx", "abc");
         write(&s, "translator-alt/model.gguf", "abc");
         write(&s, "loose-file", "x");
-        assert_eq!(s.prune().unwrap(), vec![s.root().join("rec-el")]);
+        let mut removed = s.prune().unwrap();
+        removed.sort();
+        assert_eq!(
+            removed,
+            vec![
+                s.root().join("rec-el"),
+                s.root().join("rec-en"),
+                s.root().join("translator")
+            ]
+        );
         assert!(!s.root().join("rec-el").exists());
         assert!(s.root().join("rec-latin/inference.onnx").exists());
         assert!(s.root().join("translator-alt/model.gguf").exists());
@@ -545,35 +653,70 @@ mod tests {
     }
 
     #[test]
-    fn available_source_languages_requires_core_and_pack() {
+    fn available_source_languages_require_core_pack_and_pair_model() {
         let (_d, s) = store();
-        write(&s, "rec-latin/inference.onnx", "abc");
-        write(&s, "rec-latin/dict.txt", "abc");
-        assert!(s.available_source_languages().unwrap().is_empty());
+        install(&s, "rec-latin");
         install_core(&s);
+        assert!(s.available_source_languages().unwrap().is_empty());
+        install(&s, "pair-fr-en");
         let codes: Vec<_> = s
             .available_source_languages()
             .unwrap()
             .iter()
-            .map(|l| l.code.clone())
+            .map(|l| l.code.as_str())
             .collect();
         assert_eq!(codes, vec!["fr"]);
-        assert_eq!(s.target_languages().len(), 2);
     }
 
     #[test]
-    fn languages_are_sorted_by_name() {
+    fn source_languages_are_sorted_by_name_and_exclude_the_target() {
         let dir = tempfile::tempdir().unwrap();
         let s = ModelStore::new(
-            Manifest::from_json(&SAMPLE.replace("Hebrew", "Arabic")).unwrap(),
+            Manifest::from_json(&SAMPLE.replace(r#""French""#, r#""Zulu""#)).unwrap(),
             dir.path().to_path_buf(),
         );
         let codes: Vec<_> = s
-            .target_languages()
+            .source_languages()
             .iter()
             .map(|l| l.code.as_str())
             .collect();
-        assert_eq!(codes, vec!["he", "fr"]);
+        assert_eq!(codes, vec!["de", "fr"]);
+    }
+
+    #[test]
+    fn language_state_needs_the_pack_and_the_pair_model() {
+        let (_d, s) = store();
+        assert_eq!(s.language_state("fr").unwrap(), InstallState::NotInstalled);
+        install(&s, "rec-latin");
+        assert_eq!(s.language_state("fr").unwrap(), InstallState::NotInstalled);
+        install(&s, "pair-fr-en");
+        assert_eq!(s.language_state("fr").unwrap(), InstallState::Installed);
+        write(&s, "pair-de-en/model.bin", "abc");
+        assert_eq!(s.language_state("de").unwrap(), InstallState::Corrupt);
+        assert!(s.language_state(TARGET_LANGUAGE).is_err());
+        assert_eq!(
+            s.language_models(s.manifest().language("fr").unwrap()),
+            vec!["rec-latin", "pair-fr-en"]
+        );
+    }
+
+    #[test]
+    fn deleting_a_language_keeps_a_script_pack_another_language_uses() {
+        let (_d, s) = store();
+        for id in ["rec-latin", "pair-fr-en", "pair-de-en"] {
+            install(&s, id);
+        }
+        assert!(s.language_deletable("de").unwrap());
+        s.delete_language("de").unwrap();
+        assert_eq!(s.state("pair-de-en").unwrap(), InstallState::NotInstalled);
+        assert_eq!(s.state("rec-latin").unwrap(), InstallState::Installed);
+        assert!(
+            !s.language_deletable("de").unwrap(),
+            "only French's pack is left"
+        );
+        s.delete_language("fr").unwrap();
+        assert_eq!(s.state("rec-latin").unwrap(), InstallState::NotInstalled);
+        assert!(!s.root().join("rec-latin").exists());
     }
 
     #[test]

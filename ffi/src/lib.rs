@@ -82,7 +82,7 @@ impl From<InstallState> for ModelState {
 pub struct ModelInfo {
     pub id: String,
     pub display_name: String,
-    /// Core models are required and can't be deleted; the rest are script packs.
+    /// Core models are required and can't be deleted; the rest are script packs and pair models.
     pub core: bool,
     pub size_bytes: u64,
     /// Bytes already on disk, including partial downloads that will resume.
@@ -426,10 +426,11 @@ impl Engine {
 }
 
 fn pack_languages(manifest: &Manifest, model: &ModelEntry) -> Vec<String> {
+    let id = Some(model.id.as_str());
     manifest
         .languages
         .iter()
-        .filter(|l| l.script_pack.as_deref() == Some(model.id.as_str()))
+        .filter(|l| l.script_pack.as_deref() == id || l.pair_model.as_deref() == id)
         .map(|l| l.name.clone())
         .collect()
 }
@@ -541,27 +542,30 @@ mod tests {
     }
 
     #[test]
-    fn pruning_an_old_install_leaves_the_new_translator_to_download() {
-        let dir = tempfile_dir();
+    fn pruning_an_old_install_removes_the_llm_and_retired_packs() {
+        let dir = tempfile_dir().join("prune");
         let old_gguf = dir.join("translator/model.gguf");
         std::fs::create_dir_all(old_gguf.parent().unwrap()).unwrap();
         std::fs::File::create(&old_gguf)
             .unwrap()
-            .set_len(2_489_909_760)
+            .set_len(1_133_080_448)
             .unwrap();
         std::fs::write(dir.join("translator/model.gguf.part"), "old").unwrap();
-        std::fs::create_dir_all(dir.join("rec-el")).unwrap();
-        std::fs::write(dir.join("rec-el/inference.onnx"), "x").unwrap();
+        for retired in ["rec-el", "rec-en"] {
+            std::fs::create_dir_all(dir.join(retired)).unwrap();
+            std::fs::write(dir.join(retired).join("inference.onnx"), "x").unwrap();
+        }
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
 
         assert_eq!(engine.prune_models().unwrap(), 3);
-        assert!(!old_gguf.exists());
-        assert!(!dir.join("rec-el").exists());
+        for gone in ["translator", "rec-el", "rec-en"] {
+            assert!(!dir.join(gone).exists(), "{gone}");
+        }
         let models = engine.models().unwrap();
-        let translator = models.iter().find(|m| m.id == "translator").unwrap();
-        assert_eq!(translator.state, ModelState::NotInstalled);
-        assert_eq!(translator.size_bytes, 1_133_080_448);
-        assert_eq!(translator.downloaded_bytes, 0);
+        assert!(models.iter().all(|m| m.id != "translator"));
+        let pair = models.iter().find(|m| m.id == "pair-fr-en").unwrap();
+        assert!(!pair.core);
+        assert_eq!(pair.languages, vec!["French"]);
         assert_eq!(engine.prune_models().unwrap(), 0);
     }
 

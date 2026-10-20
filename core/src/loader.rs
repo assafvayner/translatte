@@ -77,10 +77,10 @@ mod tests {
     #[test]
     fn target_only_language_is_rejected() {
         let (_d, s) = store();
-        let he = s.manifest().language("he").unwrap();
+        let he = s.manifest().language("en").unwrap();
         assert!(matches!(
             load_pipeline(&s, he, false),
-            Err(TranslatteError::NoScriptPack(c)) if c == "he"
+            Err(TranslatteError::NoScriptPack(c)) if c == "en"
         ));
     }
 

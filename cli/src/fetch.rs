@@ -1,33 +1,34 @@
 use std::io::Write;
 use std::sync::atomic::AtomicBool;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, Result};
 use translatte_core::download::{DownloadProgress, Downloader};
-use translatte_core::manifest::{ModelKind, DETECTOR_ID, TRANSLATOR_ID};
+use translatte_core::manifest::{Language, DETECTOR_ID};
 use translatte_core::model_store::ModelStore;
 
 /// Removes model data the manifest no longer describes, then downloads the core models plus the
-/// requested script packs; installed files are skipped.
-pub fn run_fetch(store: &ModelStore, packs: &[String], all_packs: bool) -> Result<()> {
-    let manifest = store.manifest();
-    let mut ids = vec![DETECTOR_ID, TRANSLATOR_ID];
-    if all_packs {
-        ids.extend(
-            manifest
-                .models
-                .iter()
-                .filter(|m| m.kind == ModelKind::ScriptPack)
-                .map(|m| m.id.as_str()),
-        );
+/// packs (script pack and pair model) of the given source languages; installed files are skipped.
+pub fn run_fetch(store: &ModelStore, langs: &[String], all: bool) -> Result<()> {
+    let sources = store.source_languages();
+    let chosen: Vec<&Language> = if all {
+        sources
     } else {
-        for p in packs {
-            match manifest.model(p) {
-                Some(m) if m.kind == ModelKind::ScriptPack => {
-                    if !ids.contains(&m.id.as_str()) {
-                        ids.push(&m.id)
-                    }
-                }
-                _ => bail!("{p} is not a script pack in the manifest"),
+        langs
+            .iter()
+            .map(|code| {
+                sources
+                    .iter()
+                    .copied()
+                    .find(|l| &l.code == code)
+                    .ok_or_else(|| anyhow!("{code} is not a source language in the manifest"))
+            })
+            .collect::<Result<_>>()?
+    };
+    let mut ids = vec![DETECTOR_ID];
+    for l in chosen {
+        for id in store.language_models(l) {
+            if !ids.contains(&id) {
+                ids.push(id);
             }
         }
     }
