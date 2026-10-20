@@ -10,13 +10,18 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.toArgb
+import co.huggingface.translatte.ui.settings.UiPrefs
+import co.huggingface.translatte.ui.theme.TranslatteTheme
+import co.huggingface.translatte.ui.theme.windowBackground
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,10 +36,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = UiPrefs(this)
+        val systemDark =
+            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        window.setBackgroundDrawable(ColorDrawable(windowBackground(prefs.theme.isDark(systemDark)).toArgb()))
+        enableEdgeToEdge()
         val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            val dark = prefs.theme.isDark(isSystemInDarkTheme())
+            LaunchedEffect(dark) {
+                val style = if (dark) {
+                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                }
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            TranslatteTheme(dark) {
                 val downloads by remember { Downloads.state(applicationContext) }.collectAsStateWithLifecycle(DownloadState())
                 var managing by rememberSaveable { mutableStateOf(false) }
                 LaunchedEffect(downloads.finished) { vm.refresh() }
