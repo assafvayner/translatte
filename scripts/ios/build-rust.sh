@@ -25,7 +25,7 @@ DEPS="$ROOT/target/ios-deps"
 export IPHONEOS_DEPLOYMENT_TARGET=17.0
 for target in "${TARGETS[@]}"; do
   lib_dir=$([[ $target == *-sim ]] && echo "$DEPS/lib-sim" || echo "$DEPS/lib-ios")
-  ORT_LIB_LOCATION="$lib_dir" cargo build --locked -p translatte-ffi --lib $PROFILE_FLAG --target "$target"
+  ORT_LIB_LOCATION="$lib_dir" cargo build --locked -p translatte-ffi --lib $PROFILE_FLAG --target "$target" --features download
 done
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 

@@ -25,6 +25,9 @@ targets:
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: CoreML.framework
+      # Model downloads: TLS certificate checks and hf-xet's system info.
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: co.huggingface.translatte
