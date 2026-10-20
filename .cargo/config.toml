@@ -5,3 +5,7 @@
 CMAKE_GENERATOR = "Ninja"
 CMAKE_C_COMPILER_LAUNCHER = "sccache"
 CMAKE_CXX_COMPILER_LAUNCHER = "sccache"
+
+# Android 15+ devices may use 16 KB pages; pad RELRO to 16 KB too, not just the LOAD segments.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]
