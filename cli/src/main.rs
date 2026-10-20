@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use translatte_core::manifest::Language;
 use translatte_core::pipeline::Stage;
@@ -50,19 +50,16 @@ enum Command {
         #[command(flatten)]
         models: ModelArgs,
     },
-    /// List languages available as source (installed packs) and target.
+    /// List the installed source languages and the target language.
     Langs {
         #[command(flatten)]
         models: ModelArgs,
     },
-    /// Translate the text in an image.
+    /// Translate the text in an image into English.
     Run {
         image: PathBuf,
         #[arg(long)]
         from: String,
-        /// Target language; required unless --no-translate is set.
-        #[arg(long)]
-        to: Option<String>,
         #[arg(short, long, default_value = "out/translated.png")]
         output: PathBuf,
         #[arg(long)]
@@ -119,29 +116,22 @@ fn real_main() -> Result<i32> {
                     .join(" ")
             };
             println!("source: {}", codes(&store.available_source_languages()?));
-            println!("target: {}", codes(&store.target_languages()));
+            println!("target: {}", store.target_language()?.code);
         }
         Command::Run {
             image,
             from,
-            to,
             output,
             json,
             no_translate,
             models,
         } => {
-            if to.is_none() && !no_translate {
-                bail!("--to is required unless --no-translate is set");
-            }
             let mut img = image::open(&image)
                 .with_context(|| format!("opening {}", image.display()))?
                 .to_rgb8();
             let store = setup::load_store(&models.manifest, &models.models)?;
             let src = store.manifest().language(&from)?;
-            let tgt = match &to {
-                Some(code) => store.manifest().language(code)?,
-                None => src,
-            };
+            let tgt = store.target_language()?;
             let t0 = Instant::now();
             let mut pipeline = setup::build_pipeline(&store, src, !no_translate)?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());

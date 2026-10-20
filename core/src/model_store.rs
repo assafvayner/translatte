@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::manifest::{
-    Language, Manifest, ModelEntry, ModelFile, ModelKind, ModelSource, DETECTOR_ID,
+    Language, Manifest, ModelEntry, ModelFile, ModelKind, ModelSource, DETECTOR_ID, TARGET_LANGUAGE,
 };
 use crate::{Result, TranslatteError};
 
@@ -266,6 +266,11 @@ impl ModelStore {
             }
         }
         Ok(out)
+    }
+
+    /// The language pair models translate into.
+    pub fn target_language(&self) -> Result<&Language> {
+        self.manifest.language(TARGET_LANGUAGE)
     }
 
     /// The models of a source language's pack: its script pack, then its pair model.
@@ -689,6 +694,12 @@ mod tests {
             .map(|l| l.code.as_str())
             .collect();
         assert_eq!(codes, vec!["de", "fr"]);
+    }
+
+    #[test]
+    fn the_target_language_is_english() {
+        let (_d, s) = store();
+        assert_eq!(s.target_language().unwrap().code, TARGET_LANGUAGE);
     }
 
     #[test]
