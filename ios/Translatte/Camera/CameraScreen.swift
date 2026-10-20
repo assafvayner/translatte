@@ -49,10 +49,8 @@ struct CameraScreen: View {
 
     @ViewBuilder private var viewfinder: some View {
         if let mock = camera.mockImage {
-            Image(uiImage: mock)
-                .resizable()
-                .scaledToFill()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Color.clear
+                .overlay { Image(uiImage: mock).resizable().scaledToFill() }
                 .clipped()
                 .ignoresSafeArea()
                 .accessibilityHidden(true)
