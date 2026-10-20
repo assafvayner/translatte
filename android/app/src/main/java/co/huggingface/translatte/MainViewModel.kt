@@ -30,7 +30,8 @@ sealed interface Phase {
     data object Idle : Phase
     data class Working(val label: String) : Phase
     data object Done : Phase
-    data class Failed(val message: String) : Phase
+    /** [retryable]: running the same photo again could succeed. */
+    data class Failed(val message: String, val retryable: Boolean = true) : Phase
 }
 
 private const val TAG = "translatte"
@@ -50,6 +51,9 @@ private const val MIN_FREE_MEMORY = 1_200_000_000L
 private const val COMFORTABLE_FREE_MEMORY = 2_800_000_000L
 
 private class LowMemoryException(message: String) : Exception(message)
+
+/** Swapping makes the target the new source, so it must be readable with the installed packs. */
+fun canSwap(sourceLanguages: List<LanguageInfo>, target: String): Boolean = sourceLanguages.any { it.code == target }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val translatte = app as TranslatteApp
@@ -113,6 +117,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setTarget(code: String) {
         targetCode = code
         prefs.edit().putString("target", code).apply()
+        prepare()
+    }
+
+    fun swap() {
+        if (!canSwap(sourceLanguages, targetCode)) return
+        val (source, target) = sourceCode to targetCode
+        sourceCode = target
+        targetCode = source
+        prefs.edit().putString("source", target).putString("target", source).apply()
         prepare()
     }
 
@@ -185,10 +198,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         run(bitmap)
     }
 
+    fun translate(file: File) = viewModelScope.launch {
+        val bitmap = loadOrFail { Images.load(file) } ?: return@launch
+        run(bitmap)
+    }
+
+    /** Runs the current photo again, e.g. after an error. */
+    fun retry() {
+        val bitmap = image ?: return
+        viewModelScope.launch { run(bitmap) }
+    }
+
     private suspend fun loadOrFail(load: () -> Bitmap): Bitmap? {
         phase = Phase.Working("Loading photo…")
         return withContext(Dispatchers.IO) { runCatching(load) }.getOrElse {
-            phase = Phase.Failed("Could not open the photo: ${it.message}")
+            phase = Phase.Failed("Could not open the photo: ${it.message}", retryable = false)
             null
         }
     }
@@ -219,7 +243,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             result = output
             phase = when {
                 output.translationError != null -> Phase.Failed("Translation failed: ${output.translationError}")
-                output.regions.isEmpty() -> Phase.Failed("No text found. Try moving closer or reducing glare.")
+                output.regions.isEmpty() -> Phase.Failed("No text found. Try moving closer or reducing glare.", retryable = false)
                 else -> Phase.Done
             }
         } catch (e: CancellationException) {
