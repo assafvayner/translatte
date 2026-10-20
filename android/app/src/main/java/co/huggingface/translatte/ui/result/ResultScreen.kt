@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -34,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,6 +52,7 @@ import co.huggingface.translatte.Phase
 import co.huggingface.translatte.ui.common.GlassCard
 import co.huggingface.translatte.ui.common.GlassIconButton
 import co.huggingface.translatte.ui.common.GlassSurface
+import co.huggingface.translatte.ui.theme.LocalGlass
 import uniffi.translatte_ffi.TranslationResult
 import kotlin.math.roundToInt
 
@@ -70,8 +74,9 @@ fun ResultScreen(
     var showOriginal by rememberSaveable { mutableStateOf(false) }
     var flipped by remember(result) { mutableStateOf(emptySet<Int>()) }
     var hint by remember { mutableStateOf(!hintSeen) }
+    val currentPhase by rememberUpdatedState(phase)
     fun gestured() {
-        if (hint) {
+        if (hint && currentPhase is Phase.Done) {
             hint = false
             onHintSeen()
         }
@@ -116,6 +121,7 @@ fun ResultScreen(
             }
         }
 
+        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(LocalGlass.current))
         Row(
             Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,

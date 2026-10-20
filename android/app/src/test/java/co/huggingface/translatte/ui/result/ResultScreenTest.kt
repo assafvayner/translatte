@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.percentOffset
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -35,7 +36,7 @@ class ResultScreenTest {
         phase: Phase,
         onRetry: () -> Unit = {},
         onHintSeen: () -> Unit = {},
-        image: Bitmap = bitmap,
+        image: Bitmap? = bitmap,
         result: TranslationResult? = null,
     ) {
         compose.setContent {
@@ -103,5 +104,29 @@ class ResultScreenTest {
         compose.onNodeWithText("No text found. Try moving closer or reducing glare.").assertExists()
         compose.onNodeWithText("Retry").assertDoesNotExist()
         compose.onNodeWithText("Back").assertExists()
+    }
+
+    @Test
+    fun aPhotoThatFailedToLoadShowsTheErrorCard() {
+        show(Phase.Failed("Could not open the photo", retryable = false), image = null)
+        compose.onNodeWithText("Could not open the photo").assertExists()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
+        compose.onNodeWithText("Back").assertExists()
+    }
+
+    @Test
+    fun gesturesWhileWorkingDontHideTheHintForGood() {
+        var hintSeen = false
+        show(Phase.Working("Finding text…"), onHintSeen = { hintSeen = true })
+        compose.onNodeWithTag("viewer").performTouchInput { doubleClick(center) }
+        compose.waitForIdle()
+        assertEquals(false, hintSeen)
+    }
+
+    @Test
+    fun originalModeExposesTheOriginalText() {
+        show(Phase.Done, image = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888), result = testResult())
+        compose.onNodeWithText("Original").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithContentDescription(testResult().regions.first().sourceText).assertExists()
     }
 }

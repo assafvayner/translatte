@@ -45,7 +45,7 @@ import kotlin.math.sin
  * Draws the photo with each translated region painted over its source text. Regions whose index is
  * in [flipped] are left unpainted, showing the original. With [onToggle], tapping a region toggles
  * it, and each region is an accessible node: its label is the translation and its state the
- * original text. Taps and [onDoubleTap] (in this layout's own coordinates) share one detector, so
+ * original text, or just the original while [showOriginal]. Taps and [onDoubleTap] (in this layout's own coordinates) share one detector, so
  * double-tapping on a region doesn't toggle it.
  */
 @Composable
@@ -91,7 +91,7 @@ fun OverlayImage(
                 }
             }
         }
-        if (onToggle != null && !showOriginal) {
+        if (onToggle != null) {
             val fit = Fit(bitmap, Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()))
             val density = LocalDensity.current
             boxes.forEachIndexed { i, box ->
@@ -108,11 +108,15 @@ fun OverlayImage(
                         .size(with(density) { w.toDp() }, with(density) { h.toDp() })
                         .rotate(Math.toDegrees(box.region.angle.toDouble()).toFloat())
                         .semantics {
-                            contentDescription = box.region.translatedText.orEmpty()
-                            stateDescription = box.region.sourceText
-                            onClick(if (i in flipped) "Show translation" else "Show original") {
-                                onToggle(i)
-                                true
+                            if (showOriginal) {
+                                contentDescription = box.region.sourceText
+                            } else {
+                                contentDescription = box.region.translatedText.orEmpty()
+                                stateDescription = box.region.sourceText
+                                onClick(if (i in flipped) "Show translation" else "Show original") {
+                                    onToggle(i)
+                                    true
+                                }
                             }
                         },
                 )
