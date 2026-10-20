@@ -10,7 +10,7 @@ struct ModelsView: View {
     @State private var meteredPrompt: [String]?
 
     var body: some View {
-        let free = model.freeBytes()
+        let free = model.freeBytes
         List {
             if setup {
                 Text("Translatte works offline once its models are on the phone. The text reader and translator are required; pick the scripts you want to read.")

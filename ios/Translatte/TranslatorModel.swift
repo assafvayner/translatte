@@ -17,6 +17,8 @@ final class TranslatorModel: ObservableObject {
     @Published private(set) var targetLanguages: [LanguageInfo] = []
     @Published private(set) var modelsReady = false
     @Published private(set) var setupError: String?
+    /// Space left on the volume the models download to, as of the last `reload`.
+    @Published private(set) var freeBytes: UInt64 = .max
     @Published var sourceCode = UserDefaults.standard.string(forKey: "source") ?? "" {
         didSet {
             UserDefaults.standard.set(sourceCode, forKey: "source")
@@ -94,17 +96,13 @@ final class TranslatorModel: ObservableObject {
             setupError = errorMessage(error)
             modelsReady = false
         }
+        let values = try? modelsDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        freeBytes = values?.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) } ?? .max
     }
 
     /// Bytes still to fetch for `ids`, counting partial downloads that will resume.
     func bytesToDownload(_ ids: [String]) -> UInt64 {
         models.filter { ids.contains($0.id) }.reduce(0) { $0 + $1.remainingBytes }
-    }
-
-    /// Space left on the volume the models download to.
-    func freeBytes() -> UInt64 {
-        let values = try? modelsDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) } ?? .max
     }
 
     func deleteModel(_ id: String) {

@@ -130,6 +130,23 @@ final class DownloadsTests: XCTestCase {
         XCTAssertTrue(makeDownloads(FakeEngine()).pending.isEmpty)
     }
 
+    func testRelaunchWaitsForTheFirstNetworkUpdate() async {
+        let first = Downloads(defaults: defaults, monitorNetwork: false)
+        first.networkChanged(available: false, metered: false)
+        first.start(["rec-en"], allowMetered: true)
+
+        let engine = FakeEngine()
+        let relaunched = Downloads(defaults: defaults, backoff: { _ in .milliseconds(10) })
+        relaunched.engine = engine
+        XCTAssertFalse(relaunched.running, "the network isn't known yet")
+        XCTAssertTrue(relaunched.queued)
+
+        await waitUntil { relaunched.running }
+        relaunched.cancel()
+        engine.finish(with: .failure(FfiError.Cancelled))
+        await waitUntil { !relaunched.busy }
+    }
+
     func testMeteredPromptOnlyForLargeDownloads() {
         XCTAssertTrue(Downloads.needsMeteredPrompt(bytes: 2_500_000_000, metered: true))
         XCTAssertFalse(Downloads.needsMeteredPrompt(bytes: 8_000_000, metered: true))

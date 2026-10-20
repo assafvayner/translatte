@@ -41,7 +41,9 @@ final class Downloads: ObservableObject {
     @Published private(set) var pending: [DownloadRequest] {
         didSet { defaults.set(try? JSONEncoder().encode(pending), forKey: Self.pendingKey) }
     }
-    @Published private(set) var networkAvailable = true
+    /// False until the path monitor's first update, so a Wi-Fi-only request saved before a relaunch
+    /// can't start on cellular.
+    @Published private(set) var networkAvailable: Bool
     /// Cellular, a personal hotspot or Low Data Mode.
     @Published private(set) var isMetered = false
     /// Bumped when a model finishes or a run ends, so screens re-read install state.
@@ -91,6 +93,7 @@ final class Downloads: ObservableObject {
     ) {
         self.defaults = defaults
         self.backoff = backoff
+        networkAvailable = !monitorNetwork
         pending = defaults.data(forKey: Self.pendingKey)
             .flatMap { try? JSONDecoder().decode([DownloadRequest].self, from: $0) } ?? []
         guard monitorNetwork else { return }
