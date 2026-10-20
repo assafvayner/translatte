@@ -52,10 +52,16 @@ void fail(char **err, const char *message) {
 }
 
 // A call that throws leaves the rest of its sentences queued on the model, holding callbacks into that
-// call's stack frame. Drop them so the next call on the model doesn't run them.
-void discard_pending(TranslationModel &model) {
-  Batch batch;
-  while (model.generateBatch(batch) > 0) {
+// call's stack frame, and the service holding a reference to the model until its next call. Drop the
+// sentences so the next call on the model doesn't run them, then run an empty call so the service lets
+// go of every drained model and bg_free really frees this one.
+void discard_pending(const std::shared_ptr<TranslationModel> &model) noexcept {
+  try {
+    Batch batch;
+    while (model->generateBatch(batch) > 0) {
+    }
+    engine().translateMultiple(model, {}, {});
+  } catch (...) {
   }
 }
 
@@ -108,7 +114,7 @@ extern "C" int bg_translate(bg_model *model, const char *const *texts, size_t n,
       try {
         responses = engine().translateMultiple(model->model, std::move(sources), options);
       } catch (...) {
-        discard_pending(*model->model);
+        discard_pending(model->model);
         throw;
       }
     }
@@ -136,6 +142,9 @@ extern "C" int bg_translate(bg_model *model, const char *const *texts, size_t n,
 extern "C" void bg_free_string(char *s) { std::free(s); }
 
 extern "C" void bg_free(bg_model *model) {
-  std::lock_guard<std::mutex> lock(engine_mutex);
-  delete model;
+  try {
+    std::lock_guard<std::mutex> lock(engine_mutex);
+    delete model;
+  } catch (...) {
+  }
 }
