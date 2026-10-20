@@ -246,6 +246,17 @@ impl Engine {
         }))
     }
 
+    /// Deletes model files the manifest no longer describes (retired script packs, a replaced
+    /// translator, partial downloads of other upstream files), so they don't keep taking space
+    /// after an app update. Returns how many files or directories were removed. Call it once after
+    /// creating the engine; it blocks, so call it off the main thread.
+    pub fn prune_models(&self) -> Result<u32, FfiError> {
+        // A download started meanwhile waits rather than racing the cleanup.
+        #[cfg(feature = "download")]
+        let _downloading = self.downloading.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(self.store.prune()?.len() as u32)
+    }
+
     pub fn models(&self) -> Result<Vec<ModelInfo>, FfiError> {
         let manifest = self.store.manifest();
         manifest
@@ -321,7 +332,8 @@ impl Engine {
     }
 
     /// Decodes a PNG or JPEG, runs OCR for `source` and, when `translate` is set, translates into
-    /// `target`. Blocking; call it off the main thread. The cache holds one pipeline, so a call with
+    /// `target`. `attempt` seeds the translator's sampling: 0 for a new photo, and a higher value
+    /// on each retry of the same photo so it can come out differently. Blocking; call it off the main thread. The cache holds one pipeline, so a call with
     /// `translate` unset replaces a cached translating pipeline with an OCR-only one, and the next
     /// translating call (or `prepare`) reloads the translator.
     pub fn translate_image(
@@ -330,6 +342,7 @@ impl Engine {
         source: String,
         target: String,
         translate: bool,
+        attempt: u32,
         listener: Option<Arc<dyn ProgressListener>>,
     ) -> Result<TranslationResult, FfiError> {
         let manifest = self.store.manifest();
@@ -339,6 +352,9 @@ impl Engine {
 
         let mut cached = self.lock_cached();
         let pipeline = self.pipeline(&mut cached, src, translate)?;
+        if let Some(t) = pipeline.translator_mut() {
+            t.generator_mut().set_seed(attempt);
+        }
         let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
         Ok(TranslationResult::from_output(
             out,
@@ -524,6 +540,31 @@ mod tests {
         assert!(!engine.delete_model("rec-latin".into()).unwrap());
     }
 
+    #[test]
+    fn pruning_an_old_install_leaves_the_new_translator_to_download() {
+        let dir = tempfile_dir();
+        let old_gguf = dir.join("translator/model.gguf");
+        std::fs::create_dir_all(old_gguf.parent().unwrap()).unwrap();
+        std::fs::File::create(&old_gguf)
+            .unwrap()
+            .set_len(2_489_909_760)
+            .unwrap();
+        std::fs::write(dir.join("translator/model.gguf.part"), "old").unwrap();
+        std::fs::create_dir_all(dir.join("rec-el")).unwrap();
+        std::fs::write(dir.join("rec-el/inference.onnx"), "x").unwrap();
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+
+        assert_eq!(engine.prune_models().unwrap(), 3);
+        assert!(!old_gguf.exists());
+        assert!(!dir.join("rec-el").exists());
+        let models = engine.models().unwrap();
+        let translator = models.iter().find(|m| m.id == "translator").unwrap();
+        assert_eq!(translator.state, ModelState::NotInstalled);
+        assert_eq!(translator.size_bytes, 1_133_080_448);
+        assert_eq!(translator.downloaded_bytes, 0);
+        assert_eq!(engine.prune_models().unwrap(), 0);
+    }
+
     #[cfg(feature = "download")]
     struct NoProgress;
     #[cfg(feature = "download")]
@@ -585,11 +626,11 @@ mod tests {
         let dir = tempfile_dir();
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         let err = engine
-            .translate_image(vec![1, 2, 3], "fr".into(), "en".into(), false, None)
+            .translate_image(vec![1, 2, 3], "fr".into(), "en".into(), false, 0, None)
             .unwrap_err();
         assert!(err.to_string().contains("decode"), "{err}");
         let err = engine
-            .translate_image(vec![], "xx".into(), "en".into(), false, None)
+            .translate_image(vec![], "xx".into(), "en".into(), false, 0, None)
             .unwrap_err();
         assert!(err.to_string().contains("unknown language"), "{err}");
         let err = engine.prepare("xx".into(), "en".into()).unwrap_err();
@@ -643,7 +684,14 @@ mod tests {
         engine.prepare("en".into(), "de".into()).unwrap();
         let recorder = Arc::new(Recorder(Mutex::new(Vec::new())));
         let r = engine
-            .translate_image(png, "en".into(), "de".into(), true, Some(recorder.clone()))
+            .translate_image(
+                png,
+                "en".into(),
+                "de".into(),
+                true,
+                0,
+                Some(recorder.clone()),
+            )
             .unwrap();
         assert_eq!(r.regions.len(), 1);
         assert_eq!(r.regions[0].source_text, "HELLO WORLD");

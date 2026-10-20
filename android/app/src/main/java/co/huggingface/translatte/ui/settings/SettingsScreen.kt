@@ -60,8 +60,8 @@ fun SettingsScreen(theme: ThemeSetting, onTheme: (ThemeSetting) -> Unit, onBack:
                 )
                 InfoRow(
                     "Translation",
-                    "TranslateGemma 4B by Google · Gemma Terms of Use",
-                    onOpen = { uri.openUri("https://ai.google.dev/gemma/terms") },
+                    "Hy-MT2 1.8B by Tencent · Apache License 2.0",
+                    onOpen = { uri.openUri("https://huggingface.co/tencent/Hy-MT2-1.8B/blob/main/LICENSE.txt") },
                 )
                 InfoRow(
                     "Font",

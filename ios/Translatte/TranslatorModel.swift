@@ -86,6 +86,11 @@ final class TranslatorModel: ObservableObject {
             }
             let engine = try self.engine ?? Engine(modelsDir: modelsDirectory.path, manifestJson: String(contentsOf: url, encoding: .utf8))
             if self.engine == nil {
+                // Frees what an app update left behind (e.g. a replaced translator), off the main
+                // thread; the engine makes a download wait for it. Host models are a developer's.
+                if !usesHostModels {
+                    worker.async { _ = try? engine.pruneModels() }
+                }
                 self.engine = engine
                 downloads.engine = engine
             }
@@ -94,11 +99,10 @@ final class TranslatorModel: ObservableObject {
             targetLanguages = engine.targetLanguages()
             modelsReady = try engine.coreInstalled() && !sourceLanguages.isEmpty
             setupError = nil
-            if sourceLanguages.contains(where: { $0.code == sourceCode }) {
-                prepare()
-            } else {
-                sourceCode = (sourceLanguages.first { $0.code == "en" } ?? sourceLanguages.first)?.code ?? ""
-            }
+            let (source, target) = LanguageDirection.fallback(
+                source: sourceCode, target: targetCode, sources: sourceLanguages, targets: targetLanguages
+            )
+            setLanguages(source: source, target: target)
         } catch {
             setupError = errorMessage(error)
             modelsReady = false
@@ -151,7 +155,7 @@ final class TranslatorModel: ObservableObject {
         image = photo
         result = nil
         phase = .working("Starting…")
-        let (source, target) = (sourceCode, targetCode)
+        let (source, target, attempt) = (sourceCode, targetCode, runs.attempt)
         let listener = StageListener { [weak self] text in
             Task { @MainActor in
                 guard let self, self.runs.isCurrent(run), self.phase.isWorking else { return }
@@ -164,7 +168,13 @@ final class TranslatorModel: ObservableObject {
                     throw AppError(errorDescription: "Could not encode the photo")
                 }
                 let warning = try checkMemory()
-                let output = try engine.translateImage(image: jpeg, source: source, target: target, translate: true, listener: listener)
+                #if DEBUG
+                // For UI tests: `-mock-translation-error <message>` makes every translation fail.
+                if let message = UserDefaults.standard.string(forKey: "mock-translation-error") {
+                    throw AppError(errorDescription: message)
+                }
+                #endif
+                let output = try engine.translateImage(image: jpeg, source: source, target: target, translate: true, attempt: attempt, listener: listener)
                 modelsLoaded = true
                 return (output, warning)
             }
@@ -201,7 +211,7 @@ final class TranslatorModel: ObservableObject {
     /// Re-runs the last translation on the same photo.
     func retry() async {
         guard let lastPhoto else { return }
-        await translate(lastPhoto, run: runs.start())
+        await translate(lastPhoto, run: runs.start(retry: true))
     }
 
     func swapLanguages() {

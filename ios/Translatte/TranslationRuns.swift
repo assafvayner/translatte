@@ -12,10 +12,13 @@ struct LastResult {
 struct TranslationRuns {
     private(set) var current = 0
     private(set) var lastSuccess: LastResult?
+    /// Seeds the translator's sampling: 0 for a new photo, counting up on each retry of it.
+    private(set) var attempt: UInt32 = 0
 
-    /// Starts a run, superseding any earlier one.
-    mutating func start() -> Int {
+    /// Starts a run, superseding any earlier one; `retry` marks another attempt at the same photo.
+    mutating func start(retry: Bool = false) -> Int {
         current += 1
+        attempt = retry ? attempt + 1 : 0
         return current
     }
 

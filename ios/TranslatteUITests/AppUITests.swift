@@ -132,7 +132,7 @@ final class AppUITests: XCTestCase {
     }
 
     func testFailedTranslationOffersRetry() throws {
-        let failing = try XCUIApplication.withModels(["-mock-camera", TestEnv.helloWorld, "-source", "en", "-target", "xx"])
+        let failing = try XCUIApplication.withModels(["-mock-camera", TestEnv.helloWorld, "-source", "en", "-target", "de", "-mock-translation-error", "Translation failed"])
         XCTAssertTrue(failing.element("camera-screen").waitForExistence(timeout: 30))
         failing.buttons["camera-shutter"].tap()
         let retry = failing.buttons["result-retry"]
@@ -166,7 +166,7 @@ final class AppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["THEME"].exists)
         XCTAssertTrue(app.element("theme-system").label.contains("translatte in light mode, americano in dark mode"))
         XCTAssertTrue(app.element("credit-ocr").label.contains("PP-OCRv5 by PaddlePaddle · Apache License 2.0"))
-        XCTAssertTrue(app.element("credit-translation").label.contains("TranslateGemma 4B by Google · Gemma Terms of Use"))
+        XCTAssertTrue(app.element("credit-translation").label.contains("Hy-MT2 1.8B by Tencent · Apache License 2.0"))
         let font = app.element("credit-font")
         XCTAssertTrue(font.label.contains("Fraunces · SIL Open Font License 1.1"), font.label)
         XCTAssertTrue(font.label.contains("Font"), font.label)

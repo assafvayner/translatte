@@ -254,6 +254,8 @@ mod tests {
             rtl,
             spaced,
             prompt_name: None,
+            prompt_name_zh: None,
+            zh_instruction: false,
         }
     }
 

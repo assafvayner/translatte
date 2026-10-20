@@ -6,7 +6,8 @@ use translatte_core::download::{DownloadProgress, Downloader};
 use translatte_core::manifest::{ModelKind, DETECTOR_ID, TRANSLATOR_ID};
 use translatte_core::model_store::ModelStore;
 
-/// Downloads the core models plus the requested script packs; installed files are skipped.
+/// Removes model data the manifest no longer describes, then downloads the core models plus the
+/// requested script packs; installed files are skipped.
 pub fn run_fetch(store: &ModelStore, packs: &[String], all_packs: bool) -> Result<()> {
     let manifest = store.manifest();
     let mut ids = vec![DETECTOR_ID, TRANSLATOR_ID];
@@ -31,6 +32,9 @@ pub fn run_fetch(store: &ModelStore, packs: &[String], all_packs: bool) -> Resul
         }
     }
     std::fs::create_dir_all(store.root())?;
+    for path in store.prune()? {
+        eprintln!("removed stale {}", path.display());
+    }
     let downloader = Downloader::new(store)?;
     downloader.download_models_blocking(&ids, &AtomicBool::new(false), print_progress)?;
     eprintln!(

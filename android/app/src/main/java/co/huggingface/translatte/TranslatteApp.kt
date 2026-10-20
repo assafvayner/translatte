@@ -7,6 +7,7 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.system.Os
+import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -59,6 +60,13 @@ class TranslatteApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Frees what an app update left behind (e.g. a replaced translator), off the main thread;
+        // the engine makes a download wait for it.
+        scope.launch(Dispatchers.IO) {
+            runCatching { engine.pruneModels() }
+                .onSuccess { if (it > 0u) Log.i(TAG, "pruned $it stale model files") }
+                .onFailure { Log.w(TAG, "pruning stale models failed", it) }
+        }
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(DOWNLOAD_CHANNEL, "Model downloads", NotificationManager.IMPORTANCE_LOW),
         )
@@ -100,6 +108,7 @@ class TranslatteApp : Application() {
 
     companion object {
         const val DOWNLOAD_CHANNEL = "downloads"
+        private const val TAG = "translatte"
         private val RELEASE_AFTER = 2.minutes
     }
 }

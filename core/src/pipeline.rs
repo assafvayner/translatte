@@ -102,6 +102,10 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         Ok(lines)
     }
 
+    pub fn translator_mut(&mut self) -> Option<&mut T> {
+        self.translator.as_mut()
+    }
+
     /// Prepares the translator for `src` to `tgt` (e.g. when the user picks the languages), so the
     /// next `run` spends less time translating. A no-op without a translator.
     pub fn warm(&mut self, src: &Language, tgt: &Language) -> Result<()> {
@@ -208,6 +212,8 @@ mod tests {
             rtl: false,
             spaced: true,
             prompt_name: None,
+            prompt_name_zh: None,
+            zh_instruction: false,
         }
     }
 

@@ -20,16 +20,16 @@
     {
       "id": "translator",
       "kind": "core",
-      "display_name": "Translator (TranslateGemma 4B)",
+      "display_name": "Translator (Hy-MT2 1.8B)",
       "source": {
-        "repo": "mradermacher/translategemma-4b-it-GGUF",
-        "revision": "d37868f759d2f817a43d28dd80cf9f982ffa62fd"
+        "repo": "tencent/Hy-MT2-1.8B-GGUF",
+        "revision": "a0c709d9fac510f2c807aa3af52872340dc37a4a"
       },
       "files": [
         {
           "path": "translator/model.gguf",
-          "size": 2489909760,
-          "source_path": "translategemma-4b-it.Q4_K_M.gguf"
+          "size": 1133080448,
+          "source_path": "Hy-MT2-1.8B-Q4_K_M.gguf"
         }
       ]
     },
@@ -116,28 +116,6 @@
         {
           "path": "rec-eslav/dict.txt",
           "size": 1663,
-          "source_path": "inference.yml",
-          "derive": "paddle_dict"
-        }
-      ]
-    },
-    {
-      "id": "rec-cyrillic",
-      "kind": "script_pack",
-      "display_name": "Cyrillic (other)",
-      "source": {
-        "repo": "PaddlePaddle/cyrillic_PP-OCRv5_mobile_rec_onnx",
-        "revision": "2cef88145434beb8afa9dd82d77d799eb1ad7b29"
-      },
-      "files": [
-        {
-          "path": "rec-cyrillic/inference.onnx",
-          "size": 8048799,
-          "source_path": "inference.onnx"
-        },
-        {
-          "path": "rec-cyrillic/dict.txt",
-          "size": 2781,
           "source_path": "inference.yml",
           "derive": "paddle_dict"
         }
@@ -232,28 +210,6 @@
       ]
     },
     {
-      "id": "rec-el",
-      "kind": "script_pack",
-      "display_name": "Greek",
-      "source": {
-        "repo": "PaddlePaddle/el_PP-OCRv5_mobile_rec_onnx",
-        "revision": "8152b89d2ee0e1d4c92decab75fe75e5e3d836b6"
-      },
-      "files": [
-        {
-          "path": "rec-el/inference.onnx",
-          "size": 7808735,
-          "source_path": "inference.onnx"
-        },
-        {
-          "path": "rec-el/dict.txt",
-          "size": 1103,
-          "source_path": "inference.yml",
-          "derive": "paddle_dict"
-        }
-      ]
-    },
-    {
       "id": "rec-ta",
       "kind": "script_pack",
       "display_name": "Tamil",
@@ -304,175 +260,113 @@
       "name": "English",
       "script_pack": "rec-en",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "英语"
     },
     {
       "code": "fr",
       "name": "French",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "法语"
     },
     {
       "code": "de",
       "name": "German",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "德语"
     },
     {
       "code": "es",
       "name": "Spanish",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "西班牙语"
     },
     {
       "code": "it",
       "name": "Italian",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "意大利语"
     },
     {
       "code": "pt",
       "name": "Portuguese",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "葡萄牙语"
     },
     {
       "code": "nl",
       "name": "Dutch",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "荷兰语"
     },
     {
       "code": "pl",
       "name": "Polish",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "波兰语"
     },
     {
       "code": "cs",
       "name": "Czech",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "ro",
-      "name": "Romanian",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "sv",
-      "name": "Swedish",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "da",
-      "name": "Danish",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "no",
-      "name": "Norwegian",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "fi",
-      "name": "Finnish",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "hu",
-      "name": "Hungarian",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "捷克语"
     },
     {
       "code": "tr",
       "name": "Turkish",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "土耳其语"
     },
     {
       "code": "id",
       "name": "Indonesian",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "印尼语"
     },
     {
-      "code": "hr",
-      "name": "Croatian",
+      "code": "ms",
+      "name": "Malay",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "马来语"
     },
     {
-      "code": "sk",
-      "name": "Slovak",
+      "code": "tl",
+      "name": "Filipino",
       "script_pack": "rec-latin",
       "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "sl",
-      "name": "Slovenian",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "lt",
-      "name": "Lithuanian",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "lv",
-      "name": "Latvian",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "et",
-      "name": "Estonian",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "ca",
-      "name": "Catalan",
-      "script_pack": "rec-latin",
-      "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "菲律宾语"
     },
     {
       "code": "zh",
       "name": "Chinese",
       "script_pack": "rec-cjk",
       "rtl": false,
-      "spaced": false
+      "spaced": false,
+      "prompt_name_zh": "中文",
+      "zh_instruction": true
     },
     {
       "code": "zh-TW",
@@ -480,126 +374,200 @@
       "script_pack": "rec-cjk",
       "rtl": false,
       "spaced": false,
-      "prompt_name": "Chinese"
+      "prompt_name": "Traditional Chinese",
+      "prompt_name_zh": "繁体中文",
+      "zh_instruction": true
+    },
+    {
+      "code": "yue",
+      "name": "Cantonese",
+      "script_pack": "rec-cjk",
+      "rtl": false,
+      "spaced": false,
+      "prompt_name_zh": "粤语",
+      "zh_instruction": true
     },
     {
       "code": "ja",
       "name": "Japanese",
       "script_pack": "rec-cjk",
       "rtl": false,
-      "spaced": false
+      "spaced": false,
+      "prompt_name_zh": "日语"
     },
     {
       "code": "ko",
       "name": "Korean",
       "script_pack": "rec-korean",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "韩语"
     },
     {
       "code": "ru",
       "name": "Russian",
       "script_pack": "rec-eslav",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "俄语"
     },
     {
       "code": "uk",
       "name": "Ukrainian",
       "script_pack": "rec-eslav",
       "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "bg",
-      "name": "Bulgarian",
-      "script_pack": "rec-cyrillic",
-      "rtl": false,
-      "spaced": true
-    },
-    {
-      "code": "sr",
-      "name": "Serbian",
-      "script_pack": "rec-cyrillic",
-      "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "乌克兰语"
     },
     {
       "code": "ar",
       "name": "Arabic",
       "script_pack": "rec-arabic",
       "rtl": true,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "阿拉伯语"
     },
     {
       "code": "fa",
       "name": "Persian",
       "script_pack": "rec-arabic",
       "rtl": true,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "波斯语"
     },
     {
       "code": "ur",
       "name": "Urdu",
       "script_pack": "rec-arabic",
       "rtl": true,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "乌尔都语"
+    },
+    {
+      "code": "ug",
+      "name": "Uyghur",
+      "script_pack": "rec-arabic",
+      "rtl": true,
+      "spaced": true,
+      "prompt_name_zh": "维吾尔语",
+      "zh_instruction": true
     },
     {
       "code": "hi",
       "name": "Hindi",
       "script_pack": "rec-devanagari",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "印地语"
     },
     {
       "code": "mr",
       "name": "Marathi",
       "script_pack": "rec-devanagari",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "马拉地语"
     },
     {
       "code": "th",
       "name": "Thai",
       "script_pack": "rec-th",
       "rtl": false,
-      "spaced": false
-    },
-    {
-      "code": "el",
-      "name": "Greek",
-      "script_pack": "rec-el",
-      "rtl": false,
-      "spaced": true
+      "spaced": false,
+      "prompt_name_zh": "泰语"
     },
     {
       "code": "ta",
       "name": "Tamil",
       "script_pack": "rec-ta",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "泰米尔语"
     },
     {
       "code": "te",
       "name": "Telugu",
       "script_pack": "rec-te",
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "泰卢固语"
     },
     {
       "code": "he",
       "name": "Hebrew",
       "script_pack": null,
       "rtl": true,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "希伯来语"
     },
     {
       "code": "vi",
       "name": "Vietnamese",
       "script_pack": null,
       "rtl": false,
-      "spaced": true
+      "spaced": true,
+      "prompt_name_zh": "越南语"
+    },
+    {
+      "code": "kk",
+      "name": "Kazakh (Arabic script)",
+      "script_pack": null,
+      "rtl": true,
+      "spaced": true,
+      "prompt_name": "Kazakh",
+      "prompt_name_zh": "哈萨克语",
+      "zh_instruction": true
+    },
+    {
+      "code": "mn",
+      "name": "Mongolian (traditional script)",
+      "script_pack": null,
+      "rtl": false,
+      "spaced": true,
+      "prompt_name": "Mongolian",
+      "prompt_name_zh": "蒙古语",
+      "zh_instruction": true
+    },
+    {
+      "code": "bo",
+      "name": "Tibetan",
+      "script_pack": null,
+      "rtl": false,
+      "spaced": false,
+      "prompt_name_zh": "藏语",
+      "zh_instruction": true
+    },
+    {
+      "code": "km",
+      "name": "Khmer",
+      "script_pack": null,
+      "rtl": false,
+      "spaced": false,
+      "prompt_name_zh": "高棉语"
+    },
+    {
+      "code": "my",
+      "name": "Burmese",
+      "script_pack": null,
+      "rtl": false,
+      "spaced": false,
+      "prompt_name_zh": "缅甸语"
+    },
+    {
+      "code": "bn",
+      "name": "Bengali",
+      "script_pack": null,
+      "rtl": false,
+      "spaced": true,
+      "prompt_name_zh": "孟加拉语"
+    },
+    {
+      "code": "gu",
+      "name": "Gujarati",
+      "script_pack": null,
+      "rtl": false,
+      "spaced": true,
+      "prompt_name_zh": "古吉拉特语"
     }
   ]
 }

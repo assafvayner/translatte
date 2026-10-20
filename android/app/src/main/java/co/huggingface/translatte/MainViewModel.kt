@@ -43,6 +43,27 @@ private const val COMFORTABLE_FREE_MEMORY = 2_800_000_000L
 
 private class LowMemoryException(message: String) : Exception(message)
 
+/**
+ * The saved [source] and [target] if both are still offered, else replacements: a choice can
+ * disappear when an app update drops a language or its script pack is deleted. A replacement is
+ * English if possible, else the first language in the (alphabetical) list, and never the same as
+ * the other side; the target changes if only English is left to read. Same rule as iOS's
+ * `LanguageDirection.fallback`.
+ */
+fun fallbackLanguages(
+    sources: List<LanguageInfo>,
+    targets: List<LanguageInfo>,
+    source: String,
+    target: String,
+): Pair<String, String> {
+    fun pick(languages: List<LanguageInfo>, avoid: String?) =
+        (languages.find { it.code == "en" && it.code != avoid } ?: languages.find { it.code != avoid })?.code
+    var s = if (sources.any { it.code == source }) source else pick(sources, target) ?: pick(sources, null) ?: ""
+    var t = if (targets.any { it.code == target }) target else pick(targets, s) ?: ""
+    if (s == t && (s != source || t != target)) t = pick(targets, s) ?: t
+    return s to t
+}
+
 /** Swapping makes the target the new source, so it must be readable with the installed packs. */
 fun canSwap(sourceLanguages: List<LanguageInfo>, target: String): Boolean = sourceLanguages.any { it.code == target }
 
@@ -86,8 +107,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             targetLanguages = engine.targetLanguages()
             val wasReady = ready
             ready = engine.coreInstalled() && sourceLanguages.isNotEmpty()
-            if (sourceLanguages.none { it.code == sourceCode }) {
-                setSource((sourceLanguages.find { it.code == "en" } ?: sourceLanguages.firstOrNull())?.code ?: "")
+            val (source, target) = fallbackLanguages(sourceLanguages, targetLanguages, sourceCode, targetCode)
+            if (target != targetCode) {
+                targetCode = target
+                prefs.edit().putString("target", target).apply()
+            }
+            if (source != sourceCode) {
+                setSource(source)
             } else if (ready && !wasReady) {
                 prepare()
             }
@@ -198,7 +224,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun reopenLast() = translations.reopenLast()
 
-    private suspend fun translateOnEngine(bitmap: Bitmap, onStage: (String) -> Unit): TranslationResult {
+    private suspend fun translateOnEngine(bitmap: Bitmap, attempt: Int, onStage: (String) -> Unit): TranslationResult {
         val (source, target) = sourceCode to targetCode
         val listener = object : ProgressListener {
             override fun onStage(stage: String, done: UInt, total: UInt) {
@@ -214,7 +240,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         return withContext(translatte.engineDispatcher) {
             checkMemory()
-            engine.translateImage(Images.jpeg(bitmap), source, target, true, listener).also {
+            engine.translateImage(Images.jpeg(bitmap), source, target, true, attempt.toUInt(), listener).also {
                 translatte.modelsLoaded = true
             }
         }

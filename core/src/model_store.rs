@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::manifest::{
-    Language, Manifest, ModelEntry, ModelFile, ModelKind, DETECTOR_ID, TRANSLATOR_ID,
+    Language, Manifest, ModelEntry, ModelFile, ModelKind, ModelSource, DETECTOR_ID, TRANSLATOR_ID,
 };
 use crate::{Result, TranslatteError};
 
@@ -14,6 +14,10 @@ pub enum InstallState {
     /// Some files are missing or have the wrong size.
     Corrupt,
 }
+
+/// Models earlier manifests shipped and later dropped; [`ModelStore::prune`] deletes their
+/// directories. Add an id here whenever the manifest drops a model.
+pub const RETIRED_MODEL_IDS: &[&str] = &["rec-el", "rec-cyrillic"];
 
 pub struct ModelStore {
     manifest: Manifest,
@@ -69,10 +73,76 @@ impl ModelStore {
         }
     }
 
+    /// `<file>.<tag>.part`, where the tag identifies the upstream file, so a partial download is
+    /// only ever resumed from the file it started from (e.g. not after the manifest swaps the model).
     pub fn part_path(&self, file: &ModelFile) -> PathBuf {
+        let source = self
+            .manifest
+            .models
+            .iter()
+            .find(|m| m.files.iter().any(|f| f.path == file.path))
+            .map(|m| &m.source);
         let mut p = self.root.join(&file.path).into_os_string();
-        p.push(".part");
+        p.push(format!(".{}.part", part_tag(source, file)));
         PathBuf::from(p)
+    }
+
+    /// Removes model data an app update left behind: directories of [`RETIRED_MODEL_IDS`] that the
+    /// manifest no longer lists, installed files whose size no longer matches (a replaced model),
+    /// and partial downloads of other upstream files. Other directories in the root (e.g. a
+    /// `translator-alt` pushed for comparisons) are left alone. Returns the removed paths. Must not
+    /// run concurrently with a download.
+    pub fn prune(&self) -> Result<Vec<PathBuf>> {
+        let mut removed = Vec::new();
+        let dirs = match std::fs::read_dir(&self.root) {
+            Ok(d) => d,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(removed),
+            Err(e) => return Err(e.into()),
+        };
+        for dir in dirs {
+            let dir = dir?;
+            let retired = dir.file_name().to_str().is_some_and(|name| {
+                RETIRED_MODEL_IDS.contains(&name) && self.manifest.model(name).is_none()
+            });
+            if retired && dir.file_type()?.is_dir() {
+                std::fs::remove_dir_all(dir.path())?;
+                removed.push(dir.path());
+            }
+        }
+        let mut keep = std::collections::HashSet::new();
+        let mut model_dirs = std::collections::BTreeSet::new();
+        for f in self.manifest.models.iter().flat_map(|m| &m.files) {
+            let dest = self.root.join(&f.path);
+            match std::fs::metadata(&dest) {
+                Ok(m) if m.is_file() && m.len() != f.size => {
+                    std::fs::remove_file(&dest)?;
+                    removed.push(dest.clone());
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+            keep.insert(self.part_path(f));
+            if let Some(dir) = dest.parent() {
+                model_dirs.insert(dir.to_path_buf());
+            }
+        }
+        for dir in model_dirs {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(d) => d,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
+            };
+            for entry in entries {
+                let path = entry?.path();
+                let is_part = path.extension().is_some_and(|e| e == "part");
+                if is_part && !keep.contains(&path) && path.is_file() {
+                    std::fs::remove_file(&path)?;
+                    removed.push(path);
+                }
+            }
+        }
+        Ok(removed)
     }
 
     /// Checks the size of `<file>.part` and atomically renames it into place.
@@ -202,6 +272,25 @@ impl ModelStore {
     }
 }
 
+/// FNV-1a over the upstream identity of `file`; stable across builds and platforms.
+fn part_tag(source: Option<&ModelSource>, file: &ModelFile) -> String {
+    let (repo, revision) = source.map_or(("", ""), |s| (s.repo.as_str(), s.revision.as_str()));
+    let size = file.size.to_le_bytes();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for field in [
+        repo.as_bytes(),
+        revision.as_bytes(),
+        file.source_path.as_bytes(),
+        &size,
+    ] {
+        for &b in field.iter().chain(&[0]) {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{h:016x}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +307,12 @@ mod tests {
 
     fn write(store: &ModelStore, rel: &str, contents: &str) {
         let p = store.root().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, contents).unwrap();
+    }
+
+    fn write_part(store: &ModelStore, name: &str, contents: &str) {
+        let p = store.part_path(file(store, "rec-latin", name));
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, contents).unwrap();
     }
@@ -261,17 +356,110 @@ mod tests {
     }
 
     #[test]
-    fn part_path_appends_part_suffix() {
+    fn part_path_is_tagged_with_the_upstream_file() {
         let (_d, s) = store();
         let f = file(&s, "rec-latin", "dict.txt");
-        assert_eq!(s.part_path(f), s.root().join("rec-latin/dict.txt.part"));
+        let part = s.part_path(f);
+        let name = part.file_name().unwrap().to_str().unwrap();
+        assert_eq!(part.parent().unwrap(), s.root().join("rec-latin"));
+        assert!(
+            name.starts_with("dict.txt.") && name.ends_with(".part"),
+            "{name}"
+        );
+        assert_eq!(name.len(), "dict.txt..part".len() + 16);
+
+        let moved =
+            Manifest::from_json(&SAMPLE.replace("acme/latin_rec", "acme/latin_rec2")).unwrap();
+        let other = ModelStore::new(moved, s.root().to_path_buf());
+        assert_ne!(other.part_path(file(&other, "rec-latin", "dict.txt")), part);
+        let resized = Manifest::from_json(&SAMPLE.replace(
+            r#""path": "rec-latin/dict.txt", "size": 3"#,
+            r#""path": "rec-latin/dict.txt", "size": 4"#,
+        ))
+        .unwrap();
+        let other = ModelStore::new(resized, s.root().to_path_buf());
+        assert_ne!(other.part_path(file(&other, "rec-latin", "dict.txt")), part);
+    }
+
+    /// The translator file as an older manifest had it: same path, another upstream file and size.
+    fn old_translator(s: &ModelStore) -> ModelStore {
+        let old = SAMPLE
+            .replace("acme/translator-GGUF", "acme/old-translator-GGUF")
+            .replace(
+                r#""path": "translator/model.gguf", "size": 3"#,
+                r#""path": "translator/model.gguf", "size": 5"#,
+            );
+        ModelStore::new(Manifest::from_json(&old).unwrap(), s.root().to_path_buf())
+    }
+
+    #[test]
+    fn replaced_model_needs_download_and_its_old_files_are_pruned() {
+        let (_d, s) = store();
+        let old = old_translator(&s);
+        write(&s, "det/inference.onnx", "abc");
+        write(&s, "translator/model.gguf", "abcde");
+        assert_eq!(old.state("translator").unwrap(), InstallState::Installed);
+        assert_eq!(s.state("translator").unwrap(), InstallState::Corrupt);
+        assert!(!s.core_installed().unwrap());
+        assert_eq!(s.downloaded_bytes("translator").unwrap(), 0);
+
+        let removed = s.prune().unwrap();
+        assert_eq!(removed, vec![s.root().join("translator/model.gguf")]);
+        assert_eq!(s.state("translator").unwrap(), InstallState::NotInstalled);
+        assert_eq!(s.state("det").unwrap(), InstallState::Installed);
+    }
+
+    #[test]
+    fn prune_drops_partial_downloads_of_other_upstream_files() {
+        let (_d, s) = store();
+        let old = old_translator(&s);
+        let f = file(&s, "translator", "model.gguf");
+        let stale = old.part_path(file(&old, "translator", "model.gguf"));
+        let legacy = s.root().join("translator/model.gguf.part");
+        std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::fs::write(&stale, "ab").unwrap();
+        std::fs::write(&legacy, "ab").unwrap();
+        std::fs::write(s.part_path(f), "ab").unwrap();
+        assert_eq!(s.downloaded_bytes("translator").unwrap(), 2);
+
+        let mut removed = s.prune().unwrap();
+        removed.sort();
+        let mut want = vec![stale, legacy];
+        want.sort();
+        assert_eq!(removed, want);
+        assert_eq!(std::fs::read_to_string(s.part_path(f)).unwrap(), "ab");
+    }
+
+    #[test]
+    fn prune_removes_dirs_of_retired_models_only() {
+        let (_d, s) = store();
+        write(&s, "rec-el/inference.onnx", "abc");
+        write(&s, "rec-latin/inference.onnx", "abc");
+        write(&s, "translator-alt/model.gguf", "abc");
+        write(&s, "loose-file", "x");
+        assert_eq!(s.prune().unwrap(), vec![s.root().join("rec-el")]);
+        assert!(!s.root().join("rec-el").exists());
+        assert!(s.root().join("rec-latin/inference.onnx").exists());
+        assert!(s.root().join("translator-alt/model.gguf").exists());
+        assert!(s.root().join("loose-file").exists());
+        assert!(s.prune().unwrap().is_empty());
+    }
+
+    #[test]
+    fn prune_of_missing_root_is_a_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = ModelStore::new(
+            Manifest::from_json(SAMPLE).unwrap(),
+            dir.path().join("missing"),
+        );
+        assert!(s.prune().unwrap().is_empty());
     }
 
     #[test]
     fn commit_download_renames_full_size_part() {
         let (_d, s) = store();
         let f = file(&s, "rec-latin", "dict.txt");
-        write(&s, "rec-latin/dict.txt.part", "abc");
+        write_part(&s, "dict.txt", "abc");
         s.commit_download(f).unwrap();
         assert!(!s.part_path(f).exists());
         assert_eq!(
@@ -294,7 +482,7 @@ mod tests {
     fn commit_download_keeps_short_part_for_resume() {
         let (_d, s) = store();
         let f = file(&s, "rec-latin", "dict.txt");
-        write(&s, "rec-latin/dict.txt.part", "ab");
+        write_part(&s, "dict.txt", "ab");
         assert!(matches!(
             s.commit_download(f),
             Err(TranslatteError::Incomplete {
@@ -310,7 +498,7 @@ mod tests {
     fn commit_download_deletes_oversize_part() {
         let (_d, s) = store();
         let f = file(&s, "rec-latin", "dict.txt");
-        write(&s, "rec-latin/dict.txt.part", "abcd");
+        write_part(&s, "dict.txt", "abcd");
         assert!(matches!(
             s.commit_download(f),
             Err(TranslatteError::SizeMismatch {
@@ -340,7 +528,7 @@ mod tests {
     fn delete_removes_partial_downloads() {
         let (_d, s) = store();
         write(&s, "rec-latin/inference.onnx", "abc");
-        write(&s, "rec-latin/dict.txt.part", "ab");
+        write_part(&s, "dict.txt", "ab");
         s.delete("rec-latin").unwrap();
         assert!(!s.root().join("rec-latin").exists());
     }
@@ -350,9 +538,9 @@ mod tests {
         let (_d, s) = store();
         assert_eq!(s.downloaded_bytes("rec-latin").unwrap(), 0);
         write(&s, "rec-latin/inference.onnx", "abc");
-        write(&s, "rec-latin/dict.txt.part", "ab");
+        write_part(&s, "dict.txt", "ab");
         assert_eq!(s.downloaded_bytes("rec-latin").unwrap(), 5);
-        write(&s, "rec-latin/dict.txt.part", "abcdef");
+        write_part(&s, "dict.txt", "abcdef");
         assert_eq!(s.downloaded_bytes("rec-latin").unwrap(), 6);
     }
 
