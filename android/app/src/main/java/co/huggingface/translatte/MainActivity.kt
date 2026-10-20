@@ -96,12 +96,13 @@ class MainActivity : ComponentActivity() {
                 val modelsScreen = @Composable { setup: Boolean, onBack: (() -> Unit)? ->
                     ModelsScreen(
                         models = vm.models,
+                        packs = vm.packs,
                         downloads = downloads,
                         setup = setup,
                         error = vm.setupError,
                         onDownload = startDownload,
                         onCancel = { Downloads.cancel(this) },
-                        onDelete = vm::deleteModel,
+                        onDelete = vm::deleteLanguage,
                         onBack = onBack,
                     )
                 }
@@ -128,8 +129,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Debug builds only: `am start ... --es autotest_download det,rec-latin` starts a download, and
-     * `--es autotest_image <file in getExternalFilesDir> --es autotest_from fr --es autotest_to en`
+     * Debug builds only: `am start ... --es autotest_download det,rec-latin,pair-fr-en` starts a
+     * download, and `--es autotest_image <file in getExternalFilesDir> --es autotest_from fr`
      * translates a photo and writes autotest.json next to it.
      */
     private fun runAutotest() {
@@ -140,7 +141,6 @@ class MainActivity : ComponentActivity() {
             vm.autotest(
                 File(dir, name),
                 intent.getStringExtra("autotest_from"),
-                intent.getStringExtra("autotest_to"),
                 File(dir, "autotest.json"),
             )
         }

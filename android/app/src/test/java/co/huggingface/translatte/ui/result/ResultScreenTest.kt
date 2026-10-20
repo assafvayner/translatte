@@ -34,7 +34,6 @@ class ResultScreenTest {
 
     private fun show(
         phase: Phase,
-        onRetry: () -> Unit = {},
         onHintSeen: () -> Unit = {},
         image: Bitmap? = bitmap,
         result: TranslationResult? = null,
@@ -48,7 +47,6 @@ class ResultScreenTest {
                     direction = "French → English",
                     hintSeen = false,
                     onHintSeen = onHintSeen,
-                    onRetry = onRetry,
                     onBack = {},
                 )
             }
@@ -91,16 +89,16 @@ class ResultScreenTest {
     }
 
     @Test
-    fun retryableErrorsOfferRetry() {
-        var retries = 0
-        show(Phase.Failed("Translation failed: boom"), onRetry = { retries++ })
-        compose.onNodeWithText("Retry").performClick()
-        assertEquals(1, retries)
+    fun errorsOfferOnlyBack() {
+        show(Phase.Failed("Translation failed: boom"))
+        compose.onNodeWithText("Translation failed: boom").assertExists()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
+        compose.onNodeWithText("Back").assertExists()
     }
 
     @Test
     fun noTextFoundHasNoRetry() {
-        show(Phase.Failed("No text found. Try moving closer or reducing glare.", retryable = false))
+        show(Phase.Failed("No text found. Try moving closer or reducing glare."))
         compose.onNodeWithText("No text found. Try moving closer or reducing glare.").assertExists()
         compose.onNodeWithText("Retry").assertDoesNotExist()
         compose.onNodeWithText("Back").assertExists()
@@ -108,7 +106,7 @@ class ResultScreenTest {
 
     @Test
     fun aPhotoThatFailedToLoadShowsTheErrorCard() {
-        show(Phase.Failed("Could not open the photo", retryable = false), image = null)
+        show(Phase.Failed("Could not open the photo"), image = null)
         compose.onNodeWithText("Could not open the photo").assertExists()
         compose.onNodeWithText("Retry").assertDoesNotExist()
         compose.onNodeWithText("Back").assertExists()

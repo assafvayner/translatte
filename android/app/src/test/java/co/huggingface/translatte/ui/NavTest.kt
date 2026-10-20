@@ -46,7 +46,7 @@ class NavTest {
     fun theViewerStaysOpenForFailures() {
         assertFalse(Nav.hasResult(Phase.Idle))
         assertTrue(Nav.hasResult(Phase.Working("Loading photo…")))
-        assertTrue(Nav.hasResult(Phase.Failed("Could not open the photo", retryable = false)))
+        assertTrue(Nav.hasResult(Phase.Failed("Could not open the photo")))
         assertTrue(Nav.hasResult(Phase.Done))
     }
 }
