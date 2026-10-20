@@ -23,9 +23,7 @@ pub struct Detector {
 
 impl Detector {
     pub fn load(path: &Path) -> Result<Self> {
-        let session = Session::builder()?
-            .with_intra_threads(4)?
-            .commit_from_file(path)?;
+        let session = super::session_builder(false)?.commit_from_file(path)?;
         Ok(Self {
             session,
             params: DbParams::default(),

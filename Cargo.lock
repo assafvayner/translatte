@@ -4269,6 +4269,7 @@ dependencies = [
  "image",
  "imageproc",
  "llama-cpp-2",
+ "llama-cpp-sys-2",
  "ndarray",
  "openssl",
  "ort",

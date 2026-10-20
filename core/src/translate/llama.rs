@@ -1,8 +1,9 @@
 use std::num::NonZeroU32;
 use std::path::Path;
+use std::ptr::NonNull;
 use std::sync::OnceLock;
 
-use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::context::params::{KvCacheType, LlamaContextParams};
 use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -56,6 +57,8 @@ self_cell::self_cell!(
 
 pub struct LlamaGenerator {
     inner: ModelContext,
+    /// Declared after `inner` so it is freed after the context that uses it.
+    _pool: Option<ThreadPool>,
     threads: i32,
     /// Sliding-window attention width, if the model uses SWA.
     n_swa: Option<usize>,
@@ -98,16 +101,27 @@ impl LlamaGenerator {
             .ok()
             .and_then(|v| v.parse().ok())
             .filter(|&n| n > 0);
+        // llama.cpp otherwise sizes the sliding-window layers' KV cache for the full context, and an
+        // 8-bit cache halves the rest; both leave more RAM to keep the mmapped weights resident.
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(N_CTX))
             .with_n_batch(N_CTX)
+            .with_swa_full(false)
+            .with_type_k(KvCacheType::Q8_0)
+            .with_type_v(KvCacheType::Q8_0)
             .with_n_threads(threads)
             .with_n_threads_batch(threads);
-        let inner =
+        let mut inner =
             ModelContext::try_new(model, |m| m.new_context(backend, ctx_params)).map_err(err)?;
+        let pool = ThreadPool::new(threads).and_then(|pool| {
+            inner
+                .with_dependent_mut(|_, ctx| pool.attach(ctx))
+                .then_some(pool)
+        });
         let prefix_cache = std::env::var("TRANSLATTE_PREFIX_CACHE").map_or(true, |v| v != "0");
         Ok(Self {
             inner,
+            _pool: pool,
             threads,
             n_swa,
             cached: Vec::new(),
@@ -137,6 +151,59 @@ impl LlamaGenerator {
     /// Tokens currently held in the KV cache.
     pub fn cached_tokens(&self) -> usize {
         self.cached.len()
+    }
+}
+
+/// ggml worker threads that persist across decode calls. Without one, ggml creates and joins a fresh
+/// set of threads for every `decode`, i.e. for every generated token, and on phones the scheduler
+/// starts those new threads on slow cores at low clocks.
+struct ThreadPool(NonNull<llama_cpp_sys_2::ggml_threadpool>);
+
+// SAFETY: the pool is only handed to llama.cpp, which drives it from the thread calling `decode`.
+unsafe impl Send for ThreadPool {}
+
+impl ThreadPool {
+    fn new(threads: i32) -> Option<Self> {
+        // SAFETY: the params are initialized by ggml and only read by `ggml_threadpool_new`.
+        unsafe {
+            let mut params = llama_cpp_sys_2::ggml_threadpool_params_default(threads);
+            NonNull::new(llama_cpp_sys_2::ggml_threadpool_new(&mut params)).map(Self)
+        }
+    }
+
+    /// Makes `ctx` run its graphs on this pool. Returns false if the context pointer is unavailable.
+    fn attach(&self, ctx: &mut LlamaContext) -> bool {
+        // llama-cpp-2 exposes no raw context pointer or threadpool API; its Debug output prints the pointer.
+        let Some(raw) = pointer_in(&format!("{ctx:?}")) else {
+            return false;
+        };
+        // SAFETY: `raw` is the live context `ctx` wraps, borrowed mutably here; the pool outlives it.
+        unsafe {
+            llama_cpp_sys_2::llama_attach_threadpool(
+                raw as *mut llama_cpp_sys_2::llama_context,
+                self.0.as_ptr(),
+                self.0.as_ptr(),
+            )
+        };
+        true
+    }
+}
+
+/// The first hex pointer in `debug`, e.g. `LlamaContext { context: 0x7b1c2a3000, .. }`.
+fn pointer_in(debug: &str) -> Option<usize> {
+    let hex = debug.split_once("0x")?.1;
+    let end = hex
+        .find(|c: char| !c.is_ascii_hexdigit())
+        .unwrap_or(hex.len());
+    usize::from_str_radix(&hex[..end], 16)
+        .ok()
+        .filter(|&p| p != 0)
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        // SAFETY: created by `ggml_threadpool_new`; the context using it was dropped first.
+        unsafe { llama_cpp_sys_2::ggml_threadpool_free(self.0.as_ptr()) }
     }
 }
 
@@ -186,6 +253,7 @@ impl TextGenerator for LlamaGenerator {
             prefix_cache,
             reused,
             seed,
+            ..
         } = self;
         inner.with_dependent_mut(|model, ctx| {
             let vocab = model.vocab();
@@ -336,12 +404,13 @@ fn generate_from(
     if std::env::var_os("TRANSLATTE_PERF").is_some() {
         let decode = t0.elapsed() - prefill;
         eprintln!(
-            "llama: threads={threads} prompt {} tok ({n_keep} reused), prefill {n_prefill} tok in {:.2}s ({:.1} tok/s), decode {n_gen} tok in {:.2}s ({:.1} tok/s)",
+            "llama: threads={threads} prompt {} tok ({n_keep} reused), prefill {n_prefill} tok in {:.2}s ({:.1} tok/s), decode {n_gen} tok in {:.2}s ({:.1} tok/s){}",
             tokens.len(),
             prefill.as_secs_f64(),
             n_prefill as f64 / prefill.as_secs_f64(),
             decode.as_secs_f64(),
             n_gen as f64 / decode.as_secs_f64(),
+            mem_status(),
         );
     }
     Ok(Generation {
@@ -350,12 +419,49 @@ fn generate_from(
     })
 }
 
+/// Peak and current RSS and major page faults, on Linux/Android, for the perf log.
+fn mem_status() -> String {
+    let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
+        return String::new();
+    };
+    let mut out: String = status
+        .lines()
+        .filter(|l| {
+            ["VmHWM", "RssAnon", "RssFile", "VmSwap"]
+                .iter()
+                .any(|k| l.starts_with(k))
+        })
+        .filter_map(|l| {
+            let mut f = l.split_whitespace();
+            Some(format!(" {}{}", f.next()?, f.next()?))
+        })
+        .collect();
+    // Field 12 of /proc/self/stat (the 10th after the parenthesized command name).
+    if let Some(majflt) = std::fs::read_to_string("/proc/self/stat")
+        .ok()
+        .and_then(|s| Some(s.rsplit(')').next()?.split_whitespace().nth(9)?.to_owned()))
+    {
+        out.push_str(&format!(" majflt:{majflt}"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn toks(ids: &[i32]) -> Vec<LlamaToken> {
         ids.iter().copied().map(LlamaToken).collect()
+    }
+
+    #[test]
+    fn finds_context_pointer_in_debug_output() {
+        assert_eq!(
+            pointer_in("LlamaContext { context: 0x7b1c2a3000 }"),
+            Some(0x7b1c2a3000)
+        );
+        assert_eq!(pointer_in("LlamaContext { context: 0x0 }"), None);
+        assert_eq!(pointer_in("LlamaContext { .. }"), None);
     }
 
     #[test]
