@@ -1,9 +1,9 @@
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::ptr::NonNull;
 use std::sync::OnceLock;
 
 use llama_cpp_2::context::params::{KvCacheType, LlamaContextParams};
+use llama_cpp_2::context::threadpool::{ThreadPool, ThreadPoolParams};
 use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -57,8 +57,6 @@ self_cell::self_cell!(
 
 pub struct LlamaGenerator {
     inner: ModelContext,
-    /// Declared after `inner` so it is freed after the context that uses it.
-    _pool: Option<ThreadPool>,
     threads: i32,
     /// Sliding-window attention width, if the model uses SWA.
     n_swa: Option<usize>,
@@ -115,15 +113,23 @@ impl LlamaGenerator {
             .with_n_threads_batch(threads);
         let mut inner =
             ModelContext::try_new(model, |m| m.new_context(backend, ctx_params)).map_err(err)?;
-        let pool = ThreadPool::new(threads, !gpu).and_then(|pool| {
-            inner
-                .with_dependent_mut(|_, ctx| pool.attach(ctx))
-                .then_some(pool)
-        });
+        // Without a pool, ggml creates and joins a fresh set of worker threads for every `decode`,
+        // i.e. for every generated token, and on phones the scheduler starts those new threads on
+        // slow cores at low clocks. Polling workers spin briefly before sleeping, which keeps the
+        // per-token handoff fast when the CPU runs the whole graph; when the graph runs on the GPU
+        // the workers have little to do and spinning would only burn power.
+        let pool_params = ThreadPoolParams::new(threads);
+        let pool_params = if gpu {
+            pool_params.with_poll(0)
+        } else {
+            pool_params
+        };
+        if let Ok(pool) = ThreadPool::new(&pool_params) {
+            inner.with_dependent_mut(|_, ctx| ctx.attach_threadpool(pool, None));
+        }
         let prefix_cache = std::env::var("TRANSLATTE_PREFIX_CACHE").map_or(true, |v| v != "0");
         Ok(Self {
             inner,
-            _pool: pool,
             threads,
             n_swa,
             cached: Vec::new(),
@@ -150,76 +156,15 @@ impl LlamaGenerator {
         self.reused
     }
 
-    /// Whether ggml runs this context on a persistent threadpool (see [`ThreadPool`]).
+    /// Whether ggml runs this context on a persistent threadpool.
     #[doc(hidden)]
     pub fn threadpool_attached(&self) -> bool {
-        self._pool.is_some()
+        self.inner.borrow_dependent().threadpool().is_some()
     }
 
     /// Tokens currently held in the KV cache.
     pub fn cached_tokens(&self) -> usize {
         self.cached.len()
-    }
-}
-
-/// ggml worker threads that persist across decode calls. Without one, ggml creates and joins a fresh
-/// set of threads for every `decode`, i.e. for every generated token, and on phones the scheduler
-/// starts those new threads on slow cores at low clocks.
-struct ThreadPool(NonNull<llama_cpp_sys_2::ggml_threadpool>);
-
-// SAFETY: the pool is only handed to llama.cpp, which drives it from the thread calling `decode`.
-unsafe impl Send for ThreadPool {}
-
-impl ThreadPool {
-    /// With `poll`, idle workers spin briefly before sleeping, which keeps the per-token handoff
-    /// fast when the CPU runs the whole graph. When the graph runs on the GPU the workers have
-    /// little to do and spinning would only burn power, so they sleep right away.
-    fn new(threads: i32, poll: bool) -> Option<Self> {
-        // SAFETY: the params are initialized by ggml and only read by `ggml_threadpool_new`.
-        unsafe {
-            let mut params = llama_cpp_sys_2::ggml_threadpool_params_default(threads);
-            if !poll {
-                params.poll = 0;
-            }
-            NonNull::new(llama_cpp_sys_2::ggml_threadpool_new(&mut params)).map(Self)
-        }
-    }
-
-    /// Makes `ctx` run its graphs on this pool. Returns false if the context pointer is unavailable.
-    fn attach(&self, ctx: &mut LlamaContext) -> bool {
-        // llama-cpp-2 exposes no raw context pointer or threadpool API; its Debug output prints the
-        // pointer. The crate is pinned (core/Cargo.toml) and `pointer_in` accepts only that exact format.
-        let Some(raw) = pointer_in(&format!("{ctx:?}")) else {
-            return false;
-        };
-        // SAFETY: `raw` is the live context `ctx` wraps, borrowed mutably here; the pool outlives it.
-        unsafe {
-            llama_cpp_sys_2::llama_attach_threadpool(
-                raw as *mut llama_cpp_sys_2::llama_context,
-                self.0.as_ptr(),
-                self.0.as_ptr(),
-            )
-        };
-        true
-    }
-}
-
-/// The pointer in llama-cpp-2 0.1.160's `LlamaContext` Debug output, `LlamaContext { context: 0x… }`;
-/// `None` for anything else.
-fn pointer_in(debug: &str) -> Option<usize> {
-    let hex = debug
-        .strip_prefix("LlamaContext { context: 0x")?
-        .strip_suffix(" }")?;
-    if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    usize::from_str_radix(hex, 16).ok().filter(|&p| p != 0)
-}
-
-impl Drop for ThreadPool {
-    fn drop(&mut self) {
-        // SAFETY: created by `ggml_threadpool_new`; the context using it was dropped first.
-        unsafe { llama_cpp_sys_2::ggml_threadpool_free(self.0.as_ptr()) }
     }
 }
 
@@ -269,7 +214,6 @@ impl TextGenerator for LlamaGenerator {
             prefix_cache,
             reused,
             seed,
-            _pool: pool,
         } = self;
         inner.with_dependent_mut(|model, ctx| {
             let vocab = model.vocab();
@@ -291,10 +235,12 @@ impl TextGenerator for LlamaGenerator {
             } else {
                 0
             };
-            let perf_tag = format!(
-                "threads={threads} pool={}",
-                if pool.is_some() { "on" } else { "off" }
-            );
+            let pool = if ctx.threadpool().is_some() {
+                "on"
+            } else {
+                "off"
+            };
+            let perf_tag = format!("threads={threads} pool={pool}");
             let result = generate_from(
                 ctx, &vocab, &tokens, n_keep, cached, budget, &perf_tag, *seed,
             );
@@ -472,20 +418,6 @@ mod tests {
 
     fn toks(ids: &[i32]) -> Vec<LlamaToken> {
         ids.iter().copied().map(LlamaToken).collect()
-    }
-
-    #[test]
-    fn finds_context_pointer_in_debug_output() {
-        assert_eq!(
-            pointer_in("LlamaContext { context: 0x7b1c2a3000 }"),
-            Some(0x7b1c2a3000)
-        );
-        assert_eq!(pointer_in("LlamaContext { context: 0x0 }"), None);
-        assert_eq!(pointer_in("LlamaContext { .. }"), None);
-        assert_eq!(pointer_in("LlamaContext { context: 0x }"), None);
-        assert_eq!(pointer_in("LlamaContext { context: 0x7b1c, n: 0x1 }"), None);
-        assert_eq!(pointer_in("Other { context: 0x7b1c }"), None);
-        assert_eq!(pointer_in("LlamaContext { context: 0x7b1c } "), None);
     }
 
     #[test]
