@@ -18,7 +18,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,10 +29,17 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -41,6 +50,8 @@ import co.huggingface.translatte.ui.theme.appBarColors
 @Composable
 fun SettingsScreen(theme: ThemeSetting, onTheme: (ThemeSetting) -> Unit, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
+    val uri = LocalUriHandler.current
+    var fontLicense by rememberSaveable { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -83,25 +94,47 @@ fun SettingsScreen(theme: ThemeSetting, onTheme: (ThemeSetting) -> Unit, onBack:
                 }
             }
             Section("About") {
-                InfoRow("Version", BuildConfig.VERSION_NAME, link = null)
+                InfoRow("Version", BuildConfig.VERSION_NAME, onOpen = null)
                 InfoRow(
                     "Text detection and recognition",
                     "PP-OCRv5 by PaddlePaddle · Apache License 2.0",
-                    link = "https://www.apache.org/licenses/LICENSE-2.0",
+                    onOpen = { uri.openUri("https://www.apache.org/licenses/LICENSE-2.0") },
                 )
                 InfoRow(
                     "Translation",
                     "TranslateGemma 4B by Google · Gemma Terms of Use",
-                    link = "https://ai.google.dev/gemma/terms",
+                    onOpen = { uri.openUri("https://ai.google.dev/gemma/terms") },
                 )
                 InfoRow(
                     "Wordmark font",
                     "Fraunces · SIL Open Font License 1.1",
-                    link = "https://openfontlicense.org/open-font-license-official-text/",
+                    external = false,
+                    onOpen = { fontLicense = true },
                 )
             }
         }
     }
+    if (fontLicense) LicenseDialog("SIL Open Font License 1.1", FONT_LICENSE) { fontLicense = false }
+}
+
+private const val FONT_LICENSE = "licenses/fraunces-ofl.txt"
+
+@Composable
+private fun LicenseDialog(title: String, asset: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val text = remember(asset) { context.assets.open(asset).bufferedReader().use { it.readText() } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            )
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }
 
 @Composable
@@ -120,12 +153,11 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
 }
 
 @Composable
-private fun InfoRow(title: String, value: String, link: String?) {
-    val uri = LocalUriHandler.current
+private fun InfoRow(title: String, value: String, external: Boolean = true, onOpen: (() -> Unit)?) {
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (link != null) Modifier.clickable(onClickLabel = "Open license") { uri.openUri(link) } else Modifier)
+            .then(if (onOpen != null) Modifier.clickable(onClickLabel = "Open license", onClick = onOpen) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -133,9 +165,9 @@ private fun InfoRow(title: String, value: String, link: String?) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (link != null) {
+        if (onOpen != null) {
             Icon(
-                Icons.AutoMirrored.Outlined.OpenInNew,
+                if (external) Icons.AutoMirrored.Outlined.OpenInNew else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )

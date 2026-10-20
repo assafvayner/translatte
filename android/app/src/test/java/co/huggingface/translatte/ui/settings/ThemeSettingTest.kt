@@ -1,5 +1,6 @@
 package co.huggingface.translatte.ui.settings
 
+import android.app.UiModeManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -23,5 +24,12 @@ class ThemeSettingTest {
         assertEquals(ThemeSetting.SYSTEM, ThemeSetting.fromKey(null))
         assertEquals(ThemeSetting.SYSTEM, ThemeSetting.fromKey("mocha"))
         assertEquals(ThemeSetting.AMERICANO, ThemeSetting.fromKey("americano"))
+    }
+
+    @Test
+    fun overridesMapToTheAppNightMode() {
+        assertEquals(UiModeManager.MODE_NIGHT_AUTO, ThemeSetting.SYSTEM.nightMode)
+        assertEquals(UiModeManager.MODE_NIGHT_NO, ThemeSetting.TRANSLATTE.nightMode)
+        assertEquals(UiModeManager.MODE_NIGHT_YES, ThemeSetting.AMERICANO.nightMode)
     }
 }

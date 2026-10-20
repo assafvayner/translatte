@@ -1,5 +1,6 @@
 package co.huggingface.translatte.ui.settings
 
+import android.app.UiModeManager
 import android.content.Context
 
 enum class ThemeSetting(val key: String, val label: String, val description: String) {
@@ -13,6 +14,14 @@ enum class ThemeSetting(val key: String, val label: String, val description: Str
         TRANSLATTE -> false
         AMERICANO -> true
     }
+
+    /** For [UiModeManager.setApplicationNightMode], so the splash and window follow an override. */
+    val nightMode: Int
+        get() = when (this) {
+            SYSTEM -> UiModeManager.MODE_NIGHT_AUTO
+            TRANSLATTE -> UiModeManager.MODE_NIGHT_NO
+            AMERICANO -> UiModeManager.MODE_NIGHT_YES
+        }
 
     companion object {
         fun fromKey(key: String?): ThemeSetting = entries.firstOrNull { it.key == key } ?: SYSTEM

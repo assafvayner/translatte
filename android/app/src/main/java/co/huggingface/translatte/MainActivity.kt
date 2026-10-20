@@ -1,19 +1,18 @@
 package co.huggingface.translatte
 
 import android.Manifest
+import android.app.UiModeManager
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
-import android.text.format.Formatter
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,9 +27,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import co.huggingface.translatte.ui.MainNav
 import co.huggingface.translatte.ui.Screen
+import co.huggingface.translatte.ui.settings.AppTheme
 import co.huggingface.translatte.ui.settings.UiPrefs
 import co.huggingface.translatte.ui.setup.ModelsScreen
-import co.huggingface.translatte.ui.theme.TranslatteTheme
 import co.huggingface.translatte.ui.theme.windowBackground
 import java.io.File
 
@@ -40,6 +39,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = UiPrefs(this)
+        val uiModes = getSystemService(UiModeManager::class.java)
+        uiModes.setApplicationNightMode(prefs.theme.nightMode)
         val systemDark =
             resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         window.setBackgroundDrawable(ColorDrawable(windowBackground(prefs.theme.isDark(systemDark)).toArgb()))
@@ -47,19 +48,18 @@ class MainActivity : ComponentActivity() {
         val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
         setContent {
-            var theme by remember { mutableStateOf(prefs.theme) }
             var screen by remember { mutableStateOf<Screen?>(null) }
-            val dark = theme.isDark(isSystemInDarkTheme())
-            val lightBarIcons = dark || (vm.ready && screen == Screen.Camera)
-            LaunchedEffect(lightBarIcons) {
-                val style = if (lightBarIcons) {
-                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                } else {
-                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+            AppTheme(prefs, applyNightMode = { uiModes.setApplicationNightMode(it.nightMode) }) { theme, dark, onTheme ->
+                val lightBarIcons = dark || (vm.ready && screen == Screen.Camera)
+                LaunchedEffect(lightBarIcons) {
+                    val style = if (lightBarIcons) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                    }
+                    enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
                 }
-                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
-            }
-            TranslatteTheme(dark) {
+                LaunchedEffect(dark) { window.setBackgroundDrawable(ColorDrawable(windowBackground(dark).toArgb())) }
                 val downloads by remember { Downloads.state(applicationContext) }.collectAsStateWithLifecycle(DownloadState())
                 LaunchedEffect(downloads.finished) { vm.refresh() }
 
@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
                         title = { Text("Download on mobile data?") },
                         text = {
                             Text(
-                                "This downloads ${Formatter.formatShortFileSize(this, vm.bytesToDownload(ids))} " +
+                                "This downloads ${formatSize(vm.bytesToDownload(ids))} " +
                                     "over a metered connection.",
                             )
                         },
@@ -120,10 +120,7 @@ class MainActivity : ComponentActivity() {
                         vm = vm,
                         prefs = prefs,
                         theme = theme,
-                        onTheme = {
-                            prefs.theme = it
-                            theme = it
-                        },
+                        onTheme = onTheme,
                         onScreenChange = { screen = it },
                         languagesScreen = { back -> modelsScreen(false, back) },
                     )
