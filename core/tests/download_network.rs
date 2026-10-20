@@ -107,7 +107,7 @@ fn downloads_small_pack_and_resumes_truncated_part() {
     assert!(!store.part_path(onnx).exists());
 }
 
-/// Resumes the 2.5GB translator from a local copy missing its last 8 MiB, so only a range is
+/// Resumes the 1.1GB translator from a local copy missing its last 8 MiB, so only a range is
 /// fetched. Needs TRANSLATTE_MODELS pointing at an installed models dir.
 #[test]
 fn resumes_translator_tail_from_local_copy() {

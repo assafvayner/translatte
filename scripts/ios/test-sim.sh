@@ -6,7 +6,7 @@
 # Env: TRANSLATTE_SIM_DEVICE (default "iPhone 18 Pro"), SKIP_RUST_BUILD=1 to reuse the xcframework.
 # TRANSLATTE_THREADS, TRANSLATTE_PERF and TRANSLATTE_PREFIX_CACHE are passed to the app; its stderr is
 # saved to out/ios/<name>.log. TRANSLATTE_DOWNLOAD_TESTS=1 adds a small Hub download to the XCTests, and
-# TRANSLATTE_E2E=1 a UI test that sets the app up from scratch (~2.5GB; use a freshly erased simulator).
+# TRANSLATTE_E2E=1 a UI test that sets the app up from scratch (~1.15GB; use a freshly erased simulator).
 # TRANSLATTE_SCREENSHOTS=<dir> saves Home, Result, Setup, Languages, Settings and Camera screenshots in both themes there.
 set -euo pipefail
 
