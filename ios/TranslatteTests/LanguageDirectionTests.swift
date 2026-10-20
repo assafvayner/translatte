@@ -17,6 +17,13 @@ final class LanguageDirectionTests: XCTestCase {
         XCTAssertEqual(LanguageDirection.label(source: "xx", target: "yy", sources: [], targets: []), "xx → yy")
     }
 
+    func testARemovedLanguageFallsBackToEnglish() {
+        XCTAssertEqual(LanguageDirection.availableOrDefault("ja", in: [ja, en]), "ja")
+        XCTAssertEqual(LanguageDirection.availableOrDefault("sv", in: [ja, en]), "en")
+        XCTAssertEqual(LanguageDirection.availableOrDefault("sv", in: [ja]), "ja")
+        XCTAssertEqual(LanguageDirection.availableOrDefault("sv", in: []), "")
+    }
+
     func testSwapNeedsTheTargetToBeReadable() {
         XCTAssertTrue(LanguageDirection.canSwap(source: "ja", target: "en", sources: [ja, en]))
         XCTAssertFalse(LanguageDirection.canSwap(source: "ja", target: "ar", sources: [ja, en]), "no Arabic pack installed")

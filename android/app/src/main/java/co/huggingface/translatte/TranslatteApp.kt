@@ -7,6 +7,7 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.system.Os
+import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -28,7 +29,13 @@ class TranslatteApp : Application() {
     val engine: Engine by lazy {
         val modelsDir = File(filesDir, "models").apply { mkdirs() }
         val manifest = assets.open("manifest.json").bufferedReader().use { it.readText() }
-        Engine(modelsDir.path, manifest)
+        Engine(modelsDir.path, manifest).also { engine ->
+            // Frees what an app update left behind (e.g. a replaced translator) before anything
+            // uses or downloads models.
+            runCatching { engine.pruneModels() }
+                .onSuccess { if (it > 0u) Log.i(TAG, "pruned $it stale model files") }
+                .onFailure { Log.w(TAG, "pruning stale models failed", it) }
+        }
     }
 
     /** Serializes calls that load, use or free models, so the engine never runs two at once. */
@@ -100,6 +107,7 @@ class TranslatteApp : Application() {
 
     companion object {
         const val DOWNLOAD_CHANNEL = "downloads"
+        private const val TAG = "translatte"
         private val RELEASE_AFTER = 2.minutes
     }
 }

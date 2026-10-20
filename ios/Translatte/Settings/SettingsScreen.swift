@@ -23,8 +23,8 @@ struct SettingsScreen: View {
                         openURL(URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!)
                     }
                     .accessibilityIdentifier("credit-ocr")
-                    AboutRow(title: "Translation", subtitle: "TranslateGemma 4B by Google · Gemma Terms of Use") {
-                        openURL(URL(string: "https://ai.google.dev/gemma/terms")!)
+                    AboutRow(title: "Translation", subtitle: "Hy-MT2 1.8B by Tencent · Apache License 2.0") {
+                        openURL(URL(string: "https://huggingface.co/tencent/Hy-MT2-1.8B/blob/main/LICENSE.txt")!)
                     }
                     .accessibilityIdentifier("credit-translation")
                     AboutRow(title: "Font", subtitle: "Fraunces · SIL Open Font License 1.1", external: false) {

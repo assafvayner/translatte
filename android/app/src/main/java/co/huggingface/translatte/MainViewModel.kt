@@ -43,6 +43,15 @@ private const val COMFORTABLE_FREE_MEMORY = 2_800_000_000L
 
 private class LowMemoryException(message: String) : Exception(message)
 
+/**
+ * [code] if [languages] offers it, else English, else the first one ("" if none): a saved choice can
+ * disappear when an app update drops a language or its script pack is deleted.
+ */
+fun availableOrDefault(languages: List<LanguageInfo>, code: String): String {
+    if (languages.any { it.code == code }) return code
+    return (languages.find { it.code == "en" } ?: languages.firstOrNull())?.code ?: ""
+}
+
 /** Swapping makes the target the new source, so it must be readable with the installed packs. */
 fun canSwap(sourceLanguages: List<LanguageInfo>, target: String): Boolean = sourceLanguages.any { it.code == target }
 
@@ -86,8 +95,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             targetLanguages = engine.targetLanguages()
             val wasReady = ready
             ready = engine.coreInstalled() && sourceLanguages.isNotEmpty()
+            val target = availableOrDefault(targetLanguages, targetCode)
+            if (target != targetCode) {
+                targetCode = target
+                prefs.edit().putString("target", target).apply()
+            }
             if (sourceLanguages.none { it.code == sourceCode }) {
-                setSource((sourceLanguages.find { it.code == "en" } ?: sourceLanguages.firstOrNull())?.code ?: "")
+                setSource(availableOrDefault(sourceLanguages, sourceCode))
             } else if (ready && !wasReady) {
                 prepare()
             }
