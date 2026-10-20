@@ -6,7 +6,7 @@ use common::store;
 use translatte_core::model_store::ModelStore;
 use translatte_core::translate::batch::BatchTranslator;
 use translatte_core::translate::llama::LlamaGenerator;
-use translatte_core::translate::prompt::build_prompt;
+use translatte_core::translate::prompt::{build_prompt, Prompt};
 use translatte_core::translate::{TextGenerator, Translator};
 
 fn translate(store: &ModelStore, blocks: &[&str], src: &str, tgt: &str) -> Vec<Option<String>> {
@@ -72,6 +72,8 @@ fn generation_stops_at_end_of_turn() {
     let m = store.manifest();
     let path = store.model_file("translator", "model.gguf").unwrap();
     let mut g = LlamaGenerator::load(&path).unwrap();
+    // Without the persistent pool decode is several times slower on phones; fail loudly instead.
+    assert!(g.threadpool_attached());
     let p = build_prompt(m.language("en").unwrap(), m.language("de").unwrap(), "Exit");
     let out = g.generate(&p, 64).unwrap();
     assert!(!out.truncated, "{:?}", out.text);
@@ -164,4 +166,50 @@ fn two_generators_can_coexist() {
         )
         .unwrap();
     assert!(out[0].as_deref().is_some_and(|t| !t.is_empty()), "{out:?}");
+}
+
+/// Prefix reuse once a sequence has grown past the sliding attention window. Hy-MT2 has no SWA, so
+/// this runs only with TRANSLATTE_SWA_GGUF pointing at a model that has one (e.g. a Gemma 3 GGUF).
+#[test]
+fn prefix_cache_past_sliding_window_matches_uncached_generation() {
+    let Some(path) = std::env::var_os("TRANSLATTE_SWA_GGUF") else {
+        eprintln!("TRANSLATTE_SWA_GGUF not set; skipping");
+        return;
+    };
+    let prompt = |text: &str| Prompt {
+        prefix: "Translate the following text into English:\n\n".into(),
+        text: text.into(),
+        suffix: "\n\nEnglish:".into(),
+    };
+    // Well over Gemma 3's 1024-token window.
+    let long = "本日のおすすめは焼き鳥と枝豆です。".repeat(150);
+    let prompts = [
+        prompt("非常口"),
+        prompt(&long),
+        prompt("禁煙"),
+        prompt(&long),
+        prompt("出口"),
+    ];
+    let run = |cache: bool| {
+        let mut g = LlamaGenerator::load(path.as_ref())
+            .unwrap()
+            .with_prefix_cache(cache);
+        let mut reused = Vec::new();
+        let out = prompts
+            .iter()
+            .map(|p| {
+                let text = g.generate(p, 16).unwrap().text;
+                reused.push(g.reused_tokens());
+                text
+            })
+            .collect::<Vec<_>>();
+        (out, reused)
+    };
+    let (uncached, _) = run(false);
+    let (cached, reused) = run(true);
+    // The short prompts share the prefix with the previous call; after a long one nothing is reused.
+    assert!(reused[1] > 0, "{reused:?}");
+    assert_eq!(reused[2], 0, "{reused:?}");
+    assert_eq!(reused[4], 0, "{reused:?}");
+    assert_eq!(cached, uncached);
 }

@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = []
-llama = ["dep:llama-cpp-2", "dep:encoding_rs", "dep:self_cell"]
+llama = ["dep:llama-cpp-2", "dep:llama-cpp-sys-2", "dep:encoding_rs", "dep:self_cell"]
 download = ["dep:hf-hub", "dep:tokio", "dep:serde_yaml_ng", "dep:futures", "dep:bytes"]
 # TLS backend for `download`; enable exactly one. rustls is the production backend (on Android
 # it verifies through rustls-platform-verifier, which the app initializes via JNI).
@@ -22,7 +22,10 @@ ort = "=2.0.0-rc.10"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-llama-cpp-2 = { version = "0.1", optional = true }
+# Pinned: the threadpool attach in translate/llama.rs reads the context pointer from llama-cpp-2's
+# Debug output (it exposes no raw pointer). Re-check that format before bumping either crate.
+llama-cpp-2 = { version = "=0.1.160", optional = true }
+llama-cpp-sys-2 = { version = "=0.1.160", optional = true }
 encoding_rs = { version = "0.8", optional = true }
 self_cell = { version = "1", optional = true }
 hf-hub = { git = "https://github.com/huggingface/hf-hub", branch = "main", default-features = false, optional = true }

@@ -25,3 +25,18 @@ pub trait TextDetector {
 pub trait TextRecognizer {
     fn recognize(&mut self, img: &RgbImage, quad: &Quad) -> Result<Line>;
 }
+
+/// ONNX Runtime session settings shared by the OCR models. The detector's activations (for a
+/// 960px image) are large, and ORT's arena would keep them allocated while the translator runs,
+/// so it gets plain allocations instead; the recognizer's small arena is kept.
+fn session_builder(arena: bool) -> ort::Result<ort::session::builder::SessionBuilder> {
+    let builder = ort::session::Session::builder()?.with_intra_threads(4)?;
+    if arena {
+        return Ok(builder);
+    }
+    builder
+        .with_execution_providers([ort::execution_providers::CPUExecutionProvider::default()
+            .with_arena_allocator(false)
+            .build()])?
+        .with_memory_pattern(false)
+}

@@ -19,9 +19,7 @@ pub struct Recognizer {
 
 impl Recognizer {
     pub fn load(onnx: &Path, dict: &Path) -> Result<Self> {
-        let session = Session::builder()?
-            .with_intra_threads(4)?
-            .commit_from_file(onnx)?;
+        let session = super::session_builder(true)?.commit_from_file(onnx)?;
         let charset = Charset::from_dict_str(&std::fs::read_to_string(dict)?);
         Ok(Self { session, charset })
     }
