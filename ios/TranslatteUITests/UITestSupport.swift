@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 enum TestEnv {
@@ -7,6 +8,20 @@ enum TestEnv {
 
     static var helloWorld: String {
         "\(value("TRANSLATTE_REPO") ?? "")/core/tests/data/hello_world.png"
+    }
+
+    /// A plain white photo with no text in it.
+    static func blankImage() throws -> String {
+        let size = CGSize(width: 800, height: 600)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let png = UIGraphicsImageRenderer(size: size, format: format).pngData { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("blank.png")
+        try png.write(to: url)
+        return url.path
     }
 }
 

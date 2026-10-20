@@ -13,7 +13,7 @@ final class ModelsUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Welcome to translatte"].waitForExistence(timeout: 10))
         let download = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Download '")).firstMatch
-        XCTAssertEqual(download.label, "Download 2.5 GB")
+        XCTAssertEqual(download.label, "Download 2.50 GB")
         XCTAssertTrue(app.staticTexts["Always included"].exists || app.staticTexts["ALWAYS INCLUDED"].exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Wi-Fi recommended · '")).firstMatch.exists)
         XCTAssertTrue(download.isEnabled)
@@ -40,14 +40,14 @@ final class ModelsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Welcome to translatte"].waitForExistence(timeout: 10))
         app.buttons["model-rec-latin"].tap()
         app.buttons["model-rec-en"].tap()
-        app.buttons["Download 2.5 GB"].tap()
+        app.buttons["Download 2.50 GB"].tap()
 
         let receiving = app.staticTexts.matching(NSPredicate(format: "label MATCHES '[0-9]{3}(\\.[0-9])? MB of 2.49 GB'")).firstMatch
         XCTAssertTrue(receiving.waitForExistence(timeout: 300))
         app.buttons["Cancel download"].tap()
         let resume = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Download '")).firstMatch
         XCTAssertTrue(resume.waitForExistence(timeout: 60))
-        XCTAssertNotEqual(resume.label, "Download 2.5 GB", "only the rest is left to download")
+        XCTAssertNotEqual(resume.label, "Download 2.50 GB", "only the rest is left to download")
         XCTAssertFalse(app.buttons["Cancel download"].exists)
 
         resume.tap()
