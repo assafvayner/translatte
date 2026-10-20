@@ -73,11 +73,11 @@ fn downloads_small_pack_and_resumes_truncated_part() {
     let d = Downloader::with_source(&store, &rec);
     let cancel = AtomicBool::new(false);
 
-    d.download_model_blocking("rec-el", &cancel, |_| {})
+    d.download_model_blocking("rec-en", &cancel, |_| {})
         .unwrap();
-    assert_eq!(store.state("rec-el").unwrap(), InstallState::Installed);
-    assert_eq!(store.state("rec-el").unwrap(), InstallState::Installed);
-    let onnx = file(&store, "rec-el", "inference.onnx");
+    assert_eq!(store.state("rec-en").unwrap(), InstallState::Installed);
+    assert_eq!(store.state("rec-en").unwrap(), InstallState::Installed);
+    let onnx = file(&store, "rec-en", "inference.onnx");
     assert_eq!(
         rec.take(),
         vec![
@@ -95,15 +95,15 @@ fn downloads_small_pack_and_resumes_truncated_part() {
     f.set_len(cut).unwrap();
     drop(f);
     std::fs::rename(&installed, store.part_path(onnx)).unwrap();
-    assert_eq!(store.state("rec-el").unwrap(), InstallState::Corrupt);
+    assert_eq!(store.state("rec-en").unwrap(), InstallState::Corrupt);
 
-    d.download_model_blocking("rec-el", &cancel, |_| {})
+    d.download_model_blocking("rec-en", &cancel, |_| {})
         .unwrap();
     assert_eq!(
         rec.take(),
         vec![("inference.onnx".to_string(), Some(cut..onnx.size))]
     );
-    assert_eq!(store.state("rec-el").unwrap(), InstallState::Installed);
+    assert_eq!(store.state("rec-en").unwrap(), InstallState::Installed);
     assert!(!store.part_path(onnx).exists());
 }
 

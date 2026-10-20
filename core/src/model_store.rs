@@ -15,6 +15,10 @@ pub enum InstallState {
     Corrupt,
 }
 
+/// Models earlier manifests shipped and later dropped; [`ModelStore::prune`] deletes their
+/// directories. Add an id here whenever the manifest drops a model.
+pub const RETIRED_MODEL_IDS: &[&str] = &["rec-el", "rec-cyrillic"];
+
 pub struct ModelStore {
     manifest: Manifest,
     root: PathBuf,
@@ -83,10 +87,11 @@ impl ModelStore {
         PathBuf::from(p)
     }
 
-    /// Removes what the manifest no longer describes, so an app update that changes models
-    /// doesn't leave them taking space: directories of models the manifest dropped, installed files
-    /// whose size no longer matches (a replaced model), and partial downloads of other upstream
-    /// files. Returns the removed paths. Must not run concurrently with a download.
+    /// Removes model data an app update left behind: directories of [`RETIRED_MODEL_IDS`] that the
+    /// manifest no longer lists, installed files whose size no longer matches (a replaced model),
+    /// and partial downloads of other upstream files. Other directories in the root (e.g. a
+    /// `translator-alt` pushed for comparisons) are left alone. Returns the removed paths. Must not
+    /// run concurrently with a download.
     pub fn prune(&self) -> Result<Vec<PathBuf>> {
         let mut removed = Vec::new();
         let dirs = match std::fs::read_dir(&self.root) {
@@ -96,11 +101,10 @@ impl ModelStore {
         };
         for dir in dirs {
             let dir = dir?;
-            let known = dir
-                .file_name()
-                .to_str()
-                .is_some_and(|name| self.manifest.model(name).is_some());
-            if dir.file_type()?.is_dir() && !known {
+            let retired = dir.file_name().to_str().is_some_and(|name| {
+                RETIRED_MODEL_IDS.contains(&name) && self.manifest.model(name).is_none()
+            });
+            if retired && dir.file_type()?.is_dir() {
                 std::fs::remove_dir_all(dir.path())?;
                 removed.push(dir.path());
             }
@@ -427,14 +431,16 @@ mod tests {
     }
 
     #[test]
-    fn prune_removes_dirs_of_models_no_longer_in_manifest() {
+    fn prune_removes_dirs_of_retired_models_only() {
         let (_d, s) = store();
         write(&s, "rec-el/inference.onnx", "abc");
         write(&s, "rec-latin/inference.onnx", "abc");
+        write(&s, "translator-alt/model.gguf", "abc");
         write(&s, "loose-file", "x");
         assert_eq!(s.prune().unwrap(), vec![s.root().join("rec-el")]);
         assert!(!s.root().join("rec-el").exists());
         assert!(s.root().join("rec-latin/inference.onnx").exists());
+        assert!(s.root().join("translator-alt/model.gguf").exists());
         assert!(s.root().join("loose-file").exists());
         assert!(s.prune().unwrap().is_empty());
     }
