@@ -34,7 +34,8 @@ final class TranslatorModel: ObservableObject {
     @Published private(set) var image: UIImage?
     @Published private(set) var result: TranslationResult?
     @Published private(set) var phase: Phase = .idle
-    /// Shown on Home, e.g. when there isn't enough free memory to load the translator.
+    @Published private var runs = TranslationRuns()
+    /// Shown on Home when there isn't enough free memory to load the translator, or enough to run it quickly.
     @Published private(set) var notice: String?
 
     let modelsDirectory: URL
@@ -52,6 +53,8 @@ final class TranslatorModel: ObservableObject {
     /// ~840MB peak footprint translating a photo, plus margin. Below this, loading risks iOS killing
     /// the app mid-translation, so it refuses.
     private nonisolated static let minFreeMemory = 1_200_000_000
+    /// Below this, as on Android, translation still works but slowly, so Home warns.
+    private nonisolated static let comfortableFreeMemory = 2_800_000_000
 
     /// Simulator runs can point at the host's models via `TRANSLATTE_MODELS_DIR`
     /// (`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR` with `simctl launch`); otherwise models live in Documents.
@@ -126,59 +129,79 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
-    func translate(_ picked: UIImage) async {
-        guard let engine else { return }
-        lastPhoto = picked
+    /// The last successful translation; failures never replace it.
+    var lastSuccess: LastResult? { runs.lastSuccess }
+
+    /// Translates an encoded photo (a capture or a Photos pick), superseding any running translation.
+    func translate(_ data: Data) async {
+        let run = runs.start()
+        lastPhoto = nil
         image = nil
         result = nil
         phase = .working("Loading photo…")
+        let prepared = try? await onWorker { PhotoDecoder.preparedForOCR(data) }
+        guard runs.isCurrent(run) else { return }
+        guard let prepared = prepared ?? nil else { return photoFailedToLoad() }
+        await translate(prepared, run: run)
+    }
+
+    private func translate(_ photo: UIImage, run: Int) async {
+        guard let engine else { return }
+        lastPhoto = photo
+        image = photo
+        result = nil
+        phase = .working("Starting…")
         let (source, target) = (sourceCode, targetCode)
         let listener = StageListener { [weak self] text in
-            Task { @MainActor in self?.phase = .working(text) }
+            Task { @MainActor in
+                guard let self, self.runs.isCurrent(run), self.phase.isWorking else { return }
+                self.phase = .working(text)
+            }
         }
         do {
-            let (prepared, jpeg) = try await onWorker {
-                let prepared = picked.preparedForOCR()
-                guard let jpeg = prepared.jpegData(compressionQuality: 0.92) else {
+            let (output, warning) = try await onWorker { [self] in
+                guard let jpeg = photo.jpegData(compressionQuality: 0.92) else {
                     throw AppError(errorDescription: "Could not encode the photo")
                 }
-                return (prepared, jpeg)
-            }
-            image = prepared
-            lastPhoto = prepared
-            phase = .working("Starting…")
-            let output = try await onWorker { [self] in
-                try checkMemory()
+                let warning = try checkMemory()
                 let output = try engine.translateImage(image: jpeg, source: source, target: target, translate: true, listener: listener)
                 modelsLoaded = true
-                return output
+                return (output, warning)
             }
+            notice = warning
+            guard let phase = runs.finish(run, image: photo, output: output) else { return }
             result = output
-            notice = nil
-            if let error = output.translationError {
-                phase = .failed("Translation failed: \(error)")
-            } else if output.regions.isEmpty {
-                phase = .failed("No text found. Try moving closer or reducing glare.")
-            } else {
-                phase = .done
-            }
+            self.phase = phase
         } catch {
+            guard runs.isCurrent(run) else { return }
             phase = .failed(errorMessage(error))
         }
     }
 
     func photoFailedToLoad() {
+        _ = runs.start()
         lastPhoto = nil
         image = nil
         result = nil
         phase = .failed("Could not open the photo")
     }
 
+    /// Shows the last successful translation in the result viewer again.
+    func showLastSuccess() {
+        guard let last = runs.lastSuccess, image !== last.image else { return }
+        _ = runs.start()
+        lastPhoto = last.image
+        image = last.image
+        result = last.result
+        phase = .done
+    }
+
     var canRetry: Bool { lastPhoto != nil }
 
     /// Re-runs the last translation on the same photo.
     func retry() async {
-        if let lastPhoto { await translate(lastPhoto) }
+        guard let lastPhoto else { return }
+        await translate(lastPhoto, run: runs.start())
     }
 
     func swapLanguages() {
@@ -196,10 +219,10 @@ final class TranslatorModel: ObservableObject {
         let (source, target) = (sourceCode, targetCode)
         worker.async { [self] in
             do {
-                try checkMemory()
+                let warning = try checkMemory()
                 try engine.prepare(source: source, target: target)
                 modelsLoaded = true
-                Task { @MainActor in self.notice = nil }
+                Task { @MainActor in self.notice = warning }
             } catch let error as AppError {
                 Task { @MainActor in self.notice = error.localizedDescription }
             } catch {
@@ -218,17 +241,20 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
-    /// Refuses to load the models when iOS would likely kill the app for using them. Runs on `worker`.
-    private nonisolated func checkMemory() throws {
-        guard !modelsLoaded else { return }
+    /// Refuses to load the models when iOS would likely kill the app for using them, and returns a
+    /// warning while memory is low enough to slow translation down. Runs on `worker`.
+    private nonisolated func checkMemory() throws -> String? {
         let available = os_proc_available_memory()
         // 0 means no limit applies, as in the simulator.
-        guard available > 0, available < Self.minFreeMemory else { return }
-        let free = ByteCountFormatter.string(fromByteCount: Int64(available), countStyle: .memory)
-        let needed = ByteCountFormatter.string(fromByteCount: Int64(Self.minFreeMemory), countStyle: .memory)
-        throw AppError(
-            errorDescription: "Not enough free memory to load the translator (\(free) free, needs \(needed)). Close other apps and try again."
-        )
+        guard available > 0 else { return nil }
+        let free = formatSize(UInt64(available))
+        if available < Self.minFreeMemory, !modelsLoaded {
+            throw AppError(
+                errorDescription: "Not enough free memory to load the translator (\(free) free, needs \(formatSize(UInt64(Self.minFreeMemory)))). Close other apps and try again."
+            )
+        }
+        guard available < Self.comfortableFreeMemory else { return nil }
+        return "Low memory (\(free) free): translation will be slow. Close other apps to speed it up."
     }
 
     private func onWorker<T>(_ work: @escaping () throws -> T) async throws -> T {
@@ -258,8 +284,8 @@ final class TranslatorModel: ObservableObject {
         let out = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("autotest.json")
         let start = Date()
-        if let picked = UIImage(contentsOfFile: path) {
-            await translate(picked)
+        if let data = FileManager.default.contents(atPath: path) {
+            await translate(data)
         } else {
             photoFailedToLoad()
         }
@@ -300,24 +326,6 @@ private final class StageListener: ProgressListener, @unchecked Sendable {
         default: label = stage
         }
         update(label)
-    }
-}
-
-extension UIImage {
-    /// Long-side cap for OCR, as on Android; recognition gains little above this and memory grows quadratically.
-    private static let maxOCRSide: CGFloat = 2048
-
-    /// Bakes EXIF orientation into the pixels so OCR coordinates match what's on screen, and caps the
-    /// long side at `maxOCRSide`. Safe to call off the main thread.
-    func preparedForOCR() -> UIImage {
-        let scale = min(1, Self.maxOCRSide / max(size.width, size.height))
-        guard imageOrientation != .up || scale < 1 else { return self }
-        let target = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
-            draw(in: CGRect(origin: .zero, size: target))
-        }
     }
 }
 

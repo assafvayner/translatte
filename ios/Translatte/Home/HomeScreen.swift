@@ -16,8 +16,11 @@ struct HomeScreen: View {
             VStack(spacing: 16) {
                 header
                 LanguageBar()
-                if model.image != nil {
-                    LastResultCard { navigator.showResult(from: .home) }
+                if let last = model.lastSuccess {
+                    LastResultCard(last: last) {
+                        model.showLastSuccess()
+                        navigator.showResult(from: .home)
+                    }
                 } else {
                     EmptyStateCard()
                 }
@@ -47,9 +50,10 @@ struct HomeScreen: View {
             pickerItem = nil
             Task {
                 let data = try? await item.loadTransferable(type: Data.self)
+                guard navigator.screen == .home else { return }
                 navigator.showResult(from: .home)
-                if let data, let picked = UIImage(data: data) {
-                    await model.translate(picked)
+                if let data {
+                    await model.translate(data)
                 } else {
                     model.photoFailedToLoad()
                 }
@@ -63,7 +67,7 @@ struct HomeScreen: View {
             }
             Button("Not now", role: .cancel) {}
         } message: {
-            Text("Translatte uses the camera to photograph the text you want translated. You can turn access on in Settings.")
+            Text("translatte needs the camera to photograph text. Allow it in Settings, or choose a photo instead.")
         }
     }
 
@@ -97,7 +101,7 @@ struct HomeScreen: View {
     }
 
     private var actions: some View {
-        let hasCamera = navigator.cameraAccess != .unavailable
+        let hasCamera = navigator.cameraAccess != .unavailable && navigator.cameraAccess != .restricted
         return HStack(spacing: 12) {
             if hasCamera {
                 Button {
@@ -118,6 +122,5 @@ struct HomeScreen: View {
             .buttonStyle(BigButtonStyle(kind: hasCamera ? .tonal : .primary))
             .accessibilityIdentifier("photos-button")
         }
-        .disabled(model.phase.isWorking)
     }
 }

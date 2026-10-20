@@ -28,19 +28,18 @@ struct EmptyStateCard: View {
 /// The last translated photo; tapping it reopens the result viewer.
 struct LastResultCard: View {
     @EnvironmentObject private var model: TranslatorModel
+    let last: LastResult
     let open: () -> Void
 
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 10) {
-                if let image = model.image {
-                    TranslatedImage(image: image, result: model.result, rtl: model.targetIsRTL)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Palette.surfaceVariant)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
+                TranslatedImage(image: last.image, result: last.result, rtl: model.targetIsRTL)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Palette.surfaceVariant)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 HStack {
                     Text("Last translation").font(.headline)
                     Spacer()

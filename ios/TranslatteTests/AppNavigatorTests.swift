@@ -10,6 +10,7 @@ final class AppNavigatorTests: XCTestCase {
         XCTAssertEqual(AppNavigator.landing(modelsReady: true, camera: .notDetermined), .camera)
         XCTAssertEqual(AppNavigator.landing(modelsReady: true, camera: .denied), .home)
         XCTAssertEqual(AppNavigator.landing(modelsReady: true, camera: .unavailable), .home)
+        XCTAssertEqual(AppNavigator.landing(modelsReady: true, camera: .restricted), .home)
     }
 
     func testCameraAccessFromDeviceAndStatus() {
@@ -17,7 +18,7 @@ final class AppNavigatorTests: XCTestCase {
         XCTAssertEqual(CameraAccess.current(hasCamera: true, status: .authorized), .authorized)
         XCTAssertEqual(CameraAccess.current(hasCamera: true, status: .notDetermined), .notDetermined)
         XCTAssertEqual(CameraAccess.current(hasCamera: true, status: .denied), .denied)
-        XCTAssertEqual(CameraAccess.current(hasCamera: true, status: .restricted), .denied)
+        XCTAssertEqual(CameraAccess.current(hasCamera: true, status: .restricted), .restricted)
     }
 
     func testResultGoesBackToWhereThePhotoCameFrom() {

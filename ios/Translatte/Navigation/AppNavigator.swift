@@ -2,7 +2,8 @@ import AVFoundation
 import SwiftUI
 
 enum CameraAccess: Equatable {
-    case authorized, notDetermined, denied, unavailable
+    /// `restricted`: blocked by device management or parental controls, which Settings can't change.
+    case authorized, notDetermined, denied, restricted, unavailable
 
     static func current(
         hasCamera: Bool = AVCaptureDevice.default(for: .video) != nil,
@@ -12,6 +13,7 @@ enum CameraAccess: Equatable {
         switch status {
         case .authorized: return .authorized
         case .notDetermined: return .notDetermined
+        case .restricted: return .restricted
         default: return .denied
         }
     }
@@ -40,7 +42,7 @@ final class AppNavigator: ObservableObject {
         guard modelsReady else { return .setup }
         switch camera {
         case .authorized, .notDetermined: return .camera
-        case .denied, .unavailable: return .home
+        case .denied, .restricted, .unavailable: return .home
         }
     }
 
@@ -54,7 +56,7 @@ final class AppNavigator: ObservableObject {
 
     func cameraAccessChanged(_ access: CameraAccess) {
         cameraAccess = access
-        if screen == .camera, access == .denied || access == .unavailable {
+        if screen == .camera, Self.landing(modelsReady: true, camera: access) == .home {
             screen = .home
         }
     }

@@ -26,10 +26,12 @@ struct CameraScreen: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("camera-screen")
+        .statusBarHidden(true)
+        .onAppear(perform: camera.reset)
         .task {
             if navigator.cameraAccess == .notDetermined {
                 let granted = await AVCaptureDevice.requestAccess(for: .video)
-                navigator.cameraAccessChanged(granted ? .authorized : .denied)
+                navigator.cameraAccessChanged(granted ? .authorized : .current())
             }
             if navigator.cameraAccess == .authorized { camera.start() }
         }
@@ -63,7 +65,7 @@ struct CameraScreen: View {
 
     private var topBar: some View {
         HStack(spacing: 10) {
-            ScrimButton(systemImage: "chevron.left", label: "Home", action: navigator.closeCamera)
+            ScrimButton(systemImage: "chevron.left", label: "Back to Home", action: navigator.closeCamera)
                 .accessibilityIdentifier("camera-close")
             Button { pickingLanguages = true } label: {
                 Text(model.directionLabel)
@@ -93,7 +95,6 @@ struct CameraScreen: View {
                     .overlay(Circle().strokeBorder(CameraStyle.foreground, lineWidth: 5))
                     .frame(width: 80, height: 80)
             }
-            .disabled(capturing || model.phase.isWorking)
             .accessibilityLabel("Take photo")
             .accessibilityIdentifier("camera-shutter")
             Spacer()
@@ -114,11 +115,12 @@ struct CameraScreen: View {
     }
 
     private func shoot() {
+        guard !capturing else { return }
         capturing = true
         Task {
             let photo = await camera.capture()
             capturing = false
-            guard let photo else { return }
+            guard let photo, navigator.screen == .camera else { return }
             navigator.showResult(from: .camera)
             await model.translate(photo)
         }
