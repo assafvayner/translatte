@@ -11,15 +11,21 @@ struct ModelsView: View {
 
     var body: some View {
         let free = model.freeBytes
-        List {
-            if setup {
-                Text("Translatte works offline once its models are on the phone. The text reader and translator are required; pick the scripts you want to read.")
+        ScrollView {
+            VStack(spacing: 16) {
+                if setup { hero }
+                Card(title: "Always included") {
+                    ForEach(model.models.filter(\.core), id: \.id) { row($0, free: free) }
+                }
+                Card(title: "Scripts to read") {
+                    ForEach(model.models.filter { !$0.core }, id: \.id) { row($0, free: free) }
+                }
             }
-            ForEach(model.models, id: \.id) { m in
-                row(m, free: free)
-            }
+            .padding(16)
         }
-        .navigationTitle(setup ? "Set up Translatte" : "Languages")
+        .background(Palette.background.ignoresSafeArea())
+        .tint(Palette.primary)
+        .navigationTitle(setup ? "" : "Languages")
         .safeAreaInset(edge: .bottom) { bottomBar(free: free) }
         .alert(
             "Download on cellular data?",
@@ -32,6 +38,22 @@ struct ModelsView: View {
         } message: { ids in
             Text("This downloads \(formatSize(model.bytesToDownload(ids))) over a metered connection.")
         }
+    }
+
+    private var hero: some View {
+        VStack(spacing: 8) {
+            LogoCup(size: 92)
+            Text("Welcome to translatte")
+                .font(.display(26))
+                .foregroundStyle(Palette.text)
+                .accessibilityAddTraits(.isHeader)
+            Text("Download the languages you read. After that, everything runs on your phone, with no internet needed.")
+                .font(.callout)
+                .foregroundStyle(Palette.textMuted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+        }
+        .padding(.top, 12)
     }
 
     private var wanted: [ModelInfo] {
@@ -54,39 +76,39 @@ struct ModelsView: View {
         let hasPack = model.models.contains { !$0.core && ($0.state == .installed || selected.contains($0.id)) }
         let waiting = downloads.waitingForUnmetered
         let queued = downloads.queued && !downloads.running && downloads.error == nil
-        if setup || downloads.busy || error != nil {
+        if setup || waiting || queued || error != nil {
             VStack(spacing: 8) {
                 if let error {
-                    Text(error).foregroundStyle(.red)
+                    NoticeBanner(message: error)
                 }
                 if waiting {
-                    Text("Waiting for Wi-Fi to download.")
+                    Text("Waiting for Wi-Fi to download.").foregroundStyle(Palette.textMuted)
                 } else if queued {
-                    Text("Download queued.")
+                    Text("Download queued.").foregroundStyle(Palette.textMuted)
                 }
-                if downloads.busy {
-                    Button(role: .cancel, action: downloads.cancel) {
-                        Text("Cancel download").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
+                if downloads.busy && setup {
+                    Button("Cancel download", role: .cancel, action: downloads.cancel)
+                        .buttonStyle(BigButtonStyle(kind: .tonal))
                 } else if setup {
                     if needed > free {
-                        Text("Needs \(formatSize(needed)), only \(formatSize(free)) free").foregroundStyle(.red)
+                        Text("Needs \(formatSize(needed)), only \(formatSize(free)) free").foregroundStyle(Palette.error)
                     }
-                    Button {
+                    Button(needed > 0 ? "Download \(formatSize(needed))" : "Download") {
                         startDownload(wanted.map(\.id))
-                    } label: {
-                        Text(needed > 0 ? "Download (\(formatSize(needed)))" : "Download").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(BigButtonStyle(kind: .primary))
                     .disabled(wanted.isEmpty || !hasPack || needed > free)
+                    if free != .max {
+                        Text("Wi-Fi recommended · \(formatSize(free)) free on this phone")
+                            .font(.caption)
+                            .foregroundStyle(Palette.textMuted)
+                    }
                 }
             }
             .font(.callout)
             .multilineTextAlignment(.center)
-            .controlSize(.large)
-            .padding()
-            .background(.bar)
+            .padding(16)
+            .background(Palette.background.ignoresSafeArea(edges: .bottom))
         }
     }
 
@@ -100,7 +122,7 @@ struct ModelsView: View {
                 let label = HStack(spacing: 12) {
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                         .imageScale(.large)
-                        .foregroundStyle(toggleable ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(checked || toggleable ? Palette.primary : Palette.textMuted)
                     ModelLabel(model: m)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -119,15 +141,21 @@ struct ModelsView: View {
                         .accessibilityAddTraits(checked ? .isSelected : [])
                         .accessibilityIdentifier("model-\(m.id)")
                 }
-                if !setup && !m.core && !downloads.busy {
+                if !setup && !m.core {
                     VStack(alignment: .trailing, spacing: 6) {
-                        if !installed {
+                        if downloads.busy {
+                            if !installed && downloads.pendingIDs.contains(m.id) {
+                                Button("Cancel", action: downloads.cancel)
+                                    .buttonStyle(.bordered)
+                                    .accessibilityIdentifier("cancel-\(m.id)")
+                            }
+                        } else if !installed {
                             Button(m.state == .incomplete ? "Resume" : "Download") { startDownload([m.id]) }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(m.remainingBytes > free)
                                 .accessibilityIdentifier("download-\(m.id)")
                         }
-                        if m.state != .notInstalled || m.downloadedBytes > 0 {
+                        if !downloads.busy && (m.state != .notInstalled || m.downloadedBytes > 0) {
                             Button("Delete", role: .destructive) { model.deleteModel(m.id) }
                                 .buttonStyle(.bordered)
                                 .accessibilityIdentifier("delete-\(m.id)")
@@ -136,11 +164,13 @@ struct ModelsView: View {
                     .controlSize(.small)
                 }
             }
+            .frame(minHeight: 44)
             if let progress {
                 ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                    .tint(Palette.primary)
                 Text(progress.done == 0 ? "Waiting for data…" : "\(formatSize(progress.done)) of \(formatSize(progress.total))")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.textMuted)
             }
         }
     }
@@ -151,14 +181,18 @@ private struct ModelLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(model.displayName).font(.headline)
-            Text(model.status).font(.caption).foregroundStyle(.secondary)
+            Text(model.displayName)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Palette.text)
             if !model.languages.isEmpty {
                 Text(model.languages.joined(separator: ", "))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.textMuted)
                     .lineLimit(2)
             }
+            Text(model.status)
+                .font(.caption)
+                .foregroundStyle(Palette.textMuted)
         }
     }
 }
@@ -177,6 +211,20 @@ extension ModelInfo {
     }
 }
 
+/// Decimal units, as on Android: MB below 1000 MB, else GB; under 10 one decimal for MB and two for
+/// GB, under 100 one decimal, from 100 none ("4.8 MB", "2.49 GB", "16.6 MB", "512 MB", "207 GB").
 func formatSize(_ bytes: UInt64) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    func digits(_ value: Double, gb: Bool) -> Int {
+        value < 10 ? (gb ? 2 : 1) : value < 100 ? 1 : 0
+    }
+    func rounded(_ value: Double, _ digits: Int) -> Double {
+        let p = pow(10, Double(digits))
+        return (value * p).rounded() / p
+    }
+    let mb = Double(bytes) / 1_000_000
+    if rounded(mb, digits(mb, gb: false)) < 1000 {
+        return "\(mb.formatted(.number.precision(.fractionLength(digits(mb, gb: false))).grouping(.never))) MB"
+    }
+    let gb = Double(bytes) / 1_000_000_000
+    return "\(gb.formatted(.number.precision(.fractionLength(digits(gb, gb: true))).grouping(.never))) GB"
 }

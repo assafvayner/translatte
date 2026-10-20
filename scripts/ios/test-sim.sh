@@ -7,6 +7,7 @@
 # TRANSLATTE_THREADS, TRANSLATTE_PERF and TRANSLATTE_PREFIX_CACHE are passed to the app; its stderr is
 # saved to out/ios/<name>.log. TRANSLATTE_DOWNLOAD_TESTS=1 adds a small Hub download to the XCTests, and
 # TRANSLATTE_E2E=1 a UI test that sets the app up from scratch (~2.5GB; use a freshly erased simulator).
+# TRANSLATTE_SCREENSHOTS=<dir> saves Home, Result, Setup, Languages, Settings and Camera screenshots in both themes there.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -39,7 +40,7 @@ DEST="platform=iOS Simulator,id=$UDID"
 TRANSLATTE_MODELS="$MODELS" xcodebuild test -project "$ROOT/ios/Translatte.xcodeproj" -scheme Translatte \
   -destination "$DEST" -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO \
   TRANSLATTE_MODELS="$MODELS" TRANSLATTE_DOWNLOAD_TESTS="${TRANSLATTE_DOWNLOAD_TESTS:-}" \
-  TRANSLATTE_E2E="${TRANSLATTE_E2E:-}" -quiet
+  TRANSLATTE_E2E="${TRANSLATTE_E2E:-}" TRANSLATTE_SCREENSHOTS="${TRANSLATTE_SCREENSHOTS:-}" -quiet
 
 APP="$DERIVED/Build/Products/Debug-iphonesimulator/Translatte.app"
 xcrun simctl install "$UDID" "$APP"

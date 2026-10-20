@@ -16,6 +16,16 @@ targets:
       - path: Translatte
       - path: ../models/manifest.json
         buildPhase: resources
+      - path: ../design/fonts/Fraunces-SemiBold.ttf
+        buildPhase: resources
+      - path: ../design/fonts/OFL.txt
+        buildPhase: resources
+    info:
+      path: Translatte-Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIAppFonts: [Fraunces-SemiBold.ttf]
     dependencies:
       - framework: Frameworks/TranslatteFFI.xcframework
         embed: false
@@ -31,6 +41,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: co.huggingface.translatte
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Translatte
         INFOPLIST_KEY_NSCameraUsageDescription: Translatte reads text in photos you take so it can translate it on your device.
@@ -80,4 +94,5 @@ schemes:
         TRANSLATTE_MODELS: $(TRANSLATTE_MODELS)
         TRANSLATTE_DOWNLOAD_TESTS: $(TRANSLATTE_DOWNLOAD_TESTS)
         TRANSLATTE_E2E: $(TRANSLATTE_E2E)
+        TRANSLATTE_SCREENSHOTS: $(TRANSLATTE_SCREENSHOTS)
         TRANSLATTE_REPO: $(SRCROOT)/..
