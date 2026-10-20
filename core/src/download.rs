@@ -184,6 +184,13 @@ impl<'a> Downloader<'a> {
         for f in &entry.files {
             check_cancel(cancel)?;
             if !self.store.is_file_installed(f)? {
+                // A file of the wrong size is from an older manifest (or damaged); the download
+                // replaces it anyway, so free its space first.
+                match std::fs::remove_file(self.store.root().join(&f.path)) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
                 if let Some(dir) = self.store.part_path(f).parent() {
                     std::fs::create_dir_all(dir)?;
                 }
@@ -1109,6 +1116,44 @@ PostProcess:
         run(&fx, "det").0.unwrap();
         assert_eq!(requests(&fx).len(), 1);
         assert_eq!(fx.store.state("det").unwrap(), InstallState::Installed);
+    }
+
+    #[test]
+    fn replaced_model_frees_old_file_before_downloading() {
+        let fx = fixture();
+        let dest = fx.store.root().join("translator/model.gguf");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, vec![1u8; BIG * 2]).unwrap();
+        fx.fake
+            .open_errors
+            .lock()
+            .unwrap()
+            .insert("o/tr/up.gguf".into(), MAX_STALLED_ATTEMPTS);
+        assert!(run(&fx, "translator").0.is_err());
+        assert!(!dest.exists());
+
+        run(&fx, "translator").0.unwrap();
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
+    }
+
+    #[test]
+    fn part_of_another_upstream_file_is_not_resumed() {
+        let fx = fixture();
+        let legacy = fx.store.root().join("translator/model.gguf.part");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, vec![9u8; 100]).unwrap();
+        run(&fx, "translator").0.unwrap();
+        assert_eq!(
+            requests(&fx),
+            vec![("o/tr/up.gguf".into(), Some(0..BIG as u64))]
+        );
+        assert_eq!(
+            fx.store.state("translator").unwrap(),
+            InstallState::Installed
+        );
     }
 
     #[test]

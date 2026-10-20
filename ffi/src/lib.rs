@@ -246,6 +246,14 @@ impl Engine {
         }))
     }
 
+    /// Deletes model files the manifest no longer describes (models it dropped, a replaced
+    /// translator, partial downloads of other upstream files), so they don't keep taking space
+    /// after an app update. Returns how many files or directories were removed. Call it once after
+    /// creating the engine, before starting downloads.
+    pub fn prune_models(&self) -> Result<u32, FfiError> {
+        Ok(self.store.prune()?.len() as u32)
+    }
+
     pub fn models(&self) -> Result<Vec<ModelInfo>, FfiError> {
         let manifest = self.store.manifest();
         manifest
@@ -522,6 +530,31 @@ mod tests {
         assert!(models.iter().all(|m| m.state == ModelState::NotInstalled));
         assert!(engine.delete_model("det".into()).is_err());
         assert!(!engine.delete_model("rec-latin".into()).unwrap());
+    }
+
+    #[test]
+    fn pruning_an_old_install_leaves_the_new_translator_to_download() {
+        let dir = tempfile_dir();
+        let old_gguf = dir.join("translator/model.gguf");
+        std::fs::create_dir_all(old_gguf.parent().unwrap()).unwrap();
+        std::fs::File::create(&old_gguf)
+            .unwrap()
+            .set_len(2_489_909_760)
+            .unwrap();
+        std::fs::write(dir.join("translator/model.gguf.part"), "old").unwrap();
+        std::fs::create_dir_all(dir.join("rec-el")).unwrap();
+        std::fs::write(dir.join("rec-el/inference.onnx"), "x").unwrap();
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+
+        assert_eq!(engine.prune_models().unwrap(), 3);
+        assert!(!old_gguf.exists());
+        assert!(!dir.join("rec-el").exists());
+        let models = engine.models().unwrap();
+        let translator = models.iter().find(|m| m.id == "translator").unwrap();
+        assert_eq!(translator.state, ModelState::NotInstalled);
+        assert_eq!(translator.size_bytes, 1_133_080_448);
+        assert_eq!(translator.downloaded_bytes, 0);
+        assert_eq!(engine.prune_models().unwrap(), 0);
     }
 
     #[cfg(feature = "download")]
