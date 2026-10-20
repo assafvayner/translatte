@@ -87,7 +87,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val wasReady = ready
             ready = engine.coreInstalled() && sourceLanguages.isNotEmpty()
             if (sourceLanguages.none { it.code == sourceCode }) {
-                setSource(sourceLanguages.firstOrNull()?.code ?: "")
+                setSource((sourceLanguages.find { it.code == "en" } ?: sourceLanguages.firstOrNull())?.code ?: "")
             } else if (ready && !wasReady) {
                 prepare()
             }
