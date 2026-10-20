@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,7 +29,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,7 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import uniffi.translatte_ffi.LanguageInfo
-import uniffi.translatte_ffi.Region
+import co.huggingface.translatte.ui.result.OverlayImage
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,7 +60,6 @@ fun TranslateScreen(vm: MainViewModel, onManageLanguages: () -> Unit) {
         uri?.let(vm::translate)
     }
     var showOriginal by rememberSaveable { mutableStateOf(false) }
-    var tapped by remember { mutableStateOf<Region?>(null) }
     var noCamera by remember { mutableStateOf(false) }
     val working = vm.phase is Phase.Working
 
@@ -86,7 +83,7 @@ fun TranslateScreen(vm: MainViewModel, onManageLanguages: () -> Unit) {
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                 val image = vm.image
                 if (image != null) {
-                    OverlayImage(image, vm.result, showOriginal, onTap = { tapped = it }, modifier = Modifier.fillMaxSize())
+                    OverlayImage(image, vm.result, showOriginal, Modifier.fillMaxSize())
                 } else {
                     Text("Take a photo of a sign, menu or label.", style = MaterialTheme.typography.bodyLarge)
                 }
@@ -128,15 +125,6 @@ fun TranslateScreen(vm: MainViewModel, onManageLanguages: () -> Unit) {
                 ) { Text("Choose photo") }
             }
         }
-    }
-
-    tapped?.let { region ->
-        AlertDialog(
-            onDismissRequest = { tapped = null },
-            confirmButton = { TextButton(onClick = { tapped = null }) { Text("Close") } },
-            title = { Text(region.translatedText ?: "") },
-            text = { Text(region.sourceText) },
-        )
     }
 }
 
