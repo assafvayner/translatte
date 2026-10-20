@@ -2,34 +2,36 @@ package co.huggingface.translatte
 
 import android.Manifest
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import android.text.format.Formatter
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import android.content.res.Configuration
-import android.graphics.drawable.ColorDrawable
-import androidx.activity.SystemBarStyle
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.ui.graphics.toArgb
-import co.huggingface.translatte.ui.settings.UiPrefs
-import co.huggingface.translatte.ui.setup.ModelsScreen
-import co.huggingface.translatte.ui.theme.TranslatteTheme
-import co.huggingface.translatte.ui.theme.windowBackground
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import co.huggingface.translatte.ui.MainNav
+import co.huggingface.translatte.ui.Screen
+import co.huggingface.translatte.ui.settings.UiPrefs
+import co.huggingface.translatte.ui.setup.ModelsScreen
+import co.huggingface.translatte.ui.theme.TranslatteTheme
+import co.huggingface.translatte.ui.theme.windowBackground
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -45,9 +47,12 @@ class MainActivity : ComponentActivity() {
         val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
         setContent {
-            val dark = prefs.theme.isDark(isSystemInDarkTheme())
-            LaunchedEffect(dark) {
-                val style = if (dark) {
+            var theme by remember { mutableStateOf(prefs.theme) }
+            var screen by remember { mutableStateOf<Screen?>(null) }
+            val dark = theme.isDark(isSystemInDarkTheme())
+            val lightBarIcons = dark || (vm.ready && screen == Screen.Camera)
+            LaunchedEffect(lightBarIcons) {
+                val style = if (lightBarIcons) {
                     SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
                 } else {
                     SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
@@ -56,7 +61,6 @@ class MainActivity : ComponentActivity() {
             }
             TranslatteTheme(dark) {
                 val downloads by remember { Downloads.state(applicationContext) }.collectAsStateWithLifecycle(DownloadState())
-                var managing by rememberSaveable { mutableStateOf(false) }
                 LaunchedEffect(downloads.finished) { vm.refresh() }
 
                 var meteredPrompt by rememberSaveable { mutableStateOf<List<String>?>(null) }
@@ -97,31 +101,32 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 }
-                when {
-                    !vm.ready -> ModelsScreen(
+                val modelsScreen = @Composable { setup: Boolean, onBack: (() -> Unit)? ->
+                    ModelsScreen(
                         models = vm.models,
                         downloads = downloads,
-                        setup = true,
+                        setup = setup,
                         error = vm.setupError,
                         onDownload = startDownload,
                         onCancel = { Downloads.cancel(this) },
                         onDelete = vm::deleteModel,
-                        onBack = null,
+                        onBack = onBack,
                     )
-                    managing -> {
-                        BackHandler { managing = false }
-                        ModelsScreen(
-                            models = vm.models,
-                            downloads = downloads,
-                            setup = false,
-                            error = vm.setupError,
-                            onDownload = startDownload,
-                            onCancel = { Downloads.cancel(this) },
-                            onDelete = vm::deleteModel,
-                            onBack = { managing = false },
-                        )
-                    }
-                    else -> TranslateScreen(vm, onManageLanguages = { managing = true })
+                }
+                if (!vm.ready) {
+                    modelsScreen(true, null)
+                } else {
+                    MainNav(
+                        vm = vm,
+                        prefs = prefs,
+                        theme = theme,
+                        onTheme = {
+                            prefs.theme = it
+                            theme = it
+                        },
+                        onScreenChange = { screen = it },
+                        languagesScreen = { back -> modelsScreen(false, back) },
+                    )
                 }
             }
         }
