@@ -9,7 +9,7 @@ cd "$ROOT"
 # TLS=native (default here): OpenSSL-backed, test-only, since the rustls verifier needs JNI, which a bare
 # `adb shell` binary lacks, so `fetch` panics under TLS=rustls. The app keeps rustls (see README "Android").
 TLS="${TLS:-native}"
-cargo build -p translatte-cli --release --target "$TARGET" --no-default-features --features "tls-$TLS" "$@"
+cargo build --locked -p translatte-cli --release --target "$TARGET" --no-default-features --features "tls-$TLS" "$@"
 
 OUT="$ROOT/target/$TARGET/release"
 cp "$ORT_DIR/lib/libonnxruntime.so" "$OUT/"

@@ -14,4 +14,4 @@ thiserror = "2"
 # `=0.1.160` requirement makes the patch fail loudly if they drift apart. llama-cpp-sys-2 comes
 # from the same checkout.
 [patch.crates-io]
-llama-cpp-2 = { git = "https://github.com/assafvayner/llama-cpp-rs", rev = "53ec9e3a1e7169279608c4cc92c6dbbf6ddec8be" }
+llama-cpp-2 = { git = "https://github.com/assafvayner/llama-cpp-rs", rev = "3f15284c6762506516662680e6c12dd5bc645647" }
