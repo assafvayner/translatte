@@ -17,13 +17,14 @@ use super::{Generation, TextGenerator};
 use crate::{Result, TranslatteError};
 
 const N_CTX: u32 = 4096;
-/// Hy-MT2's recommended sampling (model card), seeded so a given input always gets the same output.
+/// Hy-MT2's recommended sampling (model card). Seeded so a given input and seed always get the same
+/// output; [`LlamaGenerator::set_seed`] changes it (e.g. for a retry).
 const TEMPERATURE: f32 = 0.7;
 const TOP_K: i32 = 20;
 const TOP_P: f32 = 0.6;
 const REPEAT_PENALTY: f32 = 1.05;
 const PENALTY_LAST_N: i32 = 64;
-const SEED: u32 = 0;
+const DEFAULT_SEED: u32 = 0;
 
 fn err(e: impl std::fmt::Display) -> TranslatteError {
     TranslatteError::Translate(e.to_string())
@@ -63,6 +64,7 @@ pub struct LlamaGenerator {
     prefix_cache: bool,
     /// Prompt tokens the last `generate` call took from the cache instead of decoding.
     reused: usize,
+    seed: u32,
 }
 
 impl LlamaGenerator {
@@ -111,6 +113,7 @@ impl LlamaGenerator {
             cached: Vec::new(),
             prefix_cache,
             reused: 0,
+            seed: DEFAULT_SEED,
         })
     }
 
@@ -118,6 +121,12 @@ impl LlamaGenerator {
     pub fn with_prefix_cache(mut self, enabled: bool) -> Self {
         self.prefix_cache = enabled;
         self
+    }
+
+    /// Seed for sampling in later `generate` calls; a different seed can give a different
+    /// translation of the same text.
+    pub fn set_seed(&mut self, seed: u32) {
+        self.seed = seed;
     }
 
     /// Prompt tokens the last `generate` call reused from the KV cache.
@@ -176,6 +185,7 @@ impl TextGenerator for LlamaGenerator {
             cached,
             prefix_cache,
             reused,
+            seed,
         } = self;
         inner.with_dependent_mut(|model, ctx| {
             let vocab = model.vocab();
@@ -197,7 +207,9 @@ impl TextGenerator for LlamaGenerator {
             } else {
                 0
             };
-            let result = generate_from(ctx, &vocab, &tokens, n_keep, cached, budget, *threads);
+            let result = generate_from(
+                ctx, &vocab, &tokens, n_keep, cached, budget, *threads, *seed,
+            );
             match &result {
                 Ok(_) => *reused = n_keep,
                 Err(_) => {
@@ -264,6 +276,7 @@ fn warm_from(
 
 /// Decodes `tokens[n_keep..]` on top of the first `n_keep` cached entries, then samples,
 /// recording every token decoded into the context in `cached`.
+#[allow(clippy::too_many_arguments)]
 fn generate_from(
     ctx: &mut LlamaContext,
     vocab: &LlamaVocab,
@@ -272,6 +285,7 @@ fn generate_from(
     cached: &mut Vec<LlamaToken>,
     budget: usize,
     threads: i32,
+    seed: u32,
 ) -> Result<Generation> {
     truncate_cache(ctx, cached, n_keep)?;
 
@@ -291,7 +305,7 @@ fn generate_from(
         LlamaSampler::top_k(TOP_K),
         LlamaSampler::top_p(TOP_P, 1),
         LlamaSampler::temp(TEMPERATURE),
-        LlamaSampler::dist(SEED),
+        LlamaSampler::dist(seed),
     ]);
     let mut decoder = encoding_rs::UTF_8.new_decoder();
     let mut out = String::new();

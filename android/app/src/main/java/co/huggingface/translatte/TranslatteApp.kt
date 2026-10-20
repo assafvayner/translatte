@@ -29,13 +29,7 @@ class TranslatteApp : Application() {
     val engine: Engine by lazy {
         val modelsDir = File(filesDir, "models").apply { mkdirs() }
         val manifest = assets.open("manifest.json").bufferedReader().use { it.readText() }
-        Engine(modelsDir.path, manifest).also { engine ->
-            // Frees what an app update left behind (e.g. a replaced translator) before anything
-            // uses or downloads models.
-            runCatching { engine.pruneModels() }
-                .onSuccess { if (it > 0u) Log.i(TAG, "pruned $it stale model files") }
-                .onFailure { Log.w(TAG, "pruning stale models failed", it) }
-        }
+        Engine(modelsDir.path, manifest)
     }
 
     /** Serializes calls that load, use or free models, so the engine never runs two at once. */
@@ -66,6 +60,13 @@ class TranslatteApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Frees what an app update left behind (e.g. a replaced translator), off the main thread;
+        // the engine makes a download wait for it.
+        scope.launch(Dispatchers.IO) {
+            runCatching { engine.pruneModels() }
+                .onSuccess { if (it > 0u) Log.i(TAG, "pruned $it stale model files") }
+                .onFailure { Log.w(TAG, "pruning stale models failed", it) }
+        }
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(DOWNLOAD_CHANNEL, "Model downloads", NotificationManager.IMPORTANCE_LOW),
         )

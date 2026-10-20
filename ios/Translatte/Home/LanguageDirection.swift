@@ -8,11 +8,24 @@ enum LanguageDirection {
         return "\(from) → \(to)"
     }
 
-    /// `code` if `languages` offers it, else English, else the first one ("" if none): a saved choice can
-    /// disappear when an app update drops a language or its script pack is deleted.
-    static func availableOrDefault(_ code: String, in languages: [LanguageInfo]) -> String {
-        if languages.contains(where: { $0.code == code }) { return code }
-        return (languages.first { $0.code == "en" } ?? languages.first)?.code ?? ""
+    /// The saved `source` and `target` if both are still offered, else replacements: a choice can
+    /// disappear when an app update drops a language or its script pack is deleted. A replacement is
+    /// English if possible, else the first language in the (alphabetical) list, and never the same as
+    /// the other side; the target changes if only English is left to read. Same rule as Android's
+    /// `fallbackLanguages`.
+    static func fallback(
+        source: String, target: String, sources: [LanguageInfo], targets: [LanguageInfo]
+    ) -> (source: String, target: String) {
+        func pick(_ languages: [LanguageInfo], avoiding avoid: String?) -> String? {
+            (languages.first { $0.code == "en" && $0.code != avoid } ?? languages.first { $0.code != avoid })?.code
+        }
+        let s = sources.contains { $0.code == source }
+            ? source : pick(sources, avoiding: target) ?? pick(sources, avoiding: nil) ?? ""
+        var t = targets.contains { $0.code == target } ? target : pick(targets, avoiding: s) ?? ""
+        if s == t, s != source || t != target {
+            t = pick(targets, avoiding: s) ?? t
+        }
+        return (s, t)
     }
 
     /// Swapping makes the target the source, so the target must be readable with the installed packs.

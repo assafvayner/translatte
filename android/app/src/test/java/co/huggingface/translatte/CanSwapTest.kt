@@ -15,11 +15,20 @@ class CanSwapTest {
         assertFalse(canSwap(sources, "ja"))
     }
 
+    private val targets = listOf(
+        LanguageInfo("ar", "Arabic", true),
+        LanguageInfo("en", "English", false),
+        LanguageInfo("fr", "French", false),
+    )
+
     @Test
-    fun aRemovedLanguageFallsBackToEnglish() {
-        assertEquals("fr", availableOrDefault(sources, "fr"))
-        assertEquals("en", availableOrDefault(sources, "sv"))
-        assertEquals("fr", availableOrDefault(sources.take(1), "sv"))
-        assertEquals("", availableOrDefault(emptyList(), "sv"))
+    fun removedLanguagesFallBackWithoutPairingALanguageWithItself() {
+        assertEquals("fr" to "en", fallbackLanguages(sources, targets, "fr", "en"))
+        assertEquals("en" to "fr", fallbackLanguages(sources, targets, "sv", "fr"))
+        assertEquals("fr" to "en", fallbackLanguages(sources, targets, "sv", "en"))
+        assertEquals("en" to "ar", fallbackLanguages(sources, targets, "en", "sv"))
+        assertEquals("en" to "ar", fallbackLanguages(sources, targets, "sv", "no"))
+        assertEquals("en" to "ar", fallbackLanguages(sources.drop(1), targets, "sv", "en"))
+        assertEquals("" to "en", fallbackLanguages(emptyList(), targets, "sv", "en"))
     }
 }

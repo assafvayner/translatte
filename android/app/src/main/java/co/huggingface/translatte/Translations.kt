@@ -30,7 +30,8 @@ data class Translated(val image: Bitmap, val result: TranslationResult)
 class Translations(
     private val scope: CoroutineScope,
     private val io: CoroutineContext,
-    private val translate: suspend (Bitmap, onStage: (String) -> Unit) -> TranslationResult,
+    /** Translates a photo; `attempt` is 0 for a new photo and counts retries of the same one. */
+    private val translate: suspend (Bitmap, attempt: Int, onStage: (String) -> Unit) -> TranslationResult,
     private val errorMessage: (Throwable) -> String,
 ) {
     var image by mutableStateOf<Bitmap?>(null)
@@ -44,10 +45,12 @@ class Translations(
 
     private var job: Job? = null
     private var generation = 0
+    private var attempt = 0
 
     /** Loads a photo with [load] (on the IO context) and translates it. */
     fun start(load: () -> Bitmap): Job {
         val gen = supersede()
+        attempt = 0
         image = null
         result = null
         phase = Phase.Working("Loading photo…")
@@ -64,10 +67,11 @@ class Translations(
         }.also { job = it }
     }
 
-    /** Runs the current photo again, e.g. after an error. */
+    /** Runs the current photo again, e.g. after an error, with a new [attempt] so sampling varies. */
     fun retry() {
         val bitmap = image ?: return
         val gen = supersede()
+        attempt++
         job = scope.launch { run(gen, bitmap) }
     }
 
@@ -92,7 +96,7 @@ class Translations(
         result = null
         phase = Phase.Working("Starting…")
         try {
-            val output = translate(bitmap) { label ->
+            val output = translate(bitmap, attempt) { label ->
                 scope.launch { if (gen == generation && phase is Phase.Working) phase = Phase.Working(label) }
             }
             if (gen != generation) return

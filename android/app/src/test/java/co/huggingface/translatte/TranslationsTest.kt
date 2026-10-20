@@ -31,8 +31,10 @@ class TranslationsTest {
     /** Each call to the fake engine waits for the test to hand it a result, ignoring cancellation like the native call. */
     private class FakeEngine {
         val calls = mutableListOf<CompletableDeferred<Result<TranslationResult>>>()
+        val attempts = mutableListOf<Int>()
 
-        suspend fun translate(@Suppress("UNUSED_PARAMETER") bitmap: Bitmap, onStage: (String) -> Unit): TranslationResult {
+        suspend fun translate(@Suppress("UNUSED_PARAMETER") bitmap: Bitmap, attempt: Int, onStage: (String) -> Unit): TranslationResult {
+            attempts += attempt
             val call = CompletableDeferred<Result<TranslationResult>>().also { calls += it }
             onStage("Finding text…")
             return withContext(NonCancellable) { call.await() }.getOrThrow()
@@ -135,5 +137,27 @@ class TranslationsTest {
         job.join()
         assertEquals(false, (t.phase as Phase.Failed).retryable)
         assertNull(t.lastSuccess)
+    }
+
+    @Test
+    fun retriesCountAttemptsAndANewPhotoResetsThem() = runBlocking {
+        val engine = FakeEngine()
+        val t = translations(engine)
+        t.start { bitmap() }
+        yield()
+        engine.calls[0].complete(Result.failure(Exception("boom")))
+        yield()
+        t.retry()
+        yield()
+        engine.calls[1].complete(Result.failure(Exception("boom")))
+        yield()
+        t.retry()
+        yield()
+        engine.calls[2].complete(Result.success(result("ok")))
+        yield()
+        t.start { bitmap() }.also { yield() }
+        engine.calls[3].complete(Result.success(result("ok")))
+        yield()
+        assertEquals(listOf(0, 1, 2, 0), engine.attempts)
     }
 }

@@ -27,7 +27,7 @@ final class EngineTests: XCTestCase {
     func testRustErrorsSurfaceAsSwiftErrors() throws {
         let dir = FileManager.default.temporaryDirectory
         let engine = try Engine(modelsDir: dir.path, manifestJson: try manifest())
-        XCTAssertThrowsError(try engine.translateImage(image: Data([1, 2, 3]), source: "fr", target: "en", translate: false, listener: nil))
+        XCTAssertThrowsError(try engine.translateImage(image: Data([1, 2, 3]), source: "fr", target: "en", translate: false, attempt: 0, listener: nil))
         XCTAssertThrowsError(try Engine(modelsDir: dir.path, manifestJson: "{}"))
     }
 
@@ -67,7 +67,7 @@ final class EngineTests: XCTestCase {
         }
         let engine = try Engine(modelsDir: models, manifestJson: try manifest())
         let png = try Data(contentsOf: repo.appendingPathComponent("core/tests/data/hello_world.png"))
-        let result = try engine.translateImage(image: png, source: "en", target: "de", translate: true, listener: nil)
+        let result = try engine.translateImage(image: png, source: "en", target: "de", translate: true, attempt: 0, listener: nil)
         XCTAssertEqual(result.regions.count, 1)
         XCTAssertEqual(result.regions.first?.sourceText, "HELLO WORLD")
         let translated = try XCTUnwrap(result.regions.first?.translatedText).lowercased()
