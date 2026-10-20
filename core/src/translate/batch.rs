@@ -149,6 +149,8 @@ mod tests {
             rtl: false,
             spaced: true,
             prompt_name: None,
+            prompt_name_zh: None,
+            zh_instruction: false,
         }
     }
 
@@ -188,9 +190,9 @@ mod tests {
 
     #[test]
     fn single_block_is_sent_unnumbered() {
-        let (out, prompts) = run(vec![Done("Hello<end_of_turn>")], &["Bonjour"]);
+        let (out, prompts) = run(vec![Done("Hello<｜hy_place▁holder▁no▁2｜>")], &["Bonjour"]);
         assert_eq!(out, some(&["Hello"]));
-        assert!(prompts[0].contains("\n\n\nBonjour<end_of_turn>"));
+        assert!(prompts[0].contains(":\n\nBonjour<｜hy_Assistant｜>"));
     }
 
     #[test]
@@ -255,7 +257,7 @@ mod tests {
         );
         assert_eq!(out, some(&["Hello", "Exit", "Water"]));
         assert_eq!(prompts.len(), 2);
-        assert!(prompts[1].contains("\n\n\nSortie<end_of_turn>"));
+        assert!(prompts[1].contains(":\n\nSortie<｜hy_Assistant｜>"));
     }
 
     #[test]

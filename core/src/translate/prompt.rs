@@ -1,7 +1,7 @@
 use crate::manifest::Language;
 
-/// TranslateGemma's chat template split so the backend can tokenize the untrusted `text` without
-/// special-token parsing; `prefix + text + suffix` is the full rendered prompt.
+/// The user turn of Hy-MT2's chat template split so the backend can tokenize the untrusted `text`
+/// without special-token parsing; `prefix + text + suffix` is the full rendered prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prompt {
     pub prefix: String,
@@ -13,18 +13,43 @@ fn prompt_name(l: &Language) -> &str {
     l.prompt_name.as_deref().unwrap_or(&l.name)
 }
 
-/// Renders TranslateGemma's chat template (see the model's chat_template.jinja). BOS is added by the tokenizer.
+fn prompt_name_zh(l: &Language) -> &str {
+    l.prompt_name_zh
+        .as_deref()
+        .unwrap_or_else(|| prompt_name(l))
+}
+
+/// Hy-MT2's default translation instruction (model card), naming the source language too, which
+/// makes the model translate short Latin-script signs it otherwise copies. Pairs with a Chinese
+/// variety, or a language it only writes when asked in Chinese, get the Chinese instruction with
+/// Chinese language names, as the model card prescribes.
+fn instruction(src: &Language, tgt: &Language) -> String {
+    if src.zh_instruction || tgt.zh_instruction {
+        format!(
+            "将以下{}文本翻译为{}，注意只需要输出翻译后的结果，不要额外解释：\n\n",
+            prompt_name_zh(src),
+            prompt_name_zh(tgt)
+        )
+    } else {
+        format!(
+            "Translate the following {} text into {}. Note that you should only output the \
+             translated result without any additional explanation:\n\n",
+            prompt_name(src),
+            prompt_name(tgt)
+        )
+    }
+}
+
+/// Renders Hy-MT2's chat template (the GGUF's `tokenizer.chat_template`) for a single user turn.
+/// The vocab doesn't add BOS itself, so the template's BOS is part of the prefix.
 pub fn build_prompt(src: &Language, tgt: &Language, text: &str) -> Prompt {
-    let (s, sc, t, tc) = (prompt_name(src), &src.code, prompt_name(tgt), &tgt.code);
     Prompt {
         prefix: format!(
-            "<start_of_turn>user\nYou are a professional {s} ({sc}) to {t} ({tc}) translator. Your goal is to \
-             accurately convey the meaning and nuances of the original {s} text while adhering to {t} grammar, \
-             vocabulary, and cultural sensitivities.\nProduce only the {t} translation, without any additional \
-             explanations or commentary. Please translate the following {s} text into {t}:\n\n\n"
+            "<｜hy_begin▁of▁sentence｜><｜hy_User｜>{}",
+            instruction(src, tgt)
         ),
         text: text.trim().to_string(),
-        suffix: "<end_of_turn>\n<start_of_turn>model\n".to_string(),
+        suffix: "<｜hy_Assistant｜>".to_string(),
     }
 }
 
@@ -37,12 +62,19 @@ pub fn format_numbered(blocks: &[String]) -> String {
         .join("\n")
 }
 
+/// Zero of each decimal digit block the model may number items with (e.g. Burmese or Bengali
+/// targets get native digits).
+const DIGIT_ZEROS: [char; 17] = [
+    '0', '\u{0660}', '\u{06F0}', '\u{0966}', '\u{09E6}', '\u{0A66}', '\u{0AE6}', '\u{0B66}',
+    '\u{0BE6}', '\u{0C66}', '\u{0D66}', '\u{0E50}', '\u{0F20}', '\u{1040}', '\u{17E0}', '\u{1810}',
+    '０',
+];
+
 fn digit(c: char) -> Option<usize> {
-    match c {
-        '0'..='9' => Some(c as usize - '0' as usize),
-        '０'..='９' => Some(c as usize - '０' as usize),
-        _ => None,
-    }
+    DIGIT_ZEROS.iter().find_map(|&z| {
+        let d = (c as u32).checked_sub(z as u32)?;
+        (d < 10).then_some(d as usize)
+    })
 }
 
 fn starts_with_space_or_empty(s: &str) -> bool {
@@ -112,12 +144,11 @@ pub fn parse_numbered(output: &str, n: usize) -> Option<Vec<String>> {
     parse_numbered_items(output, n).filter(|items| items.iter().all(|i| !i.is_empty()))
 }
 
+/// Hy-MT2's end-of-turn token; generation normally stops on it as end-of-generation.
+const END_OF_TURN: &str = "<｜hy_place▁holder▁no▁2｜>";
+
 pub fn clean_output(s: &str) -> String {
-    s.split("<end_of_turn>")
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string()
+    s.split(END_OF_TURN).next().unwrap_or("").trim().to_string()
 }
 
 #[cfg(test)]
@@ -132,11 +163,25 @@ mod tests {
             rtl: false,
             spaced: true,
             prompt_name: None,
+            prompt_name_zh: None,
+            zh_instruction: false,
         }
     }
 
+    fn zh_lang(code: &str, name: &str, zh: &str) -> Language {
+        Language {
+            prompt_name_zh: Some(zh.into()),
+            zh_instruction: true,
+            ..lang(code, name)
+        }
+    }
+
+    fn full(p: &Prompt) -> String {
+        format!("{}{}{}", p.prefix, p.text, p.suffix)
+    }
+
     #[test]
-    fn prompt_matches_translategemma_template() {
+    fn prompt_matches_hy_mt2_template() {
         let p = build_prompt(
             &lang("ja", "Japanese"),
             &lang("en", "English"),
@@ -144,26 +189,48 @@ mod tests {
         );
         assert_eq!(p.text, "こんにちは");
         assert_eq!(
-            format!("{}{}{}", p.prefix, p.text, p.suffix),
-            "<start_of_turn>user\nYou are a professional Japanese (ja) to English (en) translator. Your goal is to \
-             accurately convey the meaning and nuances of the original Japanese text while adhering to English \
-             grammar, vocabulary, and cultural sensitivities.\nProduce only the English translation, without any \
-             additional explanations or commentary. Please translate the following Japanese text into English:\n\n\n\
-             こんにちは<end_of_turn>\n<start_of_turn>model\n"
+            full(&p),
+            "<｜hy_begin▁of▁sentence｜><｜hy_User｜>Translate the following Japanese text into \
+             English. Note that you should only output the translated result without any \
+             additional explanation:\n\nこんにちは<｜hy_Assistant｜>"
         );
     }
 
     #[test]
-    fn prompt_uses_translategemma_language_name_when_set() {
-        let src = Language {
-            prompt_name: Some("Chinese".into()),
+    fn prompt_uses_prompt_name_when_set() {
+        let tgt = Language {
+            prompt_name: Some("Traditional Chinese".into()),
             ..lang("zh-TW", "Chinese (Traditional)")
         };
-        let p = build_prompt(&src, &lang("en", "English"), "出口");
-        assert!(p
-            .prefix
-            .contains("professional Chinese (zh-TW) to English (en)"));
-        assert!(!p.prefix.contains("Traditional"));
+        let p = build_prompt(&lang("en", "English"), &tgt, "Exit");
+        assert!(p.prefix.contains("into Traditional Chinese."));
+        assert!(!p.prefix.contains("(Traditional)"));
+    }
+
+    #[test]
+    fn chinese_pairs_get_the_chinese_instruction() {
+        let zh = zh_lang("zh", "Chinese", "中文");
+        let en = Language {
+            prompt_name_zh: Some("英语".into()),
+            ..lang("en", "English")
+        };
+        assert_eq!(
+            full(&build_prompt(&zh, &en, "出口")),
+            "<｜hy_begin▁of▁sentence｜><｜hy_User｜>将以下中文文本翻译为英语，\
+             注意只需要输出翻译后的结果，不要额外解释：\n\n出口<｜hy_Assistant｜>"
+        );
+        let to_bo = build_prompt(&en, &zh_lang("bo", "Tibetan", "藏语"), "Exit");
+        assert!(to_bo.prefix.contains("将以下英语文本翻译为藏语"));
+    }
+
+    #[test]
+    fn chinese_instruction_falls_back_to_english_names() {
+        let p = build_prompt(
+            &lang("fr", "French"),
+            &zh_lang("zh", "Chinese", "中文"),
+            "Sortie",
+        );
+        assert!(p.prefix.contains("将以下French文本翻译为中文"));
     }
 
     #[test]
@@ -284,14 +351,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_accepts_native_digits() {
+        assert_eq!(parse_numbered("1. A  \n2. B  ", 2), ab());
+        assert_eq!(parse_numbered("၁. A\n၂. B", 2), ab());
+        assert_eq!(parse_numbered("১. A\n২. B", 2), ab());
+        assert_eq!(parse_numbered("١. A\n٢. B", 2), ab());
+        assert_eq!(digit('٩'), Some(9));
+        assert_eq!(digit('a'), None);
+        assert_eq!(digit('/'), None);
+    }
+
+    #[test]
     fn clean_output_strips_turn_marker() {
-        assert_eq!(clean_output("  Hello<end_of_turn>\n"), "Hello");
+        assert_eq!(
+            clean_output("  Hello  \n<｜hy_place▁holder▁no▁2｜>"),
+            "Hello"
+        );
     }
 
     #[test]
     fn clean_output_drops_everything_after_turn_marker() {
         assert_eq!(
-            clean_output(" Hello <end_of_turn>\n<start_of_turn>user\nmore"),
+            clean_output(" Hello <｜hy_place▁holder▁no▁2｜><｜hy_User｜>more"),
             "Hello"
         );
     }

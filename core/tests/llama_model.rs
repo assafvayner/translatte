@@ -27,12 +27,16 @@ fn lower(o: &Option<String>) -> String {
 }
 
 #[test]
-fn translates_with_translategemma() {
+fn translates_with_hy_mt2() {
     let Some(store) = store() else {
         eprintln!("TRANSLATTE_MODELS not set; skipping");
         return;
     };
-    let ja = translate(&store, &["非常口", "禁煙"], "ja", "en");
+    let zh = translate(&store, &["安全出口", "禁止吸烟"], "zh", "en");
+    assert!(lower(&zh[0]).contains("exit"), "{zh:?}");
+    assert!(lower(&zh[1]).contains("smok"), "{zh:?}");
+
+    let ja = translate(&store, &["出口", "禁煙"], "ja", "en");
     assert!(lower(&ja[0]).contains("exit"), "{ja:?}");
     assert!(lower(&ja[1]).contains("smok"), "{ja:?}");
 
@@ -43,6 +47,26 @@ fn translates_with_translategemma() {
         "en",
     );
     assert!(lower(&fr[0]).contains("coffee"), "{fr:?}");
+}
+
+#[test]
+fn generation_stops_at_end_of_turn() {
+    let Some(store) = store() else {
+        eprintln!("TRANSLATTE_MODELS not set; skipping");
+        return;
+    };
+    let m = store.manifest();
+    let path = store.model_file("translator", "model.gguf").unwrap();
+    let mut g = LlamaGenerator::load(&path).unwrap();
+    let p = build_prompt(m.language("en").unwrap(), m.language("de").unwrap(), "Exit");
+    let out = g.generate(&p, 64).unwrap();
+    assert!(!out.truncated, "{:?}", out.text);
+    assert!(!out.text.contains('<'), "{:?}", out.text);
+    assert!(
+        out.text.to_lowercase().contains("ausgang"),
+        "{:?}",
+        out.text
+    );
 }
 
 #[test]
@@ -120,7 +144,7 @@ fn two_generators_can_coexist() {
     let m = store.manifest();
     let out = t
         .translate(
-            &["非常口".to_string()],
+            &["出口".to_string()],
             m.language("ja").unwrap(),
             m.language("en").unwrap(),
         )

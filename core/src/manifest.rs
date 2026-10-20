@@ -69,9 +69,16 @@ pub struct Language {
     /// False for scripts written without spaces between words (zh, ja, th); controls how OCR lines are joined.
     #[serde(default = "default_true")]
     pub spaced: bool,
-    /// Name TranslateGemma's template uses for this language, when it differs from the display `name`.
+    /// English name the translator's prompt uses, when it differs from the display `name`.
     #[serde(default)]
     pub prompt_name: Option<String>,
+    /// Chinese name the translator's Chinese instruction uses.
+    #[serde(default)]
+    pub prompt_name_zh: Option<String>,
+    /// Pairs involving this language get the Chinese instruction (Chinese varieties, and languages
+    /// the model only translates into reliably when instructed in Chinese).
+    #[serde(default)]
+    pub zh_instruction: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,6 +266,8 @@ pub(crate) mod tests {
         assert!(he.spaced);
         assert_eq!(he.script_pack, None);
         assert_eq!(he.prompt_name, None);
+        assert_eq!(he.prompt_name_zh, None);
+        assert!(!he.zh_instruction);
     }
 
     #[test]
@@ -386,11 +395,17 @@ pub(crate) mod tests {
         assert!(m.language("ja").unwrap().script_pack.is_some());
         assert_eq!(
             m.language("zh-TW").unwrap().prompt_name.as_deref(),
-            Some("Chinese")
+            Some("Traditional Chinese")
         );
         assert_eq!(m.language("ja").unwrap().prompt_name, None);
-        let gguf = &m.model("translator").unwrap().files[0];
-        assert_eq!(gguf.source_path, "translategemma-4b-it.Q4_K_M.gguf");
+        for l in &m.languages {
+            assert!(l.prompt_name_zh.is_some(), "{} has no Chinese name", l.code);
+        }
+        assert!(m.language("zh").unwrap().zh_instruction);
+        assert!(!m.language("ja").unwrap().zh_instruction);
+        let translator = m.model("translator").unwrap();
+        assert_eq!(translator.source.repo, "tencent/Hy-MT2-1.8B-GGUF");
+        assert_eq!(translator.files[0].source_path, "Hy-MT2-1.8B-Q4_K_M.gguf");
         for model in m.models.iter().filter(|m| m.kind == ModelKind::ScriptPack) {
             let dict = model
                 .files

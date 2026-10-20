@@ -17,6 +17,13 @@ use super::{Generation, TextGenerator};
 use crate::{Result, TranslatteError};
 
 const N_CTX: u32 = 4096;
+/// Hy-MT2's recommended sampling (model card), seeded so a given input always gets the same output.
+const TEMPERATURE: f32 = 0.7;
+const TOP_K: i32 = 20;
+const TOP_P: f32 = 0.6;
+const REPEAT_PENALTY: f32 = 1.05;
+const PENALTY_LAST_N: i32 = 64;
+const SEED: u32 = 0;
 
 fn err(e: impl std::fmt::Display) -> TranslatteError {
     TranslatteError::Translate(e.to_string())
@@ -173,8 +180,9 @@ impl TextGenerator for LlamaGenerator {
         inner.with_dependent_mut(|model, ctx| {
             let vocab = model.vocab();
             // The user text is OCR output: tokenizing it without special parsing keeps a literal
-            // "<end_of_turn>" in an image from becoming a control token.
-            let mut tokens = vocab.tokenize(prompt.prefix.as_bytes(), true, true);
+            // control-token string in an image from becoming a control token. The prompt carries
+            // the template's BOS, so the tokenizer adds none.
+            let mut tokens = vocab.tokenize(prompt.prefix.as_bytes(), false, true);
             tokens.extend(vocab.tokenize(prompt.text.as_bytes(), false, false));
             tokens.extend(vocab.tokenize(prompt.suffix.as_bytes(), false, true));
             let budget = max_tokens.min((N_CTX as usize).saturating_sub(tokens.len()));
@@ -213,7 +221,7 @@ impl TextGenerator for LlamaGenerator {
             ..
         } = self;
         inner.with_dependent_mut(|model, ctx| {
-            let tokens = model.vocab().tokenize(prefix.as_bytes(), true, true);
+            let tokens = model.vocab().tokenize(prefix.as_bytes(), false, true);
             let n_keep = shared_prefix(cached, &tokens, *n_swa);
             let t0 = std::time::Instant::now();
             let result = warm_from(ctx, &tokens, n_keep, cached);
@@ -254,7 +262,7 @@ fn warm_from(
     Ok(())
 }
 
-/// Decodes `tokens[n_keep..]` on top of the first `n_keep` cached entries, then samples greedily,
+/// Decodes `tokens[n_keep..]` on top of the first `n_keep` cached entries, then samples,
 /// recording every token decoded into the context in `cached`.
 fn generate_from(
     ctx: &mut LlamaContext,
@@ -278,15 +286,21 @@ fn generate_from(
     cached.extend_from_slice(&tokens[n_keep..]);
     let prefill = t0.elapsed();
 
-    let mut sampler = LlamaSampler::greedy();
+    let mut sampler = LlamaSampler::chain_simple([
+        LlamaSampler::penalties(vocab.n_tokens(), PENALTY_LAST_N, REPEAT_PENALTY, 0.0, 0.0),
+        LlamaSampler::top_k(TOP_K),
+        LlamaSampler::top_p(TOP_P, 1),
+        LlamaSampler::temp(TEMPERATURE),
+        LlamaSampler::dist(SEED),
+    ]);
     let mut decoder = encoding_rs::UTF_8.new_decoder();
     let mut out = String::new();
     let mut truncated = true;
     let mut n_gen = 0;
     for pos in (tokens.len() as i32..).take(budget) {
+        // `sample` also accepts the token into the sampler (for the repetition penalty).
         let token = sampler.sample(ctx, batch.n_tokens() - 1);
         n_gen += 1;
-        sampler.accept(token);
         if vocab.is_eog(token) {
             truncated = false;
             break;
@@ -298,10 +312,6 @@ fn generate_from(
                 .unwrap_or(bytes.len() * 4),
         );
         let _ = decoder.decode_to_string(&bytes, &mut out, false);
-        if out.ends_with("<end_of_turn>") {
-            truncated = false;
-            break;
-        }
         batch.clear();
         batch.add(token, pos, &[0], true).map_err(err)?;
         ctx.decode(&mut batch).map_err(err)?;

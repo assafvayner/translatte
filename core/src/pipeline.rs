@@ -208,6 +208,8 @@ mod tests {
             rtl: false,
             spaced: true,
             prompt_name: None,
+            prompt_name_zh: None,
+            zh_instruction: false,
         }
     }
 
