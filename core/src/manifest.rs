@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::{Result, TranslatteError};
 
 pub const DETECTOR_ID: &str = "det";
-pub const TRANSLATOR_ID: &str = "translator";
 /// The only language translated into: pair models translate from a source language into it.
 pub const TARGET_LANGUAGE: &str = "en";
 
@@ -77,16 +76,6 @@ pub struct Language {
     /// False for scripts written without spaces between words (zh, ja, th); controls how OCR lines are joined.
     #[serde(default = "default_true")]
     pub spaced: bool,
-    /// English name the translator's prompt uses, when it differs from the display `name`.
-    #[serde(default)]
-    pub prompt_name: Option<String>,
-    /// Chinese name the translator's Chinese instruction uses.
-    #[serde(default)]
-    pub prompt_name_zh: Option<String>,
-    /// Pairs involving this language get the Chinese instruction (Chinese varieties, and languages
-    /// the model only translates into reliably when instructed in Chinese).
-    #[serde(default)]
-    pub zh_instruction: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

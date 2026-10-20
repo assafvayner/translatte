@@ -342,7 +342,7 @@ impl Engine {
         source: String,
         target: String,
         translate: bool,
-        attempt: u32,
+        _attempt: u32,
         listener: Option<Arc<dyn ProgressListener>>,
     ) -> Result<TranslationResult, FfiError> {
         let manifest = self.store.manifest();
@@ -352,9 +352,6 @@ impl Engine {
 
         let mut cached = self.lock_cached();
         let pipeline = self.pipeline(&mut cached, src, translate)?;
-        if let Some(t) = pipeline.translator_mut() {
-            t.generator_mut().set_seed(attempt);
-        }
         let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
         Ok(TranslationResult::from_output(
             out,
@@ -392,8 +389,7 @@ impl Engine {
 }
 
 impl Engine {
-    /// A panic mid-run can leave the cached pipeline in a bad state (e.g. llama.cpp's KV cache
-    /// half-updated), so a poisoned lock drops it rather than reusing it.
+    /// A panic mid-run can leave the cached pipeline in a bad state (e.g. a half-run native batch), so a poisoned lock drops it rather than reusing it.
     fn lock_cached(&self) -> MutexGuard<'_, Option<Cached>> {
         self.cached.lock().unwrap_or_else(|poisoned| {
             let mut cached = poisoned.into_inner();

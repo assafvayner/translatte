@@ -6,7 +6,7 @@ use crate::layout::group_lines;
 use crate::manifest::Language;
 use crate::ocr::{Line, TextDetector, TextRecognizer};
 use crate::render::style_hints;
-use crate::translate::{chunk_ranges, Translator};
+use crate::translate::Translator;
 use crate::{Result, TranslatteError};
 
 const MIN_LINE_CONFIDENCE: f32 = 0.5;
@@ -102,10 +102,6 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         Ok(lines)
     }
 
-    pub fn translator_mut(&mut self) -> Option<&mut T> {
-        self.translator.as_mut()
-    }
-
     /// Prepares the translator for `src` to `tgt` (e.g. when the user picks the languages), so the
     /// next `run` spends less time translating. A no-op without a translator.
     pub fn warm(&mut self, src: &Language, tgt: &Language) -> Result<()> {
@@ -128,18 +124,11 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         let mut translation_error = None;
         let mut translations = Vec::with_capacity(texts.len());
         if let Some(t) = &mut self.translator {
-            let ranges = chunk_ranges(&texts);
-            for (i, range) in ranges.iter().enumerate() {
-                on_stage(Stage::Translating {
-                    done: i,
-                    total: ranges.len(),
-                });
-                match t.translate(&texts[range.clone()], src, tgt) {
-                    Ok(out) => translations.extend(out),
-                    Err(e) => {
-                        translation_error = Some(e.to_string());
-                        break;
-                    }
+            if !texts.is_empty() {
+                on_stage(Stage::Translating { done: 0, total: 1 });
+                match t.translate(&texts, src, tgt) {
+                    Ok(out) => translations = out,
+                    Err(e) => translation_error = Some(e.to_string()),
                 }
             }
         }
@@ -212,9 +201,6 @@ mod tests {
             pair_model: None,
             rtl: false,
             spaced: true,
-            prompt_name: None,
-            prompt_name_zh: None,
-            zh_instruction: false,
         }
     }
 
@@ -306,37 +292,60 @@ mod tests {
         assert_eq!(p.ocr(&img, &latin, &mut |_| {}).unwrap().len(), 1);
     }
 
-    struct FailAfter(usize);
-    impl Translator for FailAfter {
+    struct Failing;
+    impl Translator for Failing {
         fn translate(
             &mut self,
-            blocks: &[String],
+            _blocks: &[String],
             _s: &Language,
             _t: &Language,
         ) -> Result<Vec<Option<String>>> {
-            if self.0 == 0 {
-                return Err(crate::TranslatteError::Translate("boom".into()));
-            }
-            self.0 -= 1;
-            Ok(blocks.iter().map(|b| Some(b.to_uppercase())).collect())
+            Err(crate::TranslatteError::Translate("boom".into()))
         }
     }
 
     #[test]
     fn translation_error_keeps_ocr_results() {
         let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
-        let long = "x".repeat(500);
-        let long: &'static str = Box::leak(long.into_boxed_str());
         let mut p = Pipeline::new(
-            FakeDet(vec![quad(10.0), quad(100.0), quad(200.0)]),
-            FakeRec(vec![(long, 0.9), (long, 0.9), (long, 0.9)], 0),
-            Some(FailAfter(1)),
+            FakeDet(vec![quad(10.0), quad(200.0)]),
+            FakeRec(vec![("sortie", 0.9), ("entrée", 0.9)], 0),
+            Some(Failing),
         );
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
-        assert_eq!(out.regions.len(), 3);
-        assert!(out.regions[0].translated_text.is_some());
-        assert!(out.regions[1].translated_text.is_none());
-        assert!(out.regions[2].translated_text.is_none());
+        assert_eq!(out.regions.len(), 2);
+        assert!(out.regions.iter().all(|r| r.translated_text.is_none()));
         assert!(out.translation_error.unwrap().contains("boom"));
+    }
+
+    struct Counting(usize);
+    impl Translator for Counting {
+        fn translate(
+            &mut self,
+            blocks: &[String],
+            _s: &Language,
+            _t: &Language,
+        ) -> Result<Vec<Option<String>>> {
+            self.0 += 1;
+            Ok(blocks.iter().map(|b| Some(b.clone())).collect())
+        }
+    }
+
+    #[test]
+    fn all_blocks_are_translated_in_one_call() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let mut p = Pipeline::new(
+            FakeDet(vec![quad(10.0), quad(150.0), quad(300.0)]),
+            FakeRec(vec![("a", 0.9), ("b", 0.9), ("c", 0.9)], 0),
+            Some(Counting(0)),
+        );
+        assert_eq!(
+            p.run(&img, &lang(), &lang(), &mut |_| {})
+                .unwrap()
+                .regions
+                .len(),
+            3
+        );
+        assert_eq!(p.translator.as_ref().unwrap().0, 1);
     }
 }

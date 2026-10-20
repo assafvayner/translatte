@@ -19,6 +19,7 @@ pub enum InstallState {
 /// directories. Add an id here whenever the manifest drops a model.
 pub const RETIRED_MODEL_IDS: &[&str] = &["rec-el", "rec-cyrillic", "rec-en", "translator"];
 
+#[derive(Clone)]
 pub struct ModelStore {
     manifest: Manifest,
     root: PathBuf,
@@ -62,6 +63,13 @@ impl ModelStore {
             n if n == entry.files.len() && size_ok => InstallState::Installed,
             _ => InstallState::Corrupt,
         })
+    }
+
+    pub fn require_installed(&self, id: &str) -> Result<()> {
+        if self.state(id)? != InstallState::Installed {
+            return Err(TranslatteError::ModelNotInstalled(id.to_string()));
+        }
+        Ok(())
     }
 
     /// True when `file` exists in the store with the expected size.

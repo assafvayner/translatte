@@ -3,7 +3,7 @@ pub mod download;
 pub mod error;
 pub mod geometry;
 pub mod layout;
-#[cfg(feature = "llama")]
+#[cfg(feature = "pair")]
 pub mod loader;
 pub mod manifest;
 pub mod model_store;

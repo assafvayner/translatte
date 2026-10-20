@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use translatte_core::loader::{load_pipeline_with, LoadedPipeline};
+use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest};
 use translatte_core::model_store::ModelStore;
 use translatte_core::TranslatteError;
@@ -19,12 +19,12 @@ pub fn build_pipeline(
     store: &ModelStore,
     src: &Language,
     translate: bool,
-    translator_gguf: Option<&Path>,
 ) -> Result<LoadedPipeline> {
-    load_pipeline_with(store, src, translate, translator_gguf).map_err(|e| match e {
+    load_pipeline(store, src, translate).map_err(|e| match e {
         TranslatteError::ModelNotInstalled(id) => anyhow::anyhow!(
-            "model {id} is not installed in {}; run `translatte fetch`",
-            store.root().display()
+            "model {id} is not installed in {}; run `translatte fetch --langs {}`",
+            store.root().display(),
+            src.code
         ),
         e => e.into(),
     })

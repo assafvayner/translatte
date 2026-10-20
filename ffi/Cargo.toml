@@ -16,7 +16,7 @@ path = "src/bin/uniffi-bindgen.rs"
 download = ["translatte-core/download", "translatte-core/tls-rustls"]
 
 [dependencies]
-translatte-core = { path = "../core", features = ["llama"] }
+translatte-core = { path = "../core", features = ["pair"] }
 image.workspace = true
 thiserror.workspace = true
 uniffi = { version = "0.29", features = ["cli"] }
