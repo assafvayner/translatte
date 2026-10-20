@@ -3,6 +3,8 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: TranslatorModel
+    @EnvironmentObject private var downloads: Downloads
+    @State private var managing = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var showCamera = false
     @State private var showOriginal = false
@@ -13,12 +15,25 @@ struct ContentView: View {
             Group {
                 if model.modelsReady {
                     translator
+                        .navigationTitle("Translatte")
+                        .toolbar {
+                            Button {
+                                managing = true
+                            } label: {
+                                Label("Languages", systemImage: "translate")
+                            }
+                            .disabled(model.phase.isWorking)
+                        }
+                        .navigationDestination(isPresented: $managing) { ModelsView(setup: false) }
                 } else {
-                    SetupView()
+                    ModelsView(setup: true)
                 }
             }
-            .navigationTitle("Translatte")
             .navigationBarTitleDisplayMode(.inline)
+        }
+        .onChange(of: downloads.finished) { model.reload() }
+        .onChange(of: model.modelsReady) { _, ready in
+            if !ready { managing = false }
         }
     }
 
@@ -117,25 +132,6 @@ private struct RegionDetail: View {
         List {
             Section("Original") { Text(region.sourceText).textSelection(.enabled) }
             Section("Translation") { Text(region.translatedText ?? "Not translated").textSelection(.enabled) }
-        }
-    }
-}
-
-private struct SetupView: View {
-    @EnvironmentObject private var model: TranslatorModel
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("Models not installed", systemImage: "arrow.down.circle")
-        } description: {
-            VStack(spacing: 8) {
-                Text("Translatte needs its OCR and translation models before it can work offline.")
-                Text("In-app download is coming. For now, copy a models folder (from `translatte fetch`) into:")
-                Text(model.modelsDirectory.path).font(.caption.monospaced()).textSelection(.enabled)
-                if let error = model.setupError { Text(error).foregroundStyle(.red) }
-            }
-        } actions: {
-            Button("Check again") { model.reload() }
         }
     }
 }
