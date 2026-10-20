@@ -5,7 +5,8 @@
 # Usage: scripts/ios/test-sim.sh [models-dir] [image] [from] [to]
 # Env: TRANSLATTE_SIM_DEVICE (default "iPhone 18 Pro"), SKIP_RUST_BUILD=1 to reuse the xcframework.
 # TRANSLATTE_THREADS, TRANSLATTE_PERF and TRANSLATTE_PREFIX_CACHE are passed to the app; its stderr is
-# saved to out/ios/<name>.log.
+# saved to out/ios/<name>.log. TRANSLATTE_DOWNLOAD_TESTS=1 adds a small Hub download to the XCTests, and
+# TRANSLATTE_E2E=1 a UI test that sets the app up from scratch (~2.5GB; use a freshly erased simulator).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -37,7 +38,8 @@ xcrun simctl bootstatus "$UDID" -b >/dev/null
 DEST="platform=iOS Simulator,id=$UDID"
 TRANSLATTE_MODELS="$MODELS" xcodebuild test -project "$ROOT/ios/Translatte.xcodeproj" -scheme Translatte \
   -destination "$DEST" -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO \
-  TRANSLATTE_MODELS="$MODELS" -quiet
+  TRANSLATTE_MODELS="$MODELS" TRANSLATTE_DOWNLOAD_TESTS="${TRANSLATTE_DOWNLOAD_TESTS:-}" \
+  TRANSLATTE_E2E="${TRANSLATTE_E2E:-}" -quiet
 
 APP="$DERIVED/Build/Products/Debug-iphonesimulator/Translatte.app"
 xcrun simctl install "$UDID" "$APP"

@@ -9,12 +9,15 @@ struct TranslatteApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(model.downloads)
                 .task { await model.runAutotestIfRequested() }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: model.releaseModels()
-            case .active: model.reload()
+            case .active:
+                model.reload()
+                model.downloads.pump()
             default: break
             }
         }

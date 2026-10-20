@@ -72,8 +72,9 @@ scripts/ios/test-sim.sh models-cache path/to/photo.jpg ja en
 
 `scripts/ios/fetch-ort.sh` downloads the official ONNX Runtime iOS static build (pinned by sha256), which the
 Rust core links against for iOS. The simulator reads models straight from the host's `models-cache/`
-(`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR`); on a device the app expects them in its Documents/models folder until
-in-app download lands. Device builds need a development team and the `increased-memory-limit` entitlement
+(`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR`); otherwise the app downloads them into Documents/models from its setup
+and Languages screens, as on Android. `TRANSLATTE_E2E=1 TRANSLATTE_SIM_DEVICE=<erased simulator> scripts/ios/test-sim.sh`
+adds a UI test that does that whole setup over the network. Device builds need a development team and the `increased-memory-limit` entitlement
 (already in `Translatte.entitlements`) for the 2.5GB translation model.
 
 The app loads the models and prefills the translator's instruction prefix (`Engine::prepare`) on launch and

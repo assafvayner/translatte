@@ -31,6 +31,36 @@ final class EngineTests: XCTestCase {
         XCTAssertThrowsError(try Engine(modelsDir: dir.path, manifestJson: "{}"))
     }
 
+    func testCancelledDownloadThrowsCancelledAndDeleteStillWorks() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let engine = try Engine(modelsDir: dir.path, manifestJson: try manifest())
+        let token = DownloadToken()
+        token.cancel()
+        XCTAssertThrowsError(try engine.download(modelIds: ["rec-en"], listener: NoProgress(), token: token)) {
+            guard case FfiError.Cancelled = $0 else { return XCTFail("\($0)") }
+        }
+        XCTAssertThrowsError(try engine.download(modelIds: ["nope"], listener: NoProgress(), token: DownloadToken()))
+        XCTAssertFalse(try engine.deleteModel(id: "rec-en"))
+        XCTAssertThrowsError(try engine.deleteModel(id: "det"))
+    }
+
+    /// Fetches the smallest pack over HTTPS, checking TLS verification through the platform verifier.
+    func testDownloadsAPackFromTheHub() throws {
+        guard ProcessInfo.processInfo.environment["TRANSLATTE_DOWNLOAD_TESTS"] == "1" else {
+            throw XCTSkip("TRANSLATTE_DOWNLOAD_TESTS not set")
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let engine = try Engine(modelsDir: dir.path, manifestJson: try manifest())
+        let progress = RecordingProgress()
+        try engine.download(modelIds: ["rec-en"], listener: progress, token: DownloadToken())
+        let pack = try XCTUnwrap(try engine.models().first { $0.id == "rec-en" })
+        XCTAssertEqual(pack.state, .installed)
+        XCTAssertEqual(pack.downloadedBytes, pack.sizeBytes)
+        XCTAssertEqual(progress.last, pack.sizeBytes)
+        XCTAssertFalse(try engine.deleteModel(id: "rec-en"))
+        XCTAssertEqual(try engine.models().first { $0.id == "rec-en" }?.state, .notInstalled)
+    }
+
     func testTranslatesHelloWorld() throws {
         guard let models = ProcessInfo.processInfo.environment["TRANSLATTE_MODELS"], !models.isEmpty else {
             throw XCTSkip("TRANSLATTE_MODELS not set")
@@ -43,5 +73,20 @@ final class EngineTests: XCTestCase {
         let translated = try XCTUnwrap(result.regions.first?.translatedText).lowercased()
         XCTAssertTrue(translated.contains("hallo"), translated)
         XCTAssertNil(result.translationError)
+    }
+}
+
+private final class NoProgress: DownloadListener, @unchecked Sendable {
+    func onProgress(modelId: String, done: UInt64, total: UInt64) {}
+}
+
+private final class RecordingProgress: DownloadListener, @unchecked Sendable {
+    private let lock = NSLock()
+    private var done: UInt64 = 0
+
+    var last: UInt64 { lock.withLock { done } }
+
+    func onProgress(modelId: String, done: UInt64, total: UInt64) {
+        lock.withLock { self.done = done }
     }
 }

@@ -12,10 +12,13 @@ final class TranslatorModel: ObservableObject {
         case failed(String)
     }
 
+    @Published private(set) var models: [ModelInfo] = []
     @Published private(set) var sourceLanguages: [LanguageInfo] = []
     @Published private(set) var targetLanguages: [LanguageInfo] = []
     @Published private(set) var modelsReady = false
     @Published private(set) var setupError: String?
+    /// Space left on the volume the models download to, as of the last `reload`.
+    @Published private(set) var freeBytes: UInt64 = .max
     @Published var sourceCode = UserDefaults.standard.string(forKey: "source") ?? "" {
         didSet {
             UserDefaults.standard.set(sourceCode, forKey: "source")
@@ -33,6 +36,7 @@ final class TranslatorModel: ObservableObject {
     @Published private(set) var phase: Phase = .idle
 
     let modelsDirectory: URL
+    let downloads = Downloads()
     private let usesHostModels: Bool
     private var engine: Engine?
     private let worker = DispatchQueue(label: "translatte.engine", qos: .userInitiated)
@@ -48,6 +52,8 @@ final class TranslatorModel: ObservableObject {
     /// Simulator runs can point at the host's models via `TRANSLATTE_MODELS_DIR`
     /// (`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR` with `simctl launch`); otherwise models live in Documents.
     init() {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        configureDownloads(cacheDir: caches.appendingPathComponent("hf").path)
         if let dir = ProcessInfo.processInfo.environment["TRANSLATTE_MODELS_DIR"], !dir.isEmpty {
             modelsDirectory = URL(fileURLWithPath: dir)
             usesHostModels = true
@@ -72,7 +78,11 @@ final class TranslatorModel: ObservableObject {
                 try dir.setResourceValues(values)
             }
             let engine = try self.engine ?? Engine(modelsDir: modelsDirectory.path, manifestJson: String(contentsOf: url, encoding: .utf8))
-            self.engine = engine
+            if self.engine == nil {
+                self.engine = engine
+                downloads.engine = engine
+            }
+            models = try engine.models()
             sourceLanguages = try engine.sourceLanguages()
             targetLanguages = engine.targetLanguages()
             modelsReady = try engine.coreInstalled() && !sourceLanguages.isEmpty
@@ -85,6 +95,30 @@ final class TranslatorModel: ObservableObject {
         } catch {
             setupError = errorMessage(error)
             modelsReady = false
+        }
+        let values = try? modelsDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        freeBytes = values?.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) } ?? .max
+    }
+
+    /// Bytes still to fetch for `ids`, counting partial downloads that will resume.
+    func bytesToDownload(_ ids: [String]) -> UInt64 {
+        models.filter { ids.contains($0.id) }.reduce(0) { $0 + $1.remainingBytes }
+    }
+
+    func deleteModel(_ id: String) {
+        guard let engine else { return }
+        Task {
+            var failure: Error?
+            do {
+                try await onWorker { [self] in
+                    // Deleting the pack in use frees every loaded model, the translator included.
+                    if try engine.deleteModel(id: id) { modelsLoaded = false }
+                }
+            } catch {
+                failure = error
+            }
+            reload()
+            if let failure { setupError = errorMessage(failure) }
         }
     }
 
@@ -187,10 +221,14 @@ final class TranslatorModel: ObservableObject {
         prepare()
     }
 
+    /// For scripted simulator tests: `-autotest-download det,rec-latin` starts a download, and
     /// `-autotest-image <path> -autotest-from <code> -autotest-to <code>` runs one translation at
-    /// launch and writes the result to Documents/autotest.json, for scripted simulator tests.
+    /// launch and writes the result to Documents/autotest.json.
     func runAutotestIfRequested() async {
         let defaults = UserDefaults.standard
+        if let ids = defaults.string(forKey: "autotest-download") {
+            downloads.start(ids.split(separator: ",").map(String.init), allowMetered: true)
+        }
         guard let path = defaults.string(forKey: "autotest-image") else { return }
         setLanguages(source: defaults.string(forKey: "autotest-from"), target: defaults.string(forKey: "autotest-to"))
         let out = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
