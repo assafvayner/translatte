@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct TranslatteApp: App {
     @StateObject private var model = TranslatorModel()
+    @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -10,6 +11,8 @@ struct TranslatteApp: App {
             ContentView()
                 .environmentObject(model)
                 .environmentObject(model.downloads)
+                .preferredColorScheme(theme.colorScheme)
+                .onChange(of: theme, initial: true) { _, theme in theme.applyToWindows() }
                 .task { await model.runAutotestIfRequested() }
         }
         .onChange(of: scenePhase) { _, phase in
