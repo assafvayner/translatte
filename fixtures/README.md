@@ -28,7 +28,7 @@ The script downloads a deterministic sample (pinned dataset revisions, selection
 | [`Melaraby/EvArEST-dataset-for-Arabic-scene-text-detection`](https://huggingface.co/datasets/Melaraby/EvArEST-dataset-for-Arabic-scene-text-detection) `bede1fdb` (word-level, test split) | BSD-3-Clause | ar |
 | [`Voxel51/Total-Text-Dataset`](https://huggingface.co/datasets/Voxel51/Total-Text-Dataset) `0ce21350` (word-level) | BSD-3-Clause | en |
 
-Not covered (no suitable real-photo dataset with transcriptions found on the Hub): Thai, Greek, Tamil, Telugu, and other Indic scripts. `Bhashini-IITJ/Bharat-Scene-Text-Dataset` (hi, mr, ta, te, bn, ...; per-image Wikimedia licenses) is gated and would cover the Indic gaps once access is granted.
+Not covered (no suitable real-photo dataset with transcriptions found on the Hub): Thai, Tamil, Telugu, and other Indic scripts. `Bhashini-IITJ/Bharat-Scene-Text-Dataset` (hi, mr, ta, te, bn, ...; per-image Wikimedia licenses) is gated and would cover the Indic gaps once access is granted.
 
 Because the images and ground truth are third-party and the Nexdata/Hindi terms are unclear, nothing from them is committed; only the downloader is.
 
