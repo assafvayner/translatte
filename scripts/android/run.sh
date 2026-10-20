@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Run the cross-compiled CLI on a connected Android device/emulator (see README "Android (emulator) smoke test").
-# Usage: scripts/android/run.sh <image> <from> <to|-> [name]   ("-" as <to> runs OCR only)
-# TRANSLATOR_GGUF=<local .gguf> pushes that file and runs with it instead of the installed translator.
+# Run the cross-compiled CLI on a connected Android device over adb (see README "Android CLI smoke test").
+# Usage: scripts/android/run.sh <image> <from> [-] [name]   ("-" runs OCR only)
 set -euo pipefail
 
-[[ $# -ge 3 ]] || { echo "usage: $0 <image> <from> <to|-> [name]" >&2; exit 2; }
-IMAGE="$1" FROM="$2" TO="$3"
-NAME="${4:-$(basename "${IMAGE%.*}")_${FROM}-${TO/#-/ocr}}"
+[[ $# -ge 2 ]] || { echo "usage: $0 <image> <from> [-] [name]" >&2; exit 2; }
+IMAGE="$1" FROM="$2" OCR="${3:-}"
+[[ -z "$OCR" || "$OCR" == "-" ]] || { echo "the third argument is - (OCR only) or absent" >&2; exit 2; }
+NAME="${4:-$(basename "${IMAGE%.*}")_${FROM}${OCR:+-ocr}}"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REL="$ROOT/target/aarch64-linux-android/release"
+TARGET_DIR="$(cd "$ROOT" && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+REL="$TARGET_DIR/aarch64-linux-android/release"
 MODELS="${TRANSLATTE_MODELS:-$ROOT/models-cache}"
 MANIFEST="$ROOT/models/manifest.json"
 DEV=/data/local/tmp/translatte
@@ -19,15 +20,15 @@ OUT="$ROOT/out/android"
 [[ -f "$IMAGE" ]] || { echo "image not found: $IMAGE" >&2; exit 1; }
 adb get-state >/dev/null
 
-PACK="$(python3 -c 'import json,sys
+read -r PACK PAIR <<<"$(python3 -c 'import json,sys
 m = json.load(open(sys.argv[1]))
-print(next((l.get("script_pack") or "" for l in m["languages"] if l["code"] == sys.argv[2]), ""))' "$MANIFEST" "$FROM")"
-[[ -n "$PACK" ]] || { echo "unknown source language (or no recognizer pack): $FROM" >&2; exit 1; }
+l = next((l for l in m["languages"] if l["code"] == sys.argv[2]), {})
+print(l.get("script_pack") or "-", l.get("pair_model") or "-")' "$MANIFEST" "$FROM")"
+[[ "$PACK" != "-" && "$PAIR" != "-" ]] || { echo "not a source language: $FROM" >&2; exit 1; }
 IDS=(det "$PACK")
-if [[ "$TO" != "-" && -z "${TRANSLATOR_GGUF:-}" ]]; then IDS+=(translator); fi
-[[ -z "${TRANSLATOR_GGUF:-}" || -f "$TRANSLATOR_GGUF" ]] || { echo "translator gguf not found: $TRANSLATOR_GGUF" >&2; exit 1; }
+[[ -n "$OCR" ]] || IDS+=("$PAIR")
 for id in "${IDS[@]}"; do
-  [[ -d "$MODELS/$id" ]] || { echo "model dir missing: $MODELS/$id (run: translatte fetch)" >&2; exit 1; }
+  [[ -d "$MODELS/$id" ]] || { echo "model dir missing: $MODELS/$id (run: translatte fetch --langs $FROM)" >&2; exit 1; }
 done
 
 push() {
@@ -51,18 +52,14 @@ push "$MANIFEST" "$DEV/manifest.json"
 for id in "${IDS[@]}"; do
   for f in "$MODELS/$id"/*; do push_model "$f" "$DEV/models/$id/$(basename "$f")"; done
 done
-ALT_ARGS=""
-if [[ -n "${TRANSLATOR_GGUF:-}" && "$TO" != "-" ]]; then
-  push_model "$TRANSLATOR_GGUF" "$DEV/models/translator-alt/model.gguf"
-  ALT_ARGS="--translator-gguf models/translator-alt/model.gguf"
-fi
 EXT="${IMAGE##*.}"
 adb shell "rm -rf '$DEV/out' && mkdir -p '$DEV/out'"
 push "$IMAGE" "$DEV/in.$EXT"
 
 mkdir -p "$OUT"
-if [[ "$TO" == "-" ]]; then LANG_ARGS="--no-translate"; else LANG_ARGS="--to '$TO' $ALT_ARGS"; fi
-adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV TRANSLATTE_PERF=1 ${TRANSLATTE_THREADS:+TRANSLATTE_THREADS=$TRANSLATTE_THREADS} ${TRANSLATTE_PREFIX_CACHE:+TRANSLATTE_PREFIX_CACHE=$TRANSLATTE_PREFIX_CACHE} /system/bin/time -v ${TASKSET:+taskset $TASKSET} timeout ${RUN_TIMEOUT:-60} ./translatte run 'in.$EXT' \
+LANG_ARGS=""
+[[ -z "$OCR" ]] || LANG_ARGS="--no-translate"
+adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV /system/bin/time -v ${TASKSET:+taskset $TASKSET} timeout ${RUN_TIMEOUT:-60} ./translatte run 'in.$EXT' \
   --from '$FROM' $LANG_ARGS --models models --manifest manifest.json -o out/out.png --json out/out.json" \
   2>&1 | tee "$OUT/$NAME.log"
 

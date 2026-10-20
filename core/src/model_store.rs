@@ -98,7 +98,7 @@ impl ModelStore {
     /// Removes model data an app update left behind: directories of [`RETIRED_MODEL_IDS`] that the
     /// manifest no longer lists, installed files whose size no longer matches (a replaced model),
     /// and partial downloads of other upstream files. Other directories in the root (e.g. a
-    /// `translator-alt` pushed for comparisons) are left alone. Returns the removed paths. Must not
+    /// model pushed by hand for comparisons) are left alone. Returns the removed paths. Must not
     /// run concurrently with a download.
     pub fn prune(&self) -> Result<Vec<PathBuf>> {
         let mut removed = Vec::new();

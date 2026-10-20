@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cross-compile translatte-cli for aarch64-linux-android (see README "Android (emulator) smoke test").
+# Cross-compile translatte-cli for aarch64-linux-android (see README "Android CLI smoke test").
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -11,7 +11,8 @@ cd "$ROOT"
 TLS="${TLS:-native}"
 cargo build --locked -p translatte-cli --release --target "$TARGET" --no-default-features --features "tls-$TLS" "$@"
 
-OUT="$ROOT/target/$TARGET/release"
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+OUT="$TARGET_DIR/$TARGET/release"
 cp "$ORT_DIR/lib/libonnxruntime.so" "$OUT/"
 cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/sysroot/usr/lib/$TARGET/libc++_shared.so" "$OUT/"
 echo "built $OUT/translatte (+ libonnxruntime.so, libc++_shared.so)"

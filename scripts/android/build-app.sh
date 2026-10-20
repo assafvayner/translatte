@@ -21,8 +21,8 @@ cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/sysroot/usr/lib/$TARGET
 # Gradle only strips native libraries when it finds the exact NDK version, so strip them here.
 "$BIN/llvm-strip" --strip-unneeded "$JNI"/*.so
 cp "$ROOT/models/manifest.json" "$GEN/assets/"
-# uniffi-bindgen is a host binary; keep the Android-only ORT/llama.cpp settings out of its build.
-env -u ORT_LIB_LOCATION -u ORT_PREFER_DYNAMIC_LINK -u GGML_CPU_ARM_ARCH -u GGML_CPU_REPACK \
+# uniffi-bindgen is a host binary; keep the Android-only ONNX Runtime settings out of its build.
+env -u ORT_LIB_LOCATION -u ORT_PREFER_DYNAMIC_LINK \
   cargo run -q --locked -p translatte-ffi --bin uniffi-bindgen -- generate \
   --library "$LIB" --language kotlin --out-dir "$GEN/kotlin" --no-format
 

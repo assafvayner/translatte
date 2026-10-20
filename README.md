@@ -5,7 +5,8 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 
 ## Layout
 
-- `core/`: Rust pipeline (OCR via ONNX Runtime, Hy-MT2 via llama.cpp, layout, style hints)
+- `core/`: Rust pipeline (OCR via ONNX Runtime, translation via bergamot-translator, layout, style hints)
+- `bergamot/`: bergamot-translator (Mozilla's translations engine on Marian, MPL-2.0) vendored in `vendor/` with our patches in `patches/` (regenerate with `bergamot/vendor.sh`), a C shim and a safe Rust wrapper
 - `cli/`: dev CLI (`translatte fetch|run|langs|eval`)
 - `ffi/`: UniFFI bindings over the core (`Engine`) for the native apps
 - `ios/`: SwiftUI iPhone app (XcodeGen project in `ios/project.yml`)
@@ -15,25 +16,26 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 
 ## Setup
 
-Requires Rust (stable + nightly for fmt), `cmake`, `ninja` and `sccache` (`brew install cmake ninja sccache`); `uv` for the scripts. llama.cpp builds from source through CMake; `.cargo/config.toml` routes it through Ninja and sccache.
+Requires Rust (stable + nightly for fmt), `cmake`, `ninja` and `sccache` (`brew install cmake ninja sccache`); `uv` for the scripts. bergamot-translator builds from source through CMake (a few minutes the first time); `.cargo/config.toml` routes it through Ninja and sccache.
 
 ```bash
-cargo run -p translatte-cli --release -- fetch --all-packs   # ~1.2GB into models-cache/
+cargo run -p translatte-cli --release -- fetch --langs fr,ja   # or --all (~1.1GB) into models-cache/
 ```
 
-`fetch` downloads the detector and translator plus the requested OCR script packs (`--packs rec-latin,rec-cjk` or `--all-packs`) straight from the upstream Hugging Face repos pinned in the manifest. Integrity is left to hf-hub (TLS, and hf-xet's chunk hashes for Xet-backed files); files are checked by size only. It skips files already installed (present with the expected size), and resumes interrupted downloads from their `.part` files (tagged with the upstream file, so a replaced model's partial download is never resumed). It first removes what the manifest no longer describes (dropped packs, wrong-size files such as a replaced translator, stale `.part` files), as the apps do on launch (`Engine::prune_models`). `HF_ENDPOINT` and `HF_TOKEN` are honored. To bump an upstream revision, edit `REVISIONS` in `scripts/gen_manifest.py` and run `uv run scripts/gen_manifest.py`.
+`fetch` downloads the detector plus the language packs (OCR script pack and translation model) of the requested source languages (`--langs fr,ja` or `--all`) straight from the Hugging Face repos pinned in the manifest. Integrity is left to hf-hub (TLS, and hf-xet's chunk hashes for Xet-backed files); files are checked by size only. It skips files already installed (present with the expected size), and resumes interrupted downloads from their `.part` files (tagged with the upstream file, so a replaced model's partial download is never resumed). It first removes what the manifest no longer describes (dropped packs, wrong-size files such as a replaced model, stale `.part` files), as the apps do on launch (`Engine::prune_models`). `HF_ENDPOINT` and `HF_TOKEN` are honored. To bump an upstream revision, edit `REVISIONS` in `scripts/gen_manifest.py` and run `uv run scripts/gen_manifest.py`.
 
-The translator is [Hy-MT2-1.8B](https://huggingface.co/tencent/Hy-MT2-1.8B) (Q4_K_M GGUF, Apache 2.0). The manifest lists
-its 38 languages: 29 can be read from photos (PP-OCRv5 has a recognizer for their script) and 9 are translation
-targets only (Hebrew, Vietnamese, Kazakh, Mongolian, Tibetan, Khmer, Burmese, Bengali, Gujarati). Hy-MT2 writes
-Kazakh in Arabic script and Mongolian in the traditional script, as used in China.
+Translation uses Mozilla's [translations](https://github.com/mozilla/translations) models (MPL-2.0): one small
+int8 Marian model per source language into English, run with bergamot-translator. They are mirrored unmodified to
+[`assafvayner/translatte-pair-models`](https://huggingface.co/assafvayner/translatte-pair-models)
+(`scripts/mirror_pair_models.py`). The manifest lists the 28 languages that PP-OCRv5 can read and that have a model
+(Traditional Chinese and Cantonese share the zh-Hant one); everything is translated into English.
 
 ## Usage
 
 ```bash
 cargo run -p translatte-cli --release -- langs
-cargo run -p translatte-cli --release -- run photo.jpg --from ja --to en -o out/photo_en.png
-cargo run -p translatte-cli --release -- run photo.jpg --from ja --to en --no-translate   # OCR only
+cargo run -p translatte-cli --release -- run photo.jpg --from ja -o out/photo_en.png
+cargo run -p translatte-cli --release -- run photo.jpg --from ja --no-translate   # OCR only
 cargo run -p translatte-cli --release -- eval fixtures --max-cer 0.15
 ```
 
@@ -57,7 +59,7 @@ cargo run -p translatte-cli --release -- eval fixtures --max-cer 0.15
 
 `quad` lists the corners clockwise from the top-left.
 
-`--to` is required unless `--no-translate` is set. With `--no-translate` the LLM is not loaded, `translated_text` is null, and the PNG is the input photo with the detected text boxes outlined in red instead of a translation overlay.
+With `--no-translate` the translation model is not loaded, `translated_text` is null, and the PNG is the input photo with the detected text boxes outlined in red instead of a translation overlay.
 
 If translation fails, OCR results are kept: `translated_text` is absent/null, `translation_error` is set, and the error is printed to stderr.
 
@@ -72,7 +74,7 @@ Requires Xcode with an iOS Simulator runtime (`xcodebuild -downloadPlatform iOS`
 scripts/ios/build-rust.sh --sim-only   # Rust core → ios/Frameworks/TranslatteFFI.xcframework + Swift bindings
 (cd ios && xcodegen generate && open Translatte.xcodeproj)
 scripts/ios/test-sim.sh                # XCTest on the simulator + one scripted translation, saved to out/ios/
-scripts/ios/test-sim.sh models-cache path/to/photo.jpg ja en
+scripts/ios/test-sim.sh models-cache path/to/photo.jpg ja
 ```
 
 `scripts/ios/fetch-ort.sh` downloads the official ONNX Runtime iOS static build (pinned by sha256), which the
@@ -80,12 +82,10 @@ Rust core links against for iOS. The simulator reads models straight from the ho
 (`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR`); otherwise the app downloads them into Documents/models from its setup
 and Languages screens, as on Android. `TRANSLATTE_E2E=1 TRANSLATTE_SIM_DEVICE=<erased simulator> scripts/ios/test-sim.sh`
 adds a UI test that does that whole setup over the network. Device builds need a development team and the `increased-memory-limit` entitlement
-(already in `Translatte.entitlements`) for the 1.1GB translation model.
+(already in `Translatte.entitlements`; the app no longer strictly needs it).
 
-The app loads the models and prefills the translator's instruction prefix (`Engine::prepare`) on launch and
-whenever the languages change, so a photo goes straight to OCR and translating the text itself. On a device the
-translator defaults to 2 threads (the efficiency cores stall llama.cpp's thread pool); `test-sim.sh` passes
-`TRANSLATTE_THREADS`, `TRANSLATTE_PERF` and `TRANSLATTE_PREFIX_CACHE` to the app and saves its stderr to `out/ios/`.
+The app loads the models and runs the translation model once (`Engine::prepare`) on launch and whenever the source
+language changes, so a photo goes straight to OCR and translation.
 
 ## Android app
 
@@ -96,11 +96,11 @@ scripts/android/build-app.sh            # translatte-ffi → jniLibs + Kotlin bi
 adb -s emulator-5554 install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The app ships no models: on first launch it downloads the detector, translator and the script packs you pick
+The app ships no models: on first launch it downloads the detector and the language packs you pick
 straight from their Hugging Face repos (WorkManager, with a foreground notification), and the Languages screen
-adds or deletes packs later. Downloads use rustls with Android's trust store via rustls-platform-verifier. Debug
-builds take `--es autotest_download det,rec-latin,translator` and `--es autotest_image <file in the app's external
-files dir> --es autotest_from de --es autotest_to en` on `am start`, the latter writing `autotest.json` beside the
+adds or deletes them later. Downloads use rustls with Android's trust store via rustls-platform-verifier. Debug
+builds take `--es autotest_download det,rec-latin,pair-fr-en` and `--es autotest_image <file in the app's external
+files dir> --es autotest_from fr` on `am start`, the latter writing `autotest.json` beside the
 photo; `run-as co.huggingface.translatte sh -c 'echo xet_data=debug > files/rust_log'` sets `RUST_LOG` (logcat
 tag `translatte`).
 
@@ -110,33 +110,34 @@ tag `translatte`).
 cargo test --workspace                                                    # unit tests (core, cli, ffi)
 cargo test -p translatte-ffi --features download                          # + ffi model management
 TRANSLATTE_MODELS=$PWD/models-cache cargo test --workspace --release \
-  --features translatte-core/llama                                        # + real-model tests
+  --features translatte-core/pair                                         # + real-model tests
+TRANSLATTE_PAIR_MODELS=<dir of <lang>/ upstream files> \
+  cargo test -p bergamot --release --test models                          # the engine alone
 TRANSLATTE_NETWORK_TESTS=1 TRANSLATTE_MODELS=$PWD/models-cache \
   cargo test -p translatte-core --features download,tls-rustls --test download_network  # downloads from the Hub
 scripts/ios/test-sim.sh                                                   # ffi through the Swift bindings
 ```
 
-## Android (emulator) smoke test
+## Android CLI smoke test
 
-Cross-compiles the CLI for `aarch64-linux-android` (API 31) and runs the full pipeline on a device or emulator over `adb`. Requires the Android NDK (found under `$ANDROID_HOME/ndk/`, or set `ANDROID_NDK_HOME`), `rustup target add aarch64-linux-android`, `cmake`, `ninja`, `sccache`, and `adb`.
+Cross-compiles the CLI for `aarch64-linux-android` (API 31) and runs the full pipeline on a device over `adb`. Requires the Android NDK (found under `$ANDROID_HOME/ndk/`, or set `ANDROID_NDK_HOME`), `rustup target add aarch64-linux-android`, `cmake`, `ninja`, `sccache`, and `adb`.
 
 ```bash
-scripts/android/build.sh      # -> target/aarch64-linux-android/release/{translatte,libonnxruntime.so,libc++_shared.so}
-emulator -avd pixel8 -memory 8192 -cores 6 -no-snapshot-save -no-boot-anim &   # needs >2GB RAM for the GGUF
-scripts/android/run.sh core/tests/data/hello_world.png en fr     # <image> <from> <to|-> [name]; "-" = OCR only
+scripts/android/build.sh      # -> <target dir>/aarch64-linux-android/release/{translatte,libonnxruntime.so,libc++_shared.so}
+scripts/android/run.sh core/tests/data/bonjour.png fr     # <image> <from> [-] [name]; "-" = OCR only
 ```
 
 - ONNX Runtime: `ort`'s prebuilt binaries don't cover Android, so `build.sh` downloads the official `com.microsoft.onnxruntime:onnxruntime-android` 1.22.0 AAR from Maven Central (checked against a pinned sha256, cached in `target/android-deps/`) and links its `libonnxruntime.so` dynamically. Desktop builds are unchanged.
-- llama.cpp builds CPU-only via the NDK CMake toolchain (llama-cpp-sys-2 turns OpenMP off on Android), using Ninja and sccache from `.cargo/config.toml` like the desktop build. `build.sh` targets `armv8.6-a+dotprod+i8mm` with weight repacking off (`GGML_CPU_ARM_ARCH`, `GGML_CPU_REPACK`); changing either needs a clean `llama-cpp-sys-2` build. On Android the translator defaults to 5 threads (`TRANSLATTE_THREADS` overrides).
-- `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and the translator unless OCR-only; models whose size is unchanged are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
-- `run.sh` knobs: `TRANSLATTE_THREADS`, `TASKSET=<hex cpu mask>`, `RUN_TIMEOUT` (seconds, default 60), `TRANSLATTE_PREFIX_CACHE=0` (re-prefill every prompt instead of reusing the KV cache of the prefix shared with the previous call), `TRANSLATOR_GGUF=<local .gguf>` (pushed to `models/translator-alt/` and passed as `--translator-gguf`, to compare quantizations). It always sets `TRANSLATTE_PERF=1`, which prints per-call prompt tokens reused from cache and prefill/decode token rates.
-- Benchmarking on a phone: keep the screen on (`adb shell svc power stayon usb`) and the phone cool. A dozing or throttled Pixel 8 caps every cluster near 1.1GHz, and with too little `MemAvailable` the GGUF is re-read from flash on every token.
+- bergamot-translator builds via the NDK CMake toolchain with `c++_shared` (the same C++ runtime ONNX Runtime needs) for `armv8.2-a+dotprod` (`BERGAMOT_BUILD_ARCH` overrides).
+- `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and its translation model unless OCR-only; models whose size is unchanged are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
+- `run.sh` knobs: `TASKSET=<hex cpu mask>`, `RUN_TIMEOUT` (seconds, default 60).
+- Benchmarking on a phone: keep the screen on (`adb shell svc power stayon usb`) and the phone cool. A dozing or throttled Pixel 8 caps every cluster near 1.1GHz.
 - TLS: `build.sh` builds with `--no-default-features --features tls-native` by default, or `TLS=rustls` (OpenSSL, vendored and built from source; needs `perl` and `make`, ~25s on a cold build). This backend is for testing only: the default `tls-rustls` verifies through `rustls-platform-verifier`, which needs JNI initialization that a bare `adb shell` binary can't do and panics without it. The app keeps rustls + the platform verifier (Android's trust store via JNI). native-tls reads Android's `/system/etc/security/cacerts` itself, so no CA setup is needed. Core enforces exactly one of `tls-rustls`/`tls-native` when `download` is on.
 - On-device `fetch`: Xet-backed files need a writable `HF_XET_CACHE` (only a small staging dir is written; the chunk cache is off), since `HOME` is `/` under `adb shell`:
 
   ```bash
   adb shell 'cd /data/local/tmp/translatte && LD_LIBRARY_PATH=. HF_XET_CACHE=/data/local/tmp/translatte/xet-cache \
-    ./translatte fetch --packs rec-en --models models --manifest manifest.json'
+    ./translatte fetch --langs fr --models models --manifest manifest.json'
   ```
 
 - On Android the CLI loads fonts from `/system/fonts` and exits via `_exit` after flushing stdout/stderr, skipping C++ static destructors (bionic otherwise aborts in ONNX Runtime's).
