@@ -732,7 +732,7 @@ endif(COMPILE_EXAMPLES)
 
 # Generate project_version.h to reflect our version number
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/common/project_version.h.in
-               ${CMAKE_CURRENT_SOURCE_DIR}/src/common/project_version.h @ONLY)
+               ${CMAKE_CURRENT_BINARY_DIR}/src/common/project_version.h @ONLY)
 
 # Generate build_info.cpp with CMake cache variables
 include(GetCacheVariables)

@@ -1,0 +1,22 @@
+--- a/inference/marian-fork/cmake/TargetArch.cmake
++++ b/inference/marian-fork/cmake/TargetArch.cmake
+@@ -81,6 +81,8 @@
+                 set(osx_arch_x86_64 TRUE)
+             elseif("${osx_arch}" STREQUAL "ppc64" AND ppc_support)
+                 set(osx_arch_ppc64 TRUE)
++            elseif("${osx_arch}" STREQUAL "arm64")
++                set(osx_arch_armv8 TRUE)
+             else()
+                 message(FATAL_ERROR "Invalid OS X arch name: ${osx_arch}")
+             endif()
+@@ -102,6 +104,10 @@
+         if(osx_arch_ppc64)
+             list(APPEND ARCH ppc64)
+         endif()
++
++        if(osx_arch_armv8)
++            list(APPEND ARCH armv8)
++        endif()
+     else()
+         file(WRITE "${CMAKE_BINARY_DIR}/arch.c" "${archdetect_c_code}")
+ 
