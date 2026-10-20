@@ -247,7 +247,7 @@ final class TranslatorModel: ObservableObject {
         prepare()
     }
 
-    /// For scripted simulator tests: `-autotest-download det,rec-latin` starts a download, and
+    /// For scripted simulator tests: `-autotest-download det,rec-latin,pair-fr-en` starts a download, and
     /// `-autotest-image <path> -autotest-from <code>` runs one translation at launch
     /// and writes the result to Documents/autotest.json.
     func runAutotestIfRequested() async {
