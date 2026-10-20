@@ -1,6 +1,9 @@
 package co.huggingface.translatte.ui.home
 
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
@@ -68,8 +71,11 @@ class LanguageBarTest {
                 LanguageBar(listOf(en, fr), listOf(en, fr, ja), source, "ja", { source = it }, {}, {})
             }
         }
-        compose.onNodeWithText("FROM").performClick()
+        val chip = compose.onNodeWithText("FROM")
+        chip.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+        chip.performClick()
         compose.onNodeWithText("TRANSLATE FROM").assertExists()
+        chip.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
         compose.onNodeWithText("English").assertExists()
         compose.onAllNodesWithText("Japanese").assertCountEquals(1)
         compose.onNode(hasText("French") and isSelectable()).assertIsSelected()

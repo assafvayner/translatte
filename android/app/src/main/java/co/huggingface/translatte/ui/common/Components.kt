@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -188,6 +190,7 @@ fun CheckRow(title: String, selected: Boolean, onClick: () -> Unit, subtitle: St
 }
 
 /** One dialog look for every prompt: sheet color, 28dp corners, title/body tokens, text buttons. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppDialog(
     title: String,
@@ -200,11 +203,11 @@ fun AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = text,
-        confirmButton = { TextButton(onClick = confirm.second) { Text(confirm.first) } },
-        dismissButton = if (dismiss.isEmpty()) {
-            null
-        } else {
-            { Row { dismiss.forEach { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } } } }
+        // One flow of buttons, so each wraps to its own line when they don't fit side by side.
+        confirmButton = {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                (dismiss + confirm).forEach { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } }
+            }
         },
         shape = DialogShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,

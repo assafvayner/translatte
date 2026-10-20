@@ -28,10 +28,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import co.huggingface.translatte.canSwap
 import co.huggingface.translatte.ui.common.PickerDropdown
@@ -67,7 +70,7 @@ fun LanguageBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LanguageTile("From", sources, source, { picking = Side.From }, Modifier.weight(1f)) { width ->
+            LanguageTile("From", sources, source, picking == Side.From, { picking = Side.From }, Modifier.weight(1f)) { bounds ->
                 PickerDropdown(
                     expanded = picking == Side.From,
                     onDismiss = { picking = null },
@@ -76,7 +79,7 @@ fun LanguageBar(
                     selected = sources.firstOrNull { it.code == source },
                     label = { it.name },
                     onSelect = { onSource(it.code) },
-                    anchorWidth = width,
+                    anchor = bounds,
                 )
             }
             FilledIconButton(
@@ -91,7 +94,7 @@ fun LanguageBar(
             ) {
                 Icon(Icons.Filled.SwapHoriz, contentDescription = "Swap languages")
             }
-            LanguageTile("To", targets, target, { picking = Side.To }, Modifier.weight(1f)) { width ->
+            LanguageTile("To", targets, target, picking == Side.To, { picking = Side.To }, Modifier.weight(1f)) { bounds ->
                 PickerDropdown(
                     expanded = picking == Side.To,
                     onDismiss = { picking = null },
@@ -100,7 +103,7 @@ fun LanguageBar(
                     selected = targets.firstOrNull { it.code == target },
                     label = { it.name },
                     onSelect = { onTarget(it.code) },
-                    anchorWidth = width,
+                    anchor = bounds,
                     alignEnd = true,
                 )
             }
@@ -113,19 +116,20 @@ private fun LanguageTile(
     label: String,
     languages: List<LanguageInfo>,
     selected: String,
+    expanded: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    dropdown: @Composable (anchorWidth: Dp) -> Unit,
+    dropdown: @Composable (anchor: Rect) -> Unit,
 ) {
-    val density = LocalDensity.current
-    var width by remember { mutableStateOf(0.dp) }
-    Box(modifier.onSizeChanged { width = with(density) { it.width.toDp() } }) {
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    Box(modifier.onGloballyPositioned { bounds = it.boundsInWindow() }) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .clip(InnerShape)
                 .background(MaterialTheme.colorScheme.background)
-                .clickable(onClickLabel = "Choose $label language", onClick = onClick)
+                .clickable(onClickLabel = "Choose $label language", role = Role.DropdownList, onClick = onClick)
+                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(overlineText(label), style = AppType.overline, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -140,6 +144,6 @@ private fun LanguageTile(
                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(20.dp))
             }
         }
-        dropdown(width)
+        dropdown(bounds)
     }
 }
