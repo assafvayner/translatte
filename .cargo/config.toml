@@ -1,4 +1,4 @@
-# llama.cpp (llama-cpp-sys-2) is built through CMake. Ninja avoids Apple make 3.81's
+# bergamot-translator (the `bergamot` crate) is built through CMake. Ninja avoids Apple make 3.81's
 # jobserver hangs under cargo, and sccache caches the C/C++ objects across targets,
 # profiles and worktrees. Requires `brew install ninja sccache`.
 [env]
