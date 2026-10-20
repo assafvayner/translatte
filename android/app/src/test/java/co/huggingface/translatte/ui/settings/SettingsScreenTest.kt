@@ -4,6 +4,10 @@ import android.app.UiModeManager
 import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -72,9 +76,23 @@ class SettingsScreenTest {
     @Test
     fun theFontLicenseOpensInTheApp() {
         compose.setContent { TranslatteTheme(dark = false) { SettingsScreen(ThemeSetting.SYSTEM, {}, {}) } }
-        compose.onNodeWithText("Fraunces", substring = true).performScrollTo().performClick()
+        compose.onNodeWithText("Font").performScrollTo().performClick()
+        compose.onNodeWithText("Fraunces · SIL Open Font License 1.1").assertExists()
         compose.onNodeWithText("SIL Open Font License 1.1").assertExists()
         compose.onNodeWithText("SIL OPEN FONT LICENSE Version 1.1", substring = true).assertExists()
         compose.onNodeWithText("Close").performClick()
+    }
+
+    @Test
+    fun themeRowsCheckTheCurrentChoice() {
+        var chosen = ThemeSetting.SYSTEM
+        compose.setContent {
+            TranslatteTheme(dark = false) { SettingsScreen(chosen, { chosen = it }, {}) }
+        }
+        compose.onNode(hasText("System") and isSelectable()).assertIsSelected()
+        compose.onNode(hasText("americano") and isSelectable()).assertIsNotSelected().performClick()
+        assertEquals(ThemeSetting.AMERICANO, chosen)
+        compose.onNodeWithText("Light").assertExists()
+        compose.onNodeWithText("Dark").assertExists()
     }
 }

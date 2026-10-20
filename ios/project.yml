@@ -18,6 +18,10 @@ targets:
         buildPhase: resources
       - path: ../design/fonts/Fraunces-SemiBold.ttf
         buildPhase: resources
+      - path: ../design/fonts/Fraunces9pt-Regular.ttf
+        buildPhase: resources
+      - path: ../design/fonts/Fraunces9pt-SemiBold.ttf
+        buildPhase: resources
       - path: ../design/fonts/OFL.txt
         buildPhase: resources
     info:
@@ -25,7 +29,7 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UIAppFonts: [Fraunces-SemiBold.ttf]
+        UIAppFonts: [Fraunces-SemiBold.ttf, Fraunces9pt-Regular.ttf, Fraunces9pt-SemiBold.ttf]
     dependencies:
       - framework: Frameworks/TranslatteFFI.xcframework
         embed: false

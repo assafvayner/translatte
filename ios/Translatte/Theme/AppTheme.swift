@@ -11,6 +11,15 @@ enum AppTheme: String, CaseIterable, Identifiable {
 
     var title: String { self == .system ? "System" : rawValue }
 
+    /// The same copy as Android's theme rows.
+    var description: String {
+        switch self {
+        case .system: "translatte in light mode, americano in dark mode"
+        case .translatte: "Light"
+        case .americano: "Dark"
+        }
+    }
+
     var colorScheme: ColorScheme? {
         switch self {
         case .system: nil

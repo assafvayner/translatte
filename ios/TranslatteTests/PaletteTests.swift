@@ -37,8 +37,22 @@ final class PaletteTests: XCTestCase {
         XCTAssertNotNil(UIImage(named: "LogoCup"))
     }
 
-    func testFrauncesIsRegistered() {
-        XCTAssertNotNil(UIFont(name: Typography.frauncesName, size: 20), "Fraunces missing from UIAppFonts")
+    func testEveryFrauncesFaceIsRegistered() {
+        for name in [Typography.displayFace, Typography.textRegular, Typography.textSemiBold] {
+            XCTAssertNotNil(UIFont(name: name, size: 16), "\(name) missing from UIAppFonts")
+        }
+    }
+
+    @MainActor
+    func testNavigationBarTitlesUseFraunces() {
+        Typography.applyNavigationBarAppearance()
+        let appearance = UINavigationBar.appearance().standardAppearance
+        let title = appearance.titleTextAttributes[.font] as? UIFont
+        XCTAssertEqual(title?.fontName, Typography.displayFace)
+        let large = appearance.largeTitleTextAttributes[.font] as? UIFont
+        XCTAssertEqual(large?.fontName, Typography.displayFace)
+        let back = appearance.backButtonAppearance.normal.titleTextAttributes[.font] as? UIFont
+        XCTAssertEqual(back?.fontName, Typography.textRegular)
     }
 
     private func rgba(_ name: String, _ style: UIUserInterfaceStyle) throws -> (rgb: UInt32, alpha: CGFloat) {

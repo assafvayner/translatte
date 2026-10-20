@@ -2,23 +2,24 @@ import SwiftUI
 
 struct EmptyStateCard: View {
     var body: some View {
-        VStack(spacing: 14) {
-            LogoCup(size: 132)
+        VStack(spacing: 12) {
+            LogoCup(size: 120)
             Text("Point at a sign, menu or label")
-                .font(.display(22))
+                .font(Typography.display)
                 .foregroundStyle(Palette.text)
                 .multilineTextAlignment(.center)
             Text("Take a photo and the translation appears right on top of the text. Works fully offline.")
-                .font(.callout)
+                .font(Typography.body)
+                .lineSpacing(Typography.bodyLineSpacing)
                 .foregroundStyle(Palette.textMuted)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 260)
+                .frame(maxWidth: 300)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .strokeBorder(Palette.outline, style: StrokeStyle(lineWidth: 2, dash: [7, 6]))
+            RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
+                .strokeBorder(Palette.outline, style: StrokeStyle(lineWidth: 1.5, dash: [8, 6]))
         )
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("empty-state")
@@ -37,19 +38,21 @@ struct LastResultCard: View {
                 TranslatedImage(image: last.image, result: last.result, rtl: model.targetIsRTL)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Palette.surfaceVariant)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: Metrics.innerRadius, style: .continuous))
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 HStack {
-                    Text("Last translation").font(.headline)
+                    Text("Last translation").font(Typography.headline)
                     Spacer()
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .iconFont(17)
                 }
                 .foregroundStyle(Palette.text)
+                .padding(.leading, 4)
             }
             .padding(12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Last translation")

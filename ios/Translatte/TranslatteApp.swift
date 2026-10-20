@@ -5,10 +5,12 @@ struct TranslatteApp: App {
     @StateObject private var model: TranslatorModel
     @StateObject private var camera: CameraController
     @StateObject private var navigator: AppNavigator
+    @StateObject private var dialogs = DialogCenter()
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        Typography.applyNavigationBarAppearance()
         let model = TranslatorModel()
         let camera = CameraController(mockImagePath: UserDefaults.standard.string(forKey: "mock-camera"))
         _model = StateObject(wrappedValue: model)
@@ -22,9 +24,16 @@ struct TranslatteApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(camera: camera)
+                .font(Typography.body)
+                .accessibilityHidden(dialogs.current != nil)
+                .overlay { DialogHost() }
+                .onReceive(NotificationCenter.default.publisher(for: UIContentSizeCategory.didChangeNotification)) { _ in
+                    Typography.applyNavigationBarAppearance()
+                }
                 .environmentObject(model)
                 .environmentObject(model.downloads)
                 .environmentObject(navigator)
+                .environmentObject(dialogs)
                 .preferredColorScheme(theme.colorScheme)
                 .onChange(of: theme, initial: true) { _, theme in theme.applyToWindows() }
                 .task {

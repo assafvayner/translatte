@@ -9,7 +9,7 @@ struct HomeScreen: View {
     @EnvironmentObject private var navigator: AppNavigator
     @State private var path: [Route] = []
     @State private var pickerItem: PhotosPickerItem?
-    @State private var explainingCamera = false
+    @EnvironmentObject private var dialogs: DialogCenter
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -30,14 +30,14 @@ struct HomeScreen: View {
                 }
                 actions
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Metrics.gutter)
             .padding(.top, 8)
             .padding(.bottom, 16)
             .background(Palette.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Route.self) { route in
                 switch route {
-                case .languages: ModelsView(setup: false)
+                case .languages: ModelsView(setup: false).toolbarRole(.editor)
                 case .settings: SettingsScreen()
                 }
             }
@@ -59,38 +59,37 @@ struct HomeScreen: View {
                 }
             }
         }
-        .alert("Camera access is off", isPresented: $explainingCamera) {
-            Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
-            }
-            Button("Not now", role: .cancel) {}
-        } message: {
-            Text("translatte needs the camera to photograph text. Allow it in Settings, or choose a photo instead.")
-        }
+    }
+
+    private func explainCamera() {
+        dialogs.show(AppDialog(
+            title: "Camera access is off",
+            message: "translatte needs the camera to photograph text. Allow it in Settings, or choose a photo instead.",
+            actions: [
+                .init(title: "Not now"),
+                .init(title: "Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                },
+            ],
+            identifier: "camera-access-dialog"
+        ))
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             LogoCup(size: 34)
-            Wordmark(size: 26)
+            Wordmark()
             Spacer()
             Button { path.append(.languages) } label: {
                 Label("Languages", systemImage: "globe")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 14)
-                    .frame(height: 44)
-                    .foregroundStyle(Palette.text)
-                    .overlay(Capsule().strokeBorder(Palette.outline))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SmallButtonStyle(kind: .outlined))
             .disabled(model.phase.isWorking)
             Button { path.append(.settings) } label: {
                 Image(systemName: "gearshape")
-                    .font(.title3)
+                    .iconFont(20)
                     .frame(width: 44, height: 44)
                     .foregroundStyle(Palette.text)
             }
@@ -106,7 +105,7 @@ struct HomeScreen: View {
             if hasCamera {
                 Button {
                     if navigator.cameraAccess == .denied {
-                        explainingCamera = true
+                        explainCamera()
                     } else {
                         navigator.openCamera()
                     }

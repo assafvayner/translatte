@@ -7,12 +7,12 @@ struct ModelsView: View {
     @EnvironmentObject private var model: TranslatorModel
     @EnvironmentObject private var downloads: Downloads
     @State private var selected: Set<String> = ["rec-latin"]
-    @State private var meteredPrompt: [String]?
+    @EnvironmentObject private var dialogs: DialogCenter
 
     var body: some View {
         let free = model.freeBytes
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: Metrics.spacing) {
                 if setup { hero }
                 Card(title: "Always included") {
                     ForEach(model.models.filter(\.core), id: \.id) { row($0, free: free) }
@@ -21,39 +21,30 @@ struct ModelsView: View {
                     ForEach(model.models.filter { !$0.core }, id: \.id) { row($0, free: free) }
                 }
             }
-            .padding(16)
+            .padding(Metrics.gutter)
         }
         .background(Palette.background.ignoresSafeArea())
         .tint(Palette.primary)
         .navigationTitle(setup ? "" : "Languages")
+        .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { bottomBar(free: free) }
-        .alert(
-            "Download on cellular data?",
-            isPresented: Binding(get: { meteredPrompt != nil }, set: { if !$0 { meteredPrompt = nil } }),
-            presenting: meteredPrompt
-        ) { ids in
-            Button("Download now") { downloads.start(ids, allowMetered: true) }
-            Button("Wait for Wi-Fi") { downloads.start(ids, allowMetered: false) }
-            Button("Cancel", role: .cancel) {}
-        } message: { ids in
-            Text("This downloads \(formatSize(model.bytesToDownload(ids))) over a metered connection.")
-        }
     }
 
     private var hero: some View {
-        VStack(spacing: 8) {
-            LogoCup(size: 92)
+        VStack(spacing: 12) {
+            LogoCup(size: 96)
             Text("Welcome to translatte")
-                .font(.display(26))
+                .font(Typography.display)
                 .foregroundStyle(Palette.text)
                 .accessibilityAddTraits(.isHeader)
             Text("Download the languages you read. After that, everything runs on your phone, with no internet needed.")
-                .font(.callout)
+                .font(Typography.body)
+                .lineSpacing(Typography.bodyLineSpacing)
                 .foregroundStyle(Palette.textMuted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
         }
-        .padding(.top, 12)
+        .padding(.top, 8)
     }
 
     private var wanted: [ModelInfo] {
@@ -63,7 +54,16 @@ struct ModelsView: View {
 
     private func startDownload(_ ids: [String]) {
         if Downloads.needsMeteredPrompt(bytes: model.bytesToDownload(ids), metered: downloads.isMetered) {
-            meteredPrompt = ids
+            dialogs.show(AppDialog(
+                title: "Download on cellular data?",
+                message: "This downloads \(formatSize(model.bytesToDownload(ids))) over a metered connection.",
+                actions: [
+                    .init(title: "Cancel"),
+                    .init(title: "Wait for Wi-Fi") { downloads.start(ids, allowMetered: false) },
+                    .init(title: "Download now") { downloads.start(ids, allowMetered: true) },
+                ],
+                identifier: "metered-dialog"
+            ))
         } else {
             downloads.start(ids, allowMetered: true)
         }
@@ -88,7 +88,7 @@ struct ModelsView: View {
                 }
                 if downloads.busy && setup {
                     Button("Cancel download", role: .cancel, action: downloads.cancel)
-                        .buttonStyle(BigButtonStyle(kind: .tonal))
+                        .buttonStyle(BigButtonStyle(kind: .outlined))
                 } else if setup {
                     if needed > free {
                         Text("Needs \(formatSize(needed)), only \(formatSize(free)) free").foregroundStyle(Palette.error)
@@ -100,14 +100,14 @@ struct ModelsView: View {
                     .disabled(wanted.isEmpty || !hasPack || needed > free)
                     if free != .max {
                         Text("Wi-Fi recommended · \(formatSize(free)) free on this phone")
-                            .font(.caption)
+                            .font(Typography.caption)
                             .foregroundStyle(Palette.textMuted)
                     }
                 }
             }
-            .font(.callout)
+            .font(Typography.body)
             .multilineTextAlignment(.center)
-            .padding(16)
+            .padding(Metrics.gutter)
             .background(Palette.background.ignoresSafeArea(edges: .bottom))
         }
     }
@@ -117,11 +117,12 @@ struct ModelsView: View {
         let toggleable = setup && !m.core && !installed
         let checked = m.core || installed || (setup && selected.contains(m.id))
         let progress = downloads.running && !installed ? downloads.progress[m.id] : nil
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 let label = HStack(spacing: 12) {
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                        .imageScale(.large)
+                        .iconFont(22)
+                        .frame(width: 24, height: 24)
                         .foregroundStyle(checked || toggleable ? Palette.primary : Palette.textMuted)
                     ModelLabel(model: m)
                 }
@@ -146,33 +147,35 @@ struct ModelsView: View {
                         if downloads.busy {
                             if !installed && downloads.pendingIDs.contains(m.id) {
                                 Button("Cancel", action: downloads.cancel)
-                                    .buttonStyle(.bordered)
+                                    .buttonStyle(SmallButtonStyle(kind: .outlined))
                                     .accessibilityIdentifier("cancel-\(m.id)")
                             }
                         } else if !installed {
                             Button(m.state == .incomplete ? "Resume" : "Download") { startDownload([m.id]) }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(SmallButtonStyle(kind: .primary))
                                 .disabled(m.remainingBytes > free)
                                 .accessibilityIdentifier("download-\(m.id)")
                         }
                         if !downloads.busy && (m.state != .notInstalled || m.downloadedBytes > 0) {
                             Button("Delete", role: .destructive) { model.deleteModel(m.id) }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(SmallButtonStyle(kind: .outlined))
                                 .accessibilityIdentifier("delete-\(m.id)")
                         }
                     }
-                    .controlSize(.small)
                 }
             }
-            .frame(minHeight: 44)
             if let progress {
                 ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
                     .tint(Palette.primary)
+                    .padding(.top, 4)
                 Text(progress.done == 0 ? "Waiting for data…" : "\(formatSize(progress.done)) of \(formatSize(progress.total))")
-                    .font(.caption)
+                    .font(Typography.caption)
                     .foregroundStyle(Palette.textMuted)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(minHeight: Metrics.rowMinHeight)
     }
 }
 
@@ -180,18 +183,20 @@ private struct ModelLabel: View {
     let model: ModelInfo
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(model.displayName)
-                .font(.body.weight(.medium))
+                .font(Typography.headline)
+                .lineSpacing(Typography.headlineLineSpacing)
                 .foregroundStyle(Palette.text)
             if !model.languages.isEmpty {
                 Text(model.languages.joined(separator: ", "))
-                    .font(.caption)
+                    .font(Typography.caption)
+                    .lineSpacing(Typography.captionLineSpacing)
                     .foregroundStyle(Palette.textMuted)
                     .lineLimit(2)
             }
             Text(model.status)
-                .font(.caption)
+                .font(Typography.caption)
                 .foregroundStyle(Palette.textMuted)
         }
     }

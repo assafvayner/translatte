@@ -2,46 +2,54 @@ import SwiftUI
 
 struct SettingsScreen: View {
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
+    @EnvironmentObject private var dialogs: DialogCenter
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
-        Form {
-            Section {
-                Picker("Theme", selection: $theme) {
-                    ForEach(AppTheme.allCases) { Text($0.title).tag($0) }
+        ScrollView {
+            VStack(spacing: Metrics.spacing) {
+                Card(title: "Theme") {
+                    ForEach(AppTheme.allCases) { option in
+                        CheckRow(title: option.title, subtitle: option.description, selected: option == theme) {
+                            theme = option
+                        }
+                        .accessibilityIdentifier("theme-\(option.rawValue)")
+                    }
                 }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("theme-picker")
-            } header: {
-                Text("Theme")
-            } footer: {
-                Text("System uses translatte in light mode and americano in dark mode.")
-                    .foregroundStyle(Palette.textMuted)
+                Card(title: "About") {
+                    ListRow(title: "Version", subtitle: Bundle.main.appVersion)
+                        .accessibilityElement(children: .combine)
+                    AboutRow(title: "Text detection and recognition", subtitle: "PP-OCRv5 by PaddlePaddle · Apache License 2.0") {
+                        openURL(URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!)
+                    }
+                    .accessibilityIdentifier("credit-ocr")
+                    AboutRow(title: "Translation", subtitle: "TranslateGemma 4B by Google · Gemma Terms of Use") {
+                        openURL(URL(string: "https://ai.google.dev/gemma/terms")!)
+                    }
+                    .accessibilityIdentifier("credit-translation")
+                    AboutRow(title: "Font", subtitle: "Fraunces · SIL Open Font License 1.1", external: false) {
+                        dialogs.show(AppDialog(
+                            title: "SIL Open Font License 1.1",
+                            message: Self.license("OFL"),
+                            scrolls: true,
+                            actions: [.init(title: "Close")],
+                            identifier: "license-dialog"
+                        ))
+                    }
+                    .accessibilityIdentifier("credit-font")
+                }
             }
-            .listRowBackground(Palette.surface)
-            Section("About") {
-                LabeledContent("Version", value: Bundle.main.appVersion)
-                Link(destination: URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!) {
-                    AboutRow(title: "Text detection and recognition", subtitle: "PP-OCRv5 by PaddlePaddle · Apache License 2.0")
-                }
-                .accessibilityIdentifier("credit-ocr")
-                Link(destination: URL(string: "https://ai.google.dev/gemma/terms")!) {
-                    AboutRow(title: "Translation", subtitle: "TranslateGemma 4B by Google · Gemma Terms of Use")
-                }
-                .accessibilityIdentifier("credit-translation")
-                NavigationLink {
-                    LicenseText(resource: "OFL")
-                } label: {
-                    AboutRow(title: "Wordmark font", subtitle: "Fraunces · SIL Open Font License 1.1", external: false)
-                }
-                .accessibilityIdentifier("credit-font")
-            }
-            .listRowBackground(Palette.surface)
+            .padding(Metrics.gutter)
         }
-        .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
-        .foregroundStyle(Palette.text)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarRole(.editor)
+    }
+
+    private static func license(_ resource: String) -> String {
+        Bundle.main.url(forResource: resource, withExtension: "txt")
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
     }
 }
 
@@ -49,45 +57,20 @@ private struct AboutRow: View {
     let title: String
     let subtitle: String
     var external = true
+    let action: () -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).foregroundStyle(Palette.text)
-                Text(subtitle)
-                    .font(.footnote)
+        Button(action: action) {
+            ListRow(title: title, subtitle: subtitle) {
+                Image(systemName: external ? "arrow.up.right.square" : "chevron.right")
+                    .iconFont(17)
                     .foregroundStyle(Palette.textMuted)
-            }
-            if external {
-                Spacer()
-                Image(systemName: "arrow.up.right.square")
-                    .foregroundStyle(Palette.textMuted)
+                    .frame(width: 24, height: 24)
                     .accessibilityHidden(true)
             }
         }
+        .buttonStyle(RowButtonStyle())
         .accessibilityElement(children: .combine)
-    }
-}
-
-private struct LicenseText: View {
-    let resource: String
-
-    var body: some View {
-        ScrollView {
-            Text(text)
-                .font(.footnote.monospaced())
-                .foregroundStyle(Palette.text)
-                .textSelection(.enabled)
-                .padding()
-        }
-        .background(Palette.background.ignoresSafeArea())
-        .navigationTitle("License")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var text: String {
-        Bundle.main.url(forResource: resource, withExtension: "txt")
-            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
     }
 }
 

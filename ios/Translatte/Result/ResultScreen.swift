@@ -28,7 +28,7 @@ struct ResultScreen: View {
                 Spacer()
                 bottomBar
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Metrics.gutter)
         }
         .foregroundStyle(Palette.text)
         .buttonStyle(.plain)
@@ -121,25 +121,21 @@ struct ResultScreen: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Button(action: navigator.closeResult) {
                 Image(systemName: "chevron.left")
-                    .font(.body.weight(.semibold))
+                    .iconFont(17, weight: .semibold)
                     .frame(width: 44, height: 44)
                     .background(Palette.glass, in: Circle())
             }
             .accessibilityLabel("Back")
             .accessibilityIdentifier("result-back")
-            Text(model.directionLabel)
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 16)
-                .frame(height: 44)
-                .background(Palette.glass, in: Capsule())
+            GlassChip(text: model.directionLabel)
                 .accessibilityIdentifier("result-direction")
             Spacer()
             if zoom.isZoomed {
                 Text("\(zoom.percent)%")
-                    .font(.footnote.monospacedDigit())
+                    .font(Typography.caption.monospacedDigit())
                     .padding(.horizontal, 12)
                     .frame(height: 32)
                     .background(Palette.glass, in: Capsule())
@@ -151,19 +147,17 @@ struct ResultScreen: View {
 
     @ViewBuilder private var bottomBar: some View {
         if let result = model.result, !result.regions.isEmpty {
-            VStack(spacing: 10) {
-                Picker("Overlay", selection: $showTranslation) {
-                    Text("Translated").tag(true)
-                    Text("Original").tag(false)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 240)
-                .padding(4)
-                .background(Palette.glass, in: Capsule())
+            VStack(spacing: 8) {
+                SegmentedToggle(
+                    labels: ["Translated", "Original"],
+                    selection: Binding(get: { showTranslation ? 0 : 1 }, set: { showTranslation = $0 == 0 }),
+                    id: "result-mode"
+                )
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("result-mode")
                 if !hintSeen {
                     Text("Pinch to zoom · tap a box to see the original")
-                        .font(.caption)
+                        .font(Typography.caption)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(Palette.glass, in: Capsule())
@@ -177,27 +171,28 @@ struct ResultScreen: View {
     @ViewBuilder private var status: some View {
         switch model.phase {
         case let .working(label):
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 ProgressView().controlSize(.large).tint(Palette.primary)
-                Text(label).font(.headline)
+                Text(label).font(Typography.headline)
             }
             .glassCard()
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("result-progress")
         case let .failed(message):
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 Image(systemName: noText ? "text.magnifyingglass" : "exclamationmark.triangle.fill")
-                    .font(.title)
+                    .iconFont(24)
                     .foregroundStyle(noText ? Palette.primary : Palette.error)
                 Text(message)
-                    .font(.callout)
+                    .font(Typography.body)
+                    .lineSpacing(Typography.bodyLineSpacing)
                     .multilineTextAlignment(.center)
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
                     Button("Back", action: navigator.closeResult)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(TextButtonStyle())
                     if !noText && model.canRetry {
                         Button("Retry") { Task { await model.retry() } }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(SmallButtonStyle(kind: .primary))
                             .accessibilityIdentifier("result-retry")
                     }
                 }

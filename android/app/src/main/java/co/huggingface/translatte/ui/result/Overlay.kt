@@ -3,6 +3,7 @@ package co.huggingface.translatte.ui.result
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -179,12 +180,18 @@ private class RegionBox(val region: Region) {
 private fun Rgb.argb() =
     android.graphics.Color.rgb(r.toInt(), g.toInt(), b.toInt())
 
+/** The system font at Medium: Fraunces only covers Latin, and photo text can be in any script (iOS matches). */
+private val PhotoTypeface = Typeface.create(Typeface.DEFAULT, 500, false)
+
 /**
  * Lays [text] out at the largest size that fits [width] x [height], without breaking words when
  * the text has spaces to wrap at.
  */
 private fun fitText(text: String, color: Int, width: Float, height: Float): StaticLayout {
-    val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+    val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        typeface = PhotoTypeface
+    }
     val w = max(width, 1f).toInt()
     val words = if (text.contains(' ')) text.split(' ') else emptyList()
     fun layout(size: Float): StaticLayout {

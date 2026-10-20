@@ -68,11 +68,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import co.huggingface.translatte.ui.theme.AppType
+import co.huggingface.translatte.ui.theme.Dimens
+import co.huggingface.translatte.ui.theme.InnerShape
+import co.huggingface.translatte.ui.theme.SheetShape
 import java.io.File
 
-private val Scrim = Color(0x8C000000)
-private val OnScrim = Color.White
-private val ScrimEdge = Color(0x99000000)
+/** Fixed espresso scrims and cream text, the same in both themes and on iOS. */
+private val Scrim = Color(0x9916110E)
+private val OnScrim = Color(0xFFF1E6D8)
+private val ScrimEdge = Color(0x8C16110E)
 
 /**
  * The landing screen: a CameraX viewfinder with controls on a fixed dark scrim in either theme.
@@ -190,25 +195,24 @@ fun CameraScreen(
         )
 
         Row(
-            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
+            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ScrimIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back to Home", onBack)
             Surface(
-                shape = RoundedCornerShape(50),
+                shape = CircleShape,
                 color = Scrim,
                 contentColor = OnScrim,
-                modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClickLabel = "Change languages") {
+                modifier = Modifier.clip(CircleShape).clickable(onClickLabel = "Change languages") {
                     sheet = true
                 },
             ) {
-                Text(
-                    direction,
-                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Box(Modifier.height(Dimens.chipHeight).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                    Text(direction, style = AppType.label, maxLines = 1)
+                }
             }
+            Spacer(Modifier.weight(1f))
             ScrimIconButton(
                 if (flash) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
                 if (flash) "Flash on" else "Flash off",
@@ -222,18 +226,18 @@ fun CameraScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             error?.let {
-                Surface(shape = RoundedCornerShape(12.dp), color = Scrim, contentColor = OnScrim) {
+                Surface(shape = InnerShape, color = Scrim, contentColor = OnScrim) {
                     Text(
                         it,
                         Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = AppType.caption,
                     )
                 }
             }
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Box(
                     Modifier
-                        .size(76.dp)
+                        .size(80.dp)
                         .border(4.dp, OnScrim, CircleShape)
                         .padding(7.dp)
                         .clip(CircleShape)
@@ -245,11 +249,11 @@ fun CameraScreen(
                     shape = CircleShape,
                     color = Scrim,
                     contentColor = OnScrim,
-                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 32.dp).size(48.dp).clip(CircleShape)
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 28.dp).size(52.dp).clip(CircleShape)
                         .clickable(onClickLabel = "Toggle zoom") { twoX = !twoX },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(if (twoX) "2×" else "1×", style = MaterialTheme.typography.labelLarge)
+                        Text(if (twoX) "2×" else "1×", style = AppType.label)
                     }
                 }
             }
@@ -257,11 +261,15 @@ fun CameraScreen(
     }
 
     if (sheet) {
-        ModalBottomSheet(onDismissRequest = { sheet = false }) {
-            Column(Modifier.padding(horizontal = 16.dp).navigationBarsPadding()) {
+        ModalBottomSheet(
+            onDismissRequest = { sheet = false },
+            shape = SheetShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Column(Modifier.padding(horizontal = Dimens.gutter).navigationBarsPadding()) {
                 Text(
                     "Languages",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = AppType.title,
                     modifier = Modifier.padding(bottom = 12.dp),
                 )
                 languageBar()
