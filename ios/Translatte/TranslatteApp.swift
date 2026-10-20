@@ -25,7 +25,11 @@ struct TranslatteApp: App {
         WindowGroup {
             RootView(camera: camera)
                 .font(Typography.body)
+                .accessibilityHidden(dialogs.current != nil)
                 .overlay { DialogHost() }
+                .onReceive(NotificationCenter.default.publisher(for: UIContentSizeCategory.didChangeNotification)) { _ in
+                    Typography.applyNavigationBarAppearance()
+                }
                 .environmentObject(model)
                 .environmentObject(model.downloads)
                 .environmentObject(navigator)

@@ -121,7 +121,7 @@ struct ModelsView: View {
             HStack(spacing: 12) {
                 let label = HStack(spacing: 12) {
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22))
+                        .iconFont(22)
                         .frame(width: 24, height: 24)
                         .foregroundStyle(checked || toggleable ? Palette.primary : Palette.textMuted)
                     ModelLabel(model: m)
@@ -157,7 +157,7 @@ struct ModelsView: View {
                                 .accessibilityIdentifier("download-\(m.id)")
                         }
                         if !downloads.busy && (m.state != .notInstalled || m.downloadedBytes > 0) {
-                            Button("Delete") { model.deleteModel(m.id) }
+                            Button("Delete", role: .destructive) { model.deleteModel(m.id) }
                                 .buttonStyle(SmallButtonStyle(kind: .outlined))
                                 .accessibilityIdentifier("delete-\(m.id)")
                         }
@@ -186,10 +186,12 @@ private struct ModelLabel: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(model.displayName)
                 .font(Typography.headline)
+                .lineSpacing(Typography.headlineLineSpacing)
                 .foregroundStyle(Palette.text)
             if !model.languages.isEmpty {
                 Text(model.languages.joined(separator: ", "))
                     .font(Typography.caption)
+                    .lineSpacing(Typography.captionLineSpacing)
                     .foregroundStyle(Palette.textMuted)
                     .lineLimit(2)
             }

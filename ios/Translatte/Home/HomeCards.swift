@@ -45,7 +45,7 @@ struct LastResultCard: View {
                     Text("Last translation").font(Typography.headline)
                     Spacer()
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 17))
+                        .iconFont(17)
                 }
                 .foregroundStyle(Palette.text)
                 .padding(.leading, 4)

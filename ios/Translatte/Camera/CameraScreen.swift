@@ -156,7 +156,7 @@ private struct ScrimButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 17, weight: .semibold))
+                .iconFont(17, weight: .semibold)
                 .frame(width: 44, height: 44)
                 .background(CameraStyle.control, in: Circle())
         }

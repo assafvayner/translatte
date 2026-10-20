@@ -32,7 +32,8 @@ final class DialogCenter: ObservableObject {
     }
 }
 
-/// Covers the whole window (navigation bars included) with the current dialog, if any.
+/// Covers the whole window (navigation bars included) with the current dialog, if any. It sits under
+/// any presented sheet, so dialogs must not be shown from inside a sheet.
 struct DialogHost: View {
     @EnvironmentObject private var center: DialogCenter
 
@@ -55,6 +56,8 @@ struct DialogHost: View {
 private struct DialogCard: View {
     let dialog: AppDialog
     let close: () -> Void
+    @AccessibilityFocusState private var titleFocused: Bool
+    @FocusState private var keyboardFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -62,9 +65,12 @@ private struct DialogCard: View {
                 .font(Typography.title)
                 .foregroundStyle(Palette.text)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($titleFocused)
             if dialog.scrolls {
                 ScrollView {
-                    message.font(Typography.caption)
+                    message
+                        .font(Typography.caption)
+                        .lineSpacing(Typography.captionLineSpacing)
                 }
                 .frame(maxHeight: 420)
             } else {
@@ -90,6 +96,19 @@ private struct DialogCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .accessibilityIdentifier(dialog.identifier ?? "dialog")
+        .accessibilityAction(.escape, close)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($keyboardFocused)
+        .onKeyPress(.escape) {
+            close()
+            return .handled
+        }
+        .onAppear {
+            keyboardFocused = true
+            UIAccessibility.post(notification: .screenChanged, argument: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { titleFocused = true }
+        }
     }
 
     private var message: some View {

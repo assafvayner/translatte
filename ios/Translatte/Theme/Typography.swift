@@ -14,8 +14,11 @@ enum Typography {
     static let title = Font.custom(displayFace, size: 20, relativeTo: .title2)
     static let headline = Font.custom(textSemiBold, size: 17, relativeTo: .headline)
     static let body = Font.custom(textRegular, size: 16, relativeTo: .body)
-    /// Extra leading that brings body to its ~22pt line height.
-    static let bodyLineSpacing: CGFloat = 3
+    /// Extra leading over Fraunces' natural 1.23 line height, matching Android's token line heights
+    /// (headline 22, body 22, caption 18).
+    static let headlineLineSpacing: CGFloat = 1
+    static let bodyLineSpacing: CGFloat = 2.3
+    static let captionLineSpacing: CGFloat = 2
     static let button = Font.custom(textSemiBold, size: 16, relativeTo: .body)
     static let label = Font.custom(textSemiBold, size: 14, relativeTo: .subheadline)
     static let caption = Font.custom(textRegular, size: 13, relativeTo: .caption)
@@ -23,8 +26,8 @@ enum Typography {
     static let overline = Font.custom(textSemiBold, size: 11, relativeTo: .caption2)
     static let overlineTracking: CGFloat = 0.8
 
-    /// Navigation bar titles in the title token and bar buttons in the body token, scaled like the
-    /// SwiftUI tokens.
+    /// Navigation bar titles in the title token and bar buttons in the body token, scaled for the
+    /// current content size. Call again when it changes: this also restyles bars already on screen.
     @MainActor
     static func applyNavigationBarAppearance() {
         func font(_ name: String, _ size: CGFloat, _ style: UIFont.TextStyle) -> UIFont {
@@ -41,10 +44,47 @@ enum Typography {
         buttons.normal.titleTextAttributes = [.font: font(textRegular, 16, .body)]
         appearance.buttonAppearance = buttons
         appearance.backButtonAppearance = buttons
-        let bar = UINavigationBar.appearance()
-        bar.standardAppearance = appearance
-        bar.scrollEdgeAppearance = appearance
-        bar.compactAppearance = appearance
+        func style(_ bar: UINavigationBar) {
+            bar.standardAppearance = appearance
+            bar.scrollEdgeAppearance = appearance
+            bar.compactAppearance = appearance
+        }
+        style(UINavigationBar.appearance())
+        func restyle(_ view: UIView) {
+            if let bar = view as? UINavigationBar { style(bar) }
+            view.subviews.forEach(restyle)
+        }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.windows.forEach(restyle)
+        }
+    }
+
+    /// The height of the app's key window, for sizing popovers.
+    @MainActor
+    static var windowHeight: CGFloat {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first?.keyWindow?.bounds.height ?? scenes.first?.screen.bounds.height ?? 800
+    }
+}
+
+/// SF Symbol sizing that follows Dynamic Type, relative to a text style.
+private struct IconFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+
+    init(size: CGFloat, weight: Font.Weight, relativeTo style: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.weight = weight
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight))
+    }
+}
+
+extension View {
+    func iconFont(_ size: CGFloat, weight: Font.Weight = .regular, relativeTo style: Font.TextStyle = .body) -> some View {
+        modifier(IconFont(size: size, weight: weight, relativeTo: style))
     }
 }
 

@@ -89,7 +89,7 @@ struct HomeScreen: View {
             .disabled(model.phase.isWorking)
             Button { path.append(.settings) } label: {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 20))
+                    .iconFont(20)
                     .frame(width: 44, height: 44)
                     .foregroundStyle(Palette.text)
             }

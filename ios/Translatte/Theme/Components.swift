@@ -144,6 +144,7 @@ struct ListRow<Trailing: View>: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(Typography.caption)
+                        .lineSpacing(Typography.captionLineSpacing)
                         .foregroundStyle(Palette.textMuted)
                 }
             }
@@ -174,7 +175,7 @@ struct CheckRow: View {
         Button(action: action) {
             ListRow(title: title, subtitle: subtitle) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 17, weight: .semibold))
+                    .iconFont(17, weight: .semibold)
                     .foregroundStyle(Palette.primary)
                     .frame(width: 24, height: 24)
                     .opacity(selected ? 1 : 0)
@@ -194,8 +195,8 @@ struct RowButtonStyle: ButtonStyle {
     }
 }
 
-/// The compact list a FROM / TO chip opens as a popover: overline title, 48pt body rows, a checkmark
-/// on the current option, scrolled to it. Choosing one closes the popover.
+/// The compact list a FROM / TO chip opens as a popover: overline title, body rows at least 48pt tall,
+/// a checkmark on the current option, opened with it as the third row. Choosing one closes it.
 struct PickerDropdown<Option: Hashable>: View {
     let title: String
     let options: [Option]
@@ -205,12 +206,12 @@ struct PickerDropdown<Option: Hashable>: View {
     let anchorWidth: CGFloat
     let onSelect: (Option) -> Void
     @Environment(\.dismiss) private var dismiss
-
-    private static var rowHeight: CGFloat { 48 }
+    @ScaledMetric(relativeTo: .body) private var rowHeight: CGFloat = 48
+    @ScaledMetric(relativeTo: .caption2) private var headerHeight: CGFloat = 36
 
     var body: some View {
         let width = min(max(anchorWidth, 220), 280)
-        let height = min(CGFloat(options.count) * Self.rowHeight + 46, UIScreen.main.bounds.height * 0.6)
+        let height = min(CGFloat(options.count) * rowHeight + headerHeight + 8, Typography.windowHeight * 0.6)
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
@@ -229,7 +230,10 @@ struct PickerDropdown<Option: Hashable>: View {
                     .background(Palette.sheet)
                     .accessibilityAddTraits(.isHeader)
             }
-            .onAppear { if let selected { proxy.scrollTo(selected, anchor: .center) } }
+            .onAppear {
+                guard let selected, let index = options.firstIndex(of: selected) else { return }
+                proxy.scrollTo(options[max(index - 2, 0)], anchor: .top)
+            }
         }
         .frame(width: width, height: height, alignment: .top)
         .presentationCompactAdaptation(.popover)
@@ -250,12 +254,13 @@ struct PickerDropdown<Option: Hashable>: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "checkmark")
-                    .font(.system(size: 15, weight: .semibold))
+                    .iconFont(15, weight: .semibold)
                     .foregroundStyle(Palette.primary)
                     .opacity(on ? 1 : 0)
             }
             .padding(.horizontal, 16)
-            .frame(height: Self.rowHeight)
+            .padding(.vertical, 8)
+            .frame(minHeight: rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowButtonStyle())
@@ -275,6 +280,7 @@ struct NoticeBanner: View {
                 .foregroundStyle(Palette.error)
             Text(message)
                 .font(Typography.body)
+                .lineSpacing(Typography.bodyLineSpacing)
                 .foregroundStyle(Palette.text)
                 .multilineTextAlignment(.leading)
         }

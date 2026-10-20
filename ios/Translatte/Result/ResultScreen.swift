@@ -124,7 +124,7 @@ struct ResultScreen: View {
         HStack(spacing: 8) {
             Button(action: navigator.closeResult) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
+                    .iconFont(17, weight: .semibold)
                     .frame(width: 44, height: 44)
                     .background(Palette.glass, in: Circle())
             }
@@ -181,7 +181,7 @@ struct ResultScreen: View {
         case let .failed(message):
             VStack(spacing: 12) {
                 Image(systemName: noText ? "text.magnifyingglass" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 24))
+                    .iconFont(24)
                     .foregroundStyle(noText ? Palette.primary : Palette.error)
                 Text(message)
                     .font(Typography.body)

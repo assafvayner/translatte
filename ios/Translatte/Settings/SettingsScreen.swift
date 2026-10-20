@@ -63,7 +63,7 @@ private struct AboutRow: View {
         Button(action: action) {
             ListRow(title: title, subtitle: subtitle) {
                 Image(systemName: external ? "arrow.up.right.square" : "chevron.right")
-                    .font(.system(size: 17))
+                    .iconFont(17)
                     .foregroundStyle(Palette.textMuted)
                     .frame(width: 24, height: 24)
                     .accessibilityHidden(true)
