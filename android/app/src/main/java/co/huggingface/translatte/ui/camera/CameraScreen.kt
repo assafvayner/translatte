@@ -10,6 +10,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.ZoomState
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -21,18 +22,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,13 +50,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -61,11 +66,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Observer
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.io.File
 
 private val Scrim = Color(0x8C000000)
 private val OnScrim = Color.White
+private val ScrimEdge = Color(0x99000000)
 
 /**
  * The landing screen: a CameraX viewfinder with controls on a fixed dark scrim in either theme.
@@ -101,16 +108,26 @@ fun CameraScreen(
     }
     var provider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var camera by remember { mutableStateOf<Camera?>(null) }
-    var flash by rememberSaveable { mutableStateOf(false) }
-    var twoX by rememberSaveable { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
+    var flash by remember { mutableStateOf(false) }
+    var twoX by remember { mutableStateOf(false) }
+    var maxZoom by remember { mutableFloatStateOf(1f) }
     var error by remember { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(granted) {
         if (!granted) return@LaunchedEffect
         val future = ProcessCameraProvider.getInstance(context)
-        future.addListener({ provider = future.get() }, ContextCompat.getMainExecutor(context))
+        future.addListener(
+            {
+                provider = try {
+                    future.get()
+                } catch (e: Exception) {
+                    error = "Couldn't start the camera."
+                    null
+                }
+            },
+            ContextCompat.getMainExecutor(context),
+        )
     }
     DisposableEffect(provider, lifecycleOwner) {
         val p = provider ?: return@DisposableEffect onDispose {}
@@ -121,6 +138,9 @@ fun CameraScreen(
         } catch (e: IllegalArgumentException) {
             error = "No back camera available."
             null
+        } catch (e: Exception) {
+            error = "Couldn't start the camera."
+            null
         }
         onDispose {
             p.unbindAll()
@@ -128,27 +148,28 @@ fun CameraScreen(
         }
     }
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
-    LaunchedEffect(twoX, camera) {
-        val c = camera ?: return@LaunchedEffect
-        val max = c.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
-        c.cameraControl.setZoomRatio(if (twoX) minOf(2f, max) else 1f)
+    DisposableEffect(camera, lifecycleOwner) {
+        val zoomState = camera?.cameraInfo?.zoomState ?: return@DisposableEffect onDispose {}
+        val observer = Observer<ZoomState> { maxZoom = it.maxZoomRatio }
+        zoomState.observe(lifecycleOwner, observer)
+        onDispose { zoomState.removeObserver(observer) }
+    }
+    LaunchedEffect(twoX, camera, maxZoom) {
+        camera?.cameraControl?.setZoomRatio(if (twoX) minOf(2f, maxZoom) else 1f)
     }
 
     fun shoot() {
-        busy = true
         error = null
-        val file = File(context.cacheDir, "photos/capture.jpg").apply { parentFile?.mkdirs() }
+        val dir = File(context.cacheDir, "photos").apply { mkdirs() }
+        val file = File.createTempFile("capture", ".jpg", dir)
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(file).build(),
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    busy = false
-                    onCaptured(file)
-                }
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) = onCaptured(file)
 
                 override fun onError(e: ImageCaptureException) {
-                    busy = false
+                    file.delete()
                     error = "Couldn't take the photo: ${e.message}"
                 }
             },
@@ -157,13 +178,23 @@ fun CameraScreen(
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (granted) AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val navBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        Box(
+            Modifier.fillMaxWidth().height(statusBar + 96.dp)
+                .background(Brush.verticalGradient(listOf(ScrimEdge, Color.Transparent))),
+        )
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(navBar + 160.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, ScrimEdge))),
+        )
 
         Row(
             Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            ScrimIconButton(Icons.Filled.Close, "Back to Home", onBack)
+            ScrimIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back to Home", onBack)
             Surface(
                 shape = RoundedCornerShape(50),
                 color = Scrim,
@@ -207,7 +238,7 @@ fun CameraScreen(
                         .padding(7.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .clickable(enabled = !busy && camera != null) { shoot() }
+                        .clickable { shoot() }
                         .semantics { contentDescription = "Take photo" },
                 )
                 Surface(
