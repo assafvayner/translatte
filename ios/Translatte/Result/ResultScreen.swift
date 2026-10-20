@@ -7,7 +7,7 @@ struct ResultScreen: View {
     @State private var showTranslation = true
     @State private var peeked: Set<Int> = []
     @State private var zoom = ZoomTransform()
-    @State private var pinchBase: CGFloat?
+    @State private var pinchBase: ZoomTransform?
     @State private var panBase: CGSize?
 
     var body: some View {
@@ -17,6 +17,12 @@ struct ResultScreen: View {
                 photo(image).ignoresSafeArea()
             }
             status.padding(.horizontal, 32)
+            VStack {
+                Color.clear
+                    .frame(height: 0)
+                    .background(Palette.glass.ignoresSafeArea(edges: .top))
+                Spacer()
+            }
             VStack {
                 topBar
                 Spacer()
@@ -79,10 +85,15 @@ struct ResultScreen: View {
         MagnifyGesture()
             .onChanged { value in
                 gestured()
-                let base = pinchBase ?? zoom.scale
+                let base = pinchBase ?? zoom
                 pinchBase = base
-                zoom.scale = base * value.magnification
-                zoom.clamp(content: fit.size, container: container)
+                zoom.pinch(
+                    from: base,
+                    magnification: value.magnification,
+                    anchor: value.startLocation,
+                    content: fit.size,
+                    container: container
+                )
             }
             .onEnded { _ in pinchBase = nil }
     }
@@ -151,7 +162,7 @@ struct ResultScreen: View {
                 .background(Palette.glass, in: Capsule())
                 .accessibilityIdentifier("result-mode")
                 if !hintSeen {
-                    Text("Pinch to zoom · drag to pan · double-tap to fit")
+                    Text("Pinch to zoom · tap a box to see the original")
                         .font(.caption)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)

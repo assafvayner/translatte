@@ -23,6 +23,17 @@ struct ZoomTransform: Equatable {
         )
     }
 
+    /// `base` scaled by `magnification` around `anchor`, keeping the point under the pinch in place.
+    mutating func pinch(from base: ZoomTransform, magnification: CGFloat, anchor: CGPoint, content: CGSize, container: CGSize) {
+        let s = min(max(base.scale * magnification, Self.minScale), Self.maxScale)
+        let ratio = s / base.scale
+        let x = anchor.x - container.width / 2
+        let y = anchor.y - container.height / 2
+        scale = s
+        offset = CGSize(width: x - (x - base.offset.width) * ratio, height: y - (y - base.offset.height) * ratio)
+        clamp(content: content, container: container)
+    }
+
     /// Back to fit when zoomed; otherwise `doubleTapScale`, keeping `point` under the finger.
     mutating func toggleDoubleTap(at point: CGPoint, content: CGSize, container: CGSize) {
         guard !isZoomed else {

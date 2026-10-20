@@ -50,4 +50,19 @@ final class ZoomTransformTests: XCTestCase {
         let zoom = ZoomTransform(scale: 2, offset: CGSize(width: 10, height: -20))
         XCTAssertEqual(zoom.unzoomed(CGPoint(x: 160, y: 280), container: container), CGPoint(x: 150, y: 300))
     }
+
+    func testPinchKeepsThePointUnderTheFingers() {
+        var zoom = ZoomTransform()
+        let anchor = CGPoint(x: 100, y: 200)
+        zoom.pinch(from: ZoomTransform(), magnification: 2, anchor: anchor, content: container, container: container)
+        XCTAssertEqual(zoom.scale, 2)
+        XCTAssertEqual(zoom.unzoomed(anchor, container: container), anchor)
+
+        let base = zoom
+        let unzoomed = zoom.unzoomed(CGPoint(x: 180, y: 300), container: container)
+        zoom.pinch(from: base, magnification: 1.5, anchor: CGPoint(x: 180, y: 300), content: container, container: container)
+        XCTAssertEqual(zoom.scale, 3)
+        XCTAssertEqual(zoom.unzoomed(CGPoint(x: 180, y: 300), container: container).x, unzoomed.x, accuracy: 0.001)
+        XCTAssertEqual(zoom.unzoomed(CGPoint(x: 180, y: 300), container: container).y, unzoomed.y, accuracy: 0.001)
+    }
 }
