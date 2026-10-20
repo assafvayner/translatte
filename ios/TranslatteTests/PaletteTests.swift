@@ -37,6 +37,10 @@ final class PaletteTests: XCTestCase {
         XCTAssertNotNil(UIImage(named: "LogoCup"))
     }
 
+    func testFrauncesIsRegistered() {
+        XCTAssertNotNil(UIFont(name: Typography.frauncesName, size: 20), "Fraunces missing from UIAppFonts")
+    }
+
     private func rgba(_ name: String, _ style: UIUserInterfaceStyle) throws -> (rgb: UInt32, alpha: CGFloat) {
         let color = try XCTUnwrap(UIColor(named: name, in: .main, compatibleWith: nil), "missing color set \(name)")
         let resolved = color.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))

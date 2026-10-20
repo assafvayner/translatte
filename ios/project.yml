@@ -16,6 +16,14 @@ targets:
       - path: Translatte
       - path: ../models/manifest.json
         buildPhase: resources
+      - path: ../design/fonts/Fraunces-SemiBold.ttf
+        buildPhase: resources
+      - path: ../design/fonts/OFL.txt
+        buildPhase: resources
+    info:
+      path: Translatte-Info.plist
+      properties:
+        UIAppFonts: [Fraunces-SemiBold.ttf]
     dependencies:
       - framework: Frameworks/TranslatteFFI.xcframework
         embed: false
