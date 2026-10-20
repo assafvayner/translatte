@@ -5,7 +5,7 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 
 ## Layout
 
-- `core/`: Rust pipeline (OCR via ONNX Runtime, TranslateGemma via llama.cpp, layout, style hints)
+- `core/`: Rust pipeline (OCR via ONNX Runtime, Hy-MT2 via llama.cpp, layout, style hints)
 - `cli/`: dev CLI (`translatte fetch|run|langs|eval`)
 - `ffi/`: UniFFI bindings over the core (`Engine`) for the native apps
 - `ios/`: SwiftUI iPhone app (XcodeGen project in `ios/project.yml`)
@@ -18,10 +18,15 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 Requires Rust (stable + nightly for fmt), `cmake`, `ninja` and `sccache` (`brew install cmake ninja sccache`); `uv` for the scripts. llama.cpp builds from source through CMake; `.cargo/config.toml` routes it through Ninja and sccache.
 
 ```bash
-cargo run -p translatte-cli --release -- fetch --all-packs   # ~2.6GB into models-cache/
+cargo run -p translatte-cli --release -- fetch --all-packs   # ~1.2GB into models-cache/
 ```
 
-`fetch` downloads the detector and translator plus the requested OCR script packs (`--packs rec-latin,rec-cjk` or `--all-packs`) straight from the upstream Hugging Face repos pinned in the manifest. Integrity is left to hf-hub (TLS, and hf-xet's chunk hashes for Xet-backed files); files are checked by size only. It skips files already installed (present with the expected size), and resumes interrupted downloads from their `.part` files. `HF_ENDPOINT` and `HF_TOKEN` are honored. To bump an upstream revision, edit `REVISIONS` in `scripts/gen_manifest.py` and run `uv run scripts/gen_manifest.py`.
+`fetch` downloads the detector and translator plus the requested OCR script packs (`--packs rec-latin,rec-cjk` or `--all-packs`) straight from the upstream Hugging Face repos pinned in the manifest. Integrity is left to hf-hub (TLS, and hf-xet's chunk hashes for Xet-backed files); files are checked by size only. It skips files already installed (present with the expected size), and resumes interrupted downloads from their `.part` files (tagged with the upstream file, so a replaced model's partial download is never resumed). It first removes what the manifest no longer describes (dropped packs, wrong-size files such as a replaced translator, stale `.part` files), as the apps do on launch (`Engine::prune_models`). `HF_ENDPOINT` and `HF_TOKEN` are honored. To bump an upstream revision, edit `REVISIONS` in `scripts/gen_manifest.py` and run `uv run scripts/gen_manifest.py`.
+
+The translator is [Hy-MT2-1.8B](https://huggingface.co/tencent/Hy-MT2-1.8B) (Q4_K_M GGUF, Apache 2.0). The manifest lists
+its 38 languages: 29 can be read from photos (PP-OCRv5 has a recognizer for their script) and 9 are translation
+targets only (Hebrew, Vietnamese, Kazakh, Mongolian, Tibetan, Khmer, Burmese, Bengali, Gujarati). Hy-MT2 writes
+Kazakh in Arabic script and Mongolian in the traditional script, as used in China.
 
 ## Usage
 
@@ -75,7 +80,7 @@ Rust core links against for iOS. The simulator reads models straight from the ho
 (`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR`); otherwise the app downloads them into Documents/models from its setup
 and Languages screens, as on Android. `TRANSLATTE_E2E=1 TRANSLATTE_SIM_DEVICE=<erased simulator> scripts/ios/test-sim.sh`
 adds a UI test that does that whole setup over the network. Device builds need a development team and the `increased-memory-limit` entitlement
-(already in `Translatte.entitlements`) for the 2.5GB translation model.
+(already in `Translatte.entitlements`) for the 1.1GB translation model.
 
 The app loads the models and prefills the translator's instruction prefix (`Engine::prepare`) on launch and
 whenever the languages change, so a photo goes straight to OCR and translating the text itself. On a device the
@@ -125,7 +130,7 @@ scripts/android/run.sh core/tests/data/hello_world.png en fr     # <image> <from
 - llama.cpp builds CPU-only via the NDK CMake toolchain (llama-cpp-sys-2 turns OpenMP off on Android), using Ninja and sccache from `.cargo/config.toml` like the desktop build. `build.sh` targets `armv8.6-a+dotprod+i8mm` with weight repacking off (`GGML_CPU_ARM_ARCH`, `GGML_CPU_REPACK`); changing either needs a clean `llama-cpp-sys-2` build. On Android the translator defaults to 5 threads (`TRANSLATTE_THREADS` overrides).
 - `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and the translator unless OCR-only; models whose size is unchanged are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
 - `run.sh` knobs: `TRANSLATTE_THREADS`, `TASKSET=<hex cpu mask>`, `RUN_TIMEOUT` (seconds, default 60), `TRANSLATTE_PREFIX_CACHE=0` (re-prefill every prompt instead of reusing the KV cache of the prefix shared with the previous call), `TRANSLATOR_GGUF=<local .gguf>` (pushed to `models/translator-alt/` and passed as `--translator-gguf`, to compare quantizations). It always sets `TRANSLATTE_PERF=1`, which prints per-call prompt tokens reused from cache and prefill/decode token rates.
-- Benchmarking on a phone: keep the screen on (`adb shell svc power stayon usb`) and the phone cool. A dozing or throttled Pixel 8 caps every cluster near 1.1GHz, and with under ~3GB `MemAvailable` the 2.5GB GGUF is re-read from flash on every token.
+- Benchmarking on a phone: keep the screen on (`adb shell svc power stayon usb`) and the phone cool. A dozing or throttled Pixel 8 caps every cluster near 1.1GHz, and with too little `MemAvailable` the GGUF is re-read from flash on every token.
 - TLS: `build.sh` builds with `--no-default-features --features tls-native` by default, or `TLS=rustls` (OpenSSL, vendored and built from source; needs `perl` and `make`, ~25s on a cold build). This backend is for testing only: the default `tls-rustls` verifies through `rustls-platform-verifier`, which needs JNI initialization that a bare `adb shell` binary can't do and panics without it. The app keeps rustls + the platform verifier (Android's trust store via JNI). native-tls reads Android's `/system/etc/security/cacerts` itself, so no CA setup is needed. Core enforces exactly one of `tls-rustls`/`tls-native` when `download` is on.
 - On-device `fetch`: Xet-backed files need a writable `HF_XET_CACHE` (only a small staging dir is written; the chunk cache is off), since `HOME` is `/` under `adb shell`:
 
