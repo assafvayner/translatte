@@ -187,15 +187,8 @@ struct ResultScreen: View {
                     .font(Typography.body)
                     .lineSpacing(Typography.bodyLineSpacing)
                     .multilineTextAlignment(.center)
-                HStack(spacing: 8) {
-                    Button("Back", action: navigator.closeResult)
-                        .buttonStyle(TextButtonStyle())
-                    if !noText && model.canRetry {
-                        Button("Retry") { Task { await model.retry() } }
-                            .buttonStyle(SmallButtonStyle(kind: .primary))
-                            .accessibilityIdentifier("result-retry")
-                    }
-                }
+                Button("Back", action: navigator.closeResult)
+                    .buttonStyle(TextButtonStyle())
             }
             .glassCard()
             .accessibilityElement(children: .contain)

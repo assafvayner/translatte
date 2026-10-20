@@ -23,8 +23,8 @@ struct SettingsScreen: View {
                         openURL(URL(string: "https://www.apache.org/licenses/LICENSE-2.0")!)
                     }
                     .accessibilityIdentifier("credit-ocr")
-                    AboutRow(title: "Translation", subtitle: "Hy-MT2 1.8B by Tencent · Apache License 2.0") {
-                        openURL(URL(string: "https://huggingface.co/tencent/Hy-MT2-1.8B/blob/main/LICENSE.txt")!)
+                    AboutRow(title: "Translation", subtitle: "Mozilla translations models and engine · Mozilla Public License 2.0") {
+                        openURL(URL(string: "https://github.com/mozilla/translations")!)
                     }
                     .accessibilityIdentifier("credit-translation")
                     AboutRow(title: "Font", subtitle: "Fraunces · SIL Open Font License 1.1", external: false) {

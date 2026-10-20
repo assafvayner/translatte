@@ -34,10 +34,9 @@ targets:
       - framework: Frameworks/TranslatteFFI.xcframework
         embed: false
       - sdk: libc++.tbd
+      - sdk: libiconv.tbd
       - sdk: Foundation.framework
       - sdk: Accelerate.framework
-      - sdk: Metal.framework
-      - sdk: MetalKit.framework
       - sdk: CoreML.framework
       # Model downloads: TLS certificate checks and hf-xet's system info.
       - sdk: Security.framework

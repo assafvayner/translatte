@@ -13,25 +13,19 @@ final class ScreenshotUITests: XCTestCase {
 
     func testCaptureEveryScreenInBothThemes() throws {
         for theme in ["translatte", "americano"] {
-            let empty = try XCUIApplication.withModels(["-theme", theme, "-source", "en", "-target", "de"])
+            let empty = try XCUIApplication.withModels(["-theme", theme, "-source", "fr"])
             XCTAssertTrue(empty.element("home").waitForExistence(timeout: 30))
             save("home-empty-\(theme)")
             empty.buttons["from-picker"].tap()
             XCTAssertTrue(empty.staticTexts["TRANSLATE FROM"].waitForExistence(timeout: 5))
             sleep(1)
             save("picker-from-\(theme)")
-            empty.buttons["language-en"].tap()
+            empty.buttons["language-fr"].tap()
             XCTAssertTrue(empty.waitUntil(empty.staticTexts["TRANSLATE FROM"], "exists == false"))
-            empty.buttons["to-picker"].tap()
-            XCTAssertTrue(empty.staticTexts["TRANSLATE TO"].waitForExistence(timeout: 5))
-            sleep(1)
-            save("picker-to-\(theme)")
-            empty.buttons["language-de"].tap()
-            XCTAssertTrue(empty.waitUntil(empty.staticTexts["TRANSLATE TO"], "exists == false"))
             empty.terminate()
 
             let app = try XCUIApplication.withModels([
-                "-theme", theme, "-mock-camera", TestEnv.helloWorld, "-source", "en", "-target", "de",
+                "-theme", theme, "-mock-camera", TestEnv.bonjour, "-source", "fr",
                 "-resultHintSeen", "NO",
             ])
             XCTAssertTrue(app.element("camera-screen").waitForExistence(timeout: 30))
@@ -40,12 +34,6 @@ final class ScreenshotUITests: XCTestCase {
             XCTAssertTrue(app.element("from-picker").waitForExistence(timeout: 5))
             sleep(1)
             save("camera-languages-\(theme)")
-            app.buttons["to-picker"].tap()
-            XCTAssertTrue(app.staticTexts["TRANSLATE TO"].waitForExistence(timeout: 5))
-            sleep(1)
-            save("camera-dropdown-\(theme)")
-            app.buttons["language-de"].tap()
-            XCTAssertTrue(app.waitUntil(app.staticTexts["TRANSLATE TO"], "exists == false"))
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
             XCTAssertTrue(app.waitUntil(app.element("from-picker"), "exists == false"))
             app.buttons["camera-shutter"].tap()

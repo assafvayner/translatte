@@ -71,7 +71,7 @@ struct BigButtonStyle: ButtonStyle {
     }
 }
 
-/// 36pt buttons in rows and cards (Download, Delete, Languages, Retry).
+/// 36pt buttons in rows and cards (Download, Delete, Languages).
 struct SmallButtonStyle: ButtonStyle {
     let kind: ButtonKind
     @Environment(\.isEnabled) private var isEnabled

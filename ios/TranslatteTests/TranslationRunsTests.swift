@@ -18,17 +18,6 @@ final class TranslationRunsTests: XCTestCase {
         return TranslationResult(imageWidth: 10, imageHeight: 10, regions: Array(repeating: region, count: regions), translationError: error)
     }
 
-    func testRetriesCountAttemptsAndANewPhotoResetsThem() {
-        var runs = TranslationRuns()
-        _ = runs.start()
-        XCTAssertEqual(runs.attempt, 0)
-        _ = runs.start(retry: true)
-        _ = runs.start(retry: true)
-        XCTAssertEqual(runs.attempt, 2)
-        _ = runs.start()
-        XCTAssertEqual(runs.attempt, 0)
-    }
-
     func testANewRunSupersedesTheRunningOne() {
         var runs = TranslationRuns()
         let first = runs.start()

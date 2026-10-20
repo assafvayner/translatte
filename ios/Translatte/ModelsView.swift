@@ -1,12 +1,19 @@
 import SwiftUI
 
-/// First-run setup (`setup`: core models plus chosen packs, one Download button) and the
-/// Languages screen (per-pack download and delete).
+/// The ids among `ids` that aren't installed yet, each once.
+func missingModels(_ ids: [String], in models: [ModelInfo]) -> [String] {
+    var seen = Set<String>()
+    return ids.filter { id in seen.insert(id).inserted && models.first { $0.id == id }?.state != .installed }
+}
+
+/// First-run setup (`setup`: the core models plus chosen languages, one Download button) and the
+/// Languages screen (per-language download and delete). A language pack is its OCR script pack plus
+/// its translation model; languages that share a script pack download it once.
 struct ModelsView: View {
     let setup: Bool
     @EnvironmentObject private var model: TranslatorModel
     @EnvironmentObject private var downloads: Downloads
-    @State private var selected: Set<String> = ["rec-latin"]
+    @State private var selected: Set<String> = []
     @EnvironmentObject private var dialogs: DialogCenter
 
     var body: some View {
@@ -15,10 +22,10 @@ struct ModelsView: View {
             VStack(spacing: Metrics.spacing) {
                 if setup { hero }
                 Card(title: "Always included") {
-                    ForEach(model.models.filter(\.core), id: \.id) { row($0, free: free) }
+                    ForEach(model.models.filter(\.core), id: \.id) { coreRow($0) }
                 }
-                Card(title: "Scripts to read") {
-                    ForEach(model.models.filter { !$0.core }, id: \.id) { row($0, free: free) }
+                Card(title: "Languages to read") {
+                    ForEach(model.packs, id: \.code) { packRow($0, free: free) }
                 }
             }
             .padding(Metrics.gutter)
@@ -47,9 +54,12 @@ struct ModelsView: View {
         .padding(.top, 8)
     }
 
-    private var wanted: [ModelInfo] {
+    /// Models setup still has to fetch: the core ones plus the chosen languages' packs.
+    private var wanted: [String] {
         guard setup else { return [] }
-        return model.models.filter { $0.state != .installed && ($0.core || selected.contains($0.id)) }
+        let ids = model.models.filter(\.core).map(\.id)
+            + model.packs.filter { selected.contains($0.code) }.flatMap(\.modelIds)
+        return missingModels(ids, in: model.models)
     }
 
     private func startDownload(_ ids: [String]) {
@@ -72,8 +82,8 @@ struct ModelsView: View {
     @ViewBuilder
     private func bottomBar(free: UInt64) -> some View {
         let error = model.setupError ?? downloads.error
-        let needed = wanted.reduce(0) { $0 + $1.remainingBytes }
-        let hasPack = model.models.contains { !$0.core && ($0.state == .installed || selected.contains($0.id)) }
+        let needed = model.bytesToDownload(wanted)
+        let hasPack = model.packs.contains { $0.state == .installed || selected.contains($0.code) }
         let waiting = downloads.waitingForUnmetered
         let queued = downloads.queued && !downloads.running && downloads.error == nil
         if setup || waiting || queued || error != nil {
@@ -94,7 +104,7 @@ struct ModelsView: View {
                         Text("Needs \(formatSize(needed)), only \(formatSize(free)) free").foregroundStyle(Palette.error)
                     }
                     Button(needed > 0 ? "Download \(formatSize(needed))" : "Download") {
-                        startDownload(wanted.map(\.id))
+                        startDownload(wanted)
                     }
                     .buttonStyle(BigButtonStyle(kind: .primary))
                     .disabled(wanted.isEmpty || !hasPack || needed > free)
@@ -112,57 +122,85 @@ struct ModelsView: View {
         }
     }
 
-    private func row(_ m: ModelInfo, free: UInt64) -> some View {
-        let installed = m.state == .installed
-        let toggleable = setup && !m.core && !installed
-        let checked = m.core || installed || (setup && selected.contains(m.id))
-        let progress = downloads.running && !installed ? downloads.progress[m.id] : nil
-        return VStack(alignment: .leading, spacing: 4) {
+    /// Combined byte progress of the models among `ids` in a running download.
+    private func progress(_ ids: [String], installed: Bool) -> ByteProgress? {
+        guard downloads.running, !installed else { return nil }
+        let parts = ids.compactMap { downloads.progress[$0] }
+        guard !parts.isEmpty else { return nil }
+        return ByteProgress(done: parts.reduce(0) { $0 + $1.done }, total: parts.reduce(0) { $0 + $1.total })
+    }
+
+    private func coreRow(_ m: ModelInfo) -> some View {
+        row(
+            id: "model-\(m.id)", title: m.displayName, status: "Required · \(formatSize(m.sizeBytes))",
+            checked: true, toggle: nil, progress: progress([m.id], installed: m.state == .installed)
+        ) { EmptyView() }
+    }
+
+    private func packRow(_ p: LanguagePack, free: UInt64) -> some View {
+        let installed = p.state == .installed
+        let checked = installed || (setup && selected.contains(p.code))
+        let toggle: (() -> Void)? = setup && !installed
+            ? { if checked { selected.remove(p.code) } else { selected.insert(p.code) } }
+            : nil
+        return row(
+            id: "pack-\(p.code)", title: p.name, status: p.status, checked: checked, toggle: toggle,
+            progress: progress(p.modelIds, installed: installed)
+        ) {
+            if !setup {
+                VStack(alignment: .trailing, spacing: 6) {
+                    if downloads.busy {
+                        if !installed && !downloads.pendingIDs.isDisjoint(with: p.modelIds) {
+                            Button("Cancel", action: downloads.cancel)
+                                .buttonStyle(SmallButtonStyle(kind: .outlined))
+                                .accessibilityIdentifier("cancel-\(p.code)")
+                        }
+                    } else if !installed {
+                        Button(p.state == .incomplete ? "Resume" : "Download") {
+                            startDownload(missingModels(p.modelIds, in: model.models))
+                        }
+                        .buttonStyle(SmallButtonStyle(kind: .primary))
+                        .disabled(p.remainingBytes > free)
+                        .accessibilityIdentifier("download-\(p.code)")
+                    }
+                    if !downloads.busy && p.deletable {
+                        Button("Delete", role: .destructive) { model.deleteLanguage(p.code) }
+                            .buttonStyle(SmallButtonStyle(kind: .outlined))
+                            .accessibilityIdentifier("delete-\(p.code)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func row<Actions: View>(
+        id: String, title: String, status: String, checked: Bool, toggle: (() -> Void)?,
+        progress: ByteProgress?, @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 let label = HStack(spacing: 12) {
                     Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                         .iconFont(22)
                         .frame(width: 24, height: 24)
-                        .foregroundStyle(checked || toggleable ? Palette.primary : Palette.textMuted)
-                    ModelLabel(model: m)
+                        .foregroundStyle(checked || toggle != nil ? Palette.primary : Palette.textMuted)
+                    RowLabel(title: title, status: status)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if toggleable {
-                    Button {
-                        if checked { selected.remove(m.id) } else { selected.insert(m.id) }
-                    } label: {
+                if let toggle {
+                    Button(action: toggle) {
                         label.contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(checked ? .isSelected : [])
-                    .accessibilityIdentifier("model-\(m.id)")
+                    .accessibilityIdentifier(id)
                 } else {
                     label
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(checked ? .isSelected : [])
-                        .accessibilityIdentifier("model-\(m.id)")
+                        .accessibilityIdentifier(id)
                 }
-                if !setup && !m.core {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        if downloads.busy {
-                            if !installed && downloads.pendingIDs.contains(m.id) {
-                                Button("Cancel", action: downloads.cancel)
-                                    .buttonStyle(SmallButtonStyle(kind: .outlined))
-                                    .accessibilityIdentifier("cancel-\(m.id)")
-                            }
-                        } else if !installed {
-                            Button(m.state == .incomplete ? "Resume" : "Download") { startDownload([m.id]) }
-                                .buttonStyle(SmallButtonStyle(kind: .primary))
-                                .disabled(m.remainingBytes > free)
-                                .accessibilityIdentifier("download-\(m.id)")
-                        }
-                        if !downloads.busy && (m.state != .notInstalled || m.downloadedBytes > 0) {
-                            Button("Delete", role: .destructive) { model.deleteModel(m.id) }
-                                .buttonStyle(SmallButtonStyle(kind: .outlined))
-                                .accessibilityIdentifier("delete-\(m.id)")
-                        }
-                    }
-                }
+                actions()
             }
             if let progress {
                 ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
@@ -179,23 +217,17 @@ struct ModelsView: View {
     }
 }
 
-private struct ModelLabel: View {
-    let model: ModelInfo
+private struct RowLabel: View {
+    let title: String
+    let status: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(model.displayName)
+            Text(title)
                 .font(Typography.headline)
                 .lineSpacing(Typography.headlineLineSpacing)
                 .foregroundStyle(Palette.text)
-            if !model.languages.isEmpty {
-                Text(model.languages.joined(separator: ", "))
-                    .font(Typography.caption)
-                    .lineSpacing(Typography.captionLineSpacing)
-                    .foregroundStyle(Palette.textMuted)
-                    .lineLimit(2)
-            }
-            Text(model.status)
+            Text(status)
                 .font(Typography.caption)
                 .foregroundStyle(Palette.textMuted)
         }
@@ -204,10 +236,13 @@ private struct ModelLabel: View {
 
 extension ModelInfo {
     var remainingBytes: UInt64 { sizeBytes - min(downloadedBytes, sizeBytes) }
+}
+
+extension LanguagePack {
+    var remainingBytes: UInt64 { sizeBytes - min(downloadedBytes, sizeBytes) }
 
     var status: String {
         let size = formatSize(sizeBytes)
-        if core { return "Required · \(size)" }
         switch state {
         case .installed: return "Installed · \(size)"
         case .incomplete: return "Incomplete · \(size)"
