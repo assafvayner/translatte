@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.graphics.toArgb
 import co.huggingface.translatte.ui.settings.UiPrefs
+import co.huggingface.translatte.ui.setup.ModelsScreen
 import co.huggingface.translatte.ui.theme.TranslatteTheme
 import co.huggingface.translatte.ui.theme.windowBackground
 import androidx.compose.runtime.LaunchedEffect
