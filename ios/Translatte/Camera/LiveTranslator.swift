@@ -8,6 +8,8 @@ struct LiveFrame {
     let height: Int
     /// Clockwise degrees that turn the frame upright.
     let rotation: Int
+    /// A replayed video frame's position.
+    var ptsMs: Int64?
 
     init(rgba: Data, width: Int, height: Int, rotation: Int) {
         self.rgba = rgba
@@ -86,9 +88,15 @@ final class LiveTranslator: ObservableObject {
     private var lastDoneMs: Int64?
     private var generation = 0
     private var pruner: Task<Void, Never>?
+    private let events: LiveEventLog?
 
     init(translate: @escaping (LiveFrame) async throws -> TranslationResult) {
         self.translate = translate
+        #if DEBUG
+        events = LiveEventLog(emit: LiveEventSink.write)
+        #else
+        events = nil
+        #endif
     }
 
     var enabled: Bool {
@@ -102,6 +110,7 @@ final class LiveTranslator: ObservableObject {
         pruner?.cancel()
         pruner = nil
         gate.clearFailures()
+        events?.reset(nowMs: Self.nowMs(), prev: overlay)
         tracker.reset()
         overlay = []
         latest = nil
@@ -118,10 +127,20 @@ final class LiveTranslator: ObservableObject {
 
     /// Runs on the camera's frame queue for every frame; converts and translates only those `LiveRules` lets through.
     /// The UI is portrait-only, so back-camera buffers need a clockwise quarter turn.
-    nonisolated func offer(_ pixelBuffer: CVPixelBuffer) {
+    nonisolated func offer(_ pixelBuffer: CVPixelBuffer, rotation: Int = 90, ptsMs: Int64? = nil) {
         guard gate.tryTake(nowMs: Self.nowMs(), hot: ThermalMonitor.shared.hot) else { return }
-        guard let frame = LiveFrame(pixelBuffer: pixelBuffer, rotation: 90) else { return gate.finish(failed: true, nowMs: Self.nowMs()) }
+        guard var frame = LiveFrame(pixelBuffer: pixelBuffer, rotation: rotation) else { return gate.finish(failed: true, nowMs: Self.nowMs()) }
+        frame.ptsMs = ptsMs
         Task { @MainActor in await self.run(frame) }
+    }
+
+    /// Debug builds: plays `replay` in place of the camera, offering its frames, until cancelled.
+    /// Event times count from the start of the video.
+    func runReplay(_ replay: LiveReplay) async {
+        await replay.play(
+            started: { [weak self] positionMs in self?.events?.start(nowMs: Self.nowMs() - positionMs) },
+            frame: { [weak self] buffer, rotation, ptsMs in self?.offer(buffer, rotation: rotation, ptsMs: ptsMs) }
+        )
     }
 
     /// The simulator has no camera: feeds the mock still as frames until cancelled.
@@ -148,6 +167,7 @@ final class LiveTranslator: ObservableObject {
 
     private func publish(_ frame: LiveFrame, _ result: TranslationResult) {
         let now = Self.nowMs()
+        let prev = overlay
         overlay = tracker.update(result.regions, nowMs: now)
         if !overlay.isEmpty, pruner == nil { pruner = Task { await self.prune() } }
         imageSize = CGSize(width: Int(result.imageWidth), height: Int(result.imageHeight))
@@ -156,6 +176,7 @@ final class LiveTranslator: ObservableObject {
         let line = LiveRules.readout(intervalMs: lastDoneMs.map { now - $0 }, timings: result.timings)
         readout = line
         NSLog("translatte: live %@ regions %d", line, result.regions.count)
+        events?.update(nowMs: now, prev: prev, next: overlay, result: result, intervalMs: lastDoneMs.map { now - $0 }, ptsMs: frame.ptsMs)
         #endif
         lastDoneMs = now
     }
@@ -164,8 +185,12 @@ final class LiveTranslator: ObservableObject {
         while !Task.isCancelled, !overlay.isEmpty {
             try? await Task.sleep(nanoseconds: UInt64(LiveRules.pruneIntervalMs) * 1_000_000)
             guard !Task.isCancelled else { return }
-            let kept = tracker.prune(nowMs: Self.nowMs())
-            if kept.count != overlay.count { overlay = kept }
+            let now = Self.nowMs()
+            let kept = tracker.prune(nowMs: now)
+            if kept.count != overlay.count {
+                events?.prune(nowMs: now, prev: overlay, next: kept)
+                overlay = kept
+            }
         }
         pruner = nil
     }

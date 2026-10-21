@@ -2,7 +2,7 @@ import AVFoundation
 import UIKit
 
 /// The in-app camera's capture session, plus live frames while live translation is on. `-mock-camera <path>` swaps in a still image so the simulator,
-/// which has no camera, can run the camera screen and its UI tests.
+/// which has no camera, can run the camera screen and its UI tests; in debug builds, `-mock-video <path>` swaps in a video (see `LiveReplay`).
 final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
     /// Captures are capped near 12 MP: OCR downsamples to 2048px anyway, and 48 MP stills cost
     /// hundreds of MB to hold and decode.
@@ -13,7 +13,8 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
     let session = AVCaptureSession()
     let mockImage: UIImage?
     private let mockData: Data?
-    var isMock: Bool { mockImage != nil }
+    let replay: LiveReplay?
+    var isMock: Bool { mockImage != nil || replay != nil }
 
     /// Owns `session`, `output`, `device`, `rotation` and `captures`.
     private let queue = DispatchQueue(label: "translatte.camera")
@@ -31,9 +32,10 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
     private let handlerLock = NSLock()
     private var frameHandler: (@Sendable (CVPixelBuffer) -> Void)?
 
-    init(mockImagePath: String?) {
+    @MainActor init(mockImagePath: String?, mockVideoPath: String? = nil, loopVideo: Bool = false) {
         mockData = mockImagePath.flatMap { FileManager.default.contents(atPath: $0) }
         mockImage = mockData.flatMap(UIImage.init(data:))
+        replay = mockVideoPath.map { LiveReplay(path: $0, loop: loopVideo) }
         super.init()
     }
 
