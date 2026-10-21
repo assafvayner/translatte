@@ -6,6 +6,11 @@ func missingModels(_ ids: [String], in models: [ModelInfo]) -> [String] {
     return ids.filter { id in seen.insert(id).inserted && models.first { $0.id == id }?.state != .installed }
 }
 
+/// A row owns the running download only when every model it still needs is part of it.
+func ownsDownload(missing: [String], inFlight: Set<String>) -> Bool {
+    !missing.isEmpty && inFlight.isSuperset(of: missing)
+}
+
 /// First-run setup (`setup`: the core models plus chosen languages, one Download button) and the
 /// Languages screen (per-language download and delete). A language pack is its OCR script pack plus
 /// its translation model; languages that share a script pack download it once.
@@ -130,6 +135,10 @@ struct ModelsView: View {
         return ByteProgress(done: parts.reduce(0) { $0 + $1.done }, total: parts.reduce(0) { $0 + $1.total })
     }
 
+    private func owns(_ p: LanguagePack, inFlight: Set<String>) -> Bool {
+        p.state != .installed && ownsDownload(missing: missingModels(p.modelIds, in: model.models), inFlight: inFlight)
+    }
+
     private func coreRow(_ m: ModelInfo) -> some View {
         row(
             id: "model-\(m.id)", title: m.displayName, status: "Required · \(formatSize(m.sizeBytes))",
@@ -145,12 +154,13 @@ struct ModelsView: View {
             : nil
         return row(
             id: "pack-\(p.code)", title: p.name, status: p.status, checked: checked, toggle: toggle,
-            progress: progress(p.modelIds, installed: installed)
+            progress: owns(p, inFlight: Set(downloads.progress.keys))
+                ? progress(p.modelIds, installed: installed) : nil
         ) {
             if !setup {
                 VStack(alignment: .trailing, spacing: 6) {
                     if downloads.busy {
-                        if !installed && !downloads.pendingIDs.isDisjoint(with: p.modelIds) {
+                        if owns(p, inFlight: downloads.pendingIDs) {
                             Button("Cancel", action: downloads.cancel)
                                 .buttonStyle(SmallButtonStyle(kind: .outlined))
                                 .accessibilityIdentifier("cancel-\(p.code)")
@@ -242,11 +252,10 @@ extension LanguagePack {
     var remainingBytes: UInt64 { sizeBytes - min(downloadedBytes, sizeBytes) }
 
     var status: String {
-        let size = formatSize(sizeBytes)
         switch state {
-        case .installed: return "Installed · \(size)"
-        case .incomplete: return "Incomplete · \(size)"
-        case .notInstalled: return size
+        case .installed: return "Installed · \(formatSize(sizeBytes))"
+        case .incomplete: return "Incomplete · \(formatSize(remainingBytes))"
+        case .notInstalled: return formatSize(remainingBytes)
         }
     }
 }

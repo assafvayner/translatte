@@ -74,6 +74,17 @@ internal fun packProgress(progress: Map<String, Pair<Long, Long>>, ids: List<Str
     return if (parts.isEmpty()) null else parts.sumOf { it.first } to parts.sumOf { it.second }
 }
 
+/** A row owns the running download only when every model it still needs is part of it. */
+internal fun ownsDownload(missing: List<String>, inFlight: Set<String>): Boolean =
+    missing.isNotEmpty() && inFlight.containsAll(missing)
+
+/** Installed packs show their size; the rest show what is left to download. */
+internal fun packStatus(pack: LanguagePack): String = when (pack.state) {
+    ModelState.INSTALLED -> "Installed · ${formatSize(pack.sizeBytes.toLong())}"
+    ModelState.INCOMPLETE -> "Incomplete · ${formatSize(pack.remainingBytes())}"
+    ModelState.NOT_INSTALLED -> formatSize(pack.remainingBytes())
+}
+
 /**
  * First-run setup ([setup] = true: the core models plus chosen languages, one Download button) and
  * the Languages screen (per-language download and delete). A language pack is its OCR script pack
@@ -108,18 +119,16 @@ fun ModelsScreen(
     val progressOf = { ids: List<String>, installed: Boolean ->
         if (downloads.running && !installed) packProgress(downloads.progress, ids) else null
     }
+    val owns = { p: LanguagePack ->
+        p.state != ModelState.INSTALLED && ownsDownload(missingModels(models, p.modelIds), downloads.progress.keys)
+    }
 
     val packRow: @Composable (LanguagePack) -> Unit = { p ->
         val installed = p.state == ModelState.INSTALLED
-        val size = formatSize(p.sizeBytes.toLong())
         PackRow(
             title = p.name,
-            status = when (p.state) {
-                ModelState.INSTALLED -> "Installed · $size"
-                ModelState.INCOMPLETE -> "Incomplete · $size"
-                ModelState.NOT_INSTALLED -> size
-            },
-            progress = progressOf(p.modelIds, installed),
+            status = packStatus(p),
+            progress = if (owns(p)) progressOf(p.modelIds, installed) else null,
             onCheck = if (setup && !installed) {
                 { checked: Boolean -> selected = if (checked) selected + p.code else selected - p.code }
             } else {
@@ -128,7 +137,7 @@ fun ModelsScreen(
             checked = packChecked(false, installed, setup, p.code in selected),
             actions = when {
                 setup -> null
-                downloads.busy -> if (!installed && p.modelIds.any { it in downloads.progress }) {
+                downloads.busy -> if (owns(p)) {
                     { SmallOutlinedButton("Cancel", onClick = onCancel) }
                 } else {
                     null
