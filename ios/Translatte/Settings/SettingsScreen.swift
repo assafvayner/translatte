@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsScreen: View {
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
+    @AppStorage(LiveRules.storageKey) private var live = true
     @EnvironmentObject private var dialogs: DialogCenter
     @Environment(\.openURL) private var openURL
 
@@ -14,6 +15,17 @@ struct SettingsScreen: View {
                             theme = option
                         }
                         .accessibilityIdentifier("theme-\(option.rawValue)")
+                    }
+                }
+                Card(title: "Camera") {
+                    ListRow(
+                        title: "Live translation (experimental)",
+                        subtitle: "Translates what the camera sees as you point it. Off: translate when you take a photo."
+                    ) {
+                        Toggle("Live translation (experimental)", isOn: $live)
+                            .labelsHidden()
+                            .tint(Palette.primary)
+                            .accessibilityIdentifier("live-translation")
                     }
                 }
                 Card(title: "About") {

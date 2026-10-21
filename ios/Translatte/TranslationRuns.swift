@@ -32,6 +32,13 @@ struct TranslationRuns {
         return phase
     }
 
+    /// Supersedes any running translation with an already translated image (a live camera frame),
+    /// which becomes the last success.
+    mutating func show(image: UIImage, output: TranslationResult) {
+        current += 1
+        lastSuccess = LastResult(image: image, result: output)
+    }
+
     static func phase(for output: TranslationResult) -> TranslatorModel.Phase {
         if let error = output.translationError {
             return .failed("Translation failed: \(error)")
