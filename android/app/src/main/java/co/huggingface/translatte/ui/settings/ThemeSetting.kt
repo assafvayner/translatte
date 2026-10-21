@@ -46,9 +46,15 @@ class UiPrefs(context: Context) {
         get() = prefs.getBoolean(CAMERA_ASKED, false)
         set(value) = prefs.edit().putBoolean(CAMERA_ASKED, value).apply()
 
+    /** Live camera translation (experimental); on by default in this build. */
+    var liveTranslation: Boolean
+        get() = prefs.getBoolean(LIVE_TRANSLATION, true)
+        set(value) = prefs.edit().putBoolean(LIVE_TRANSLATION, value).apply()
+
     private companion object {
         const val THEME = "theme"
         const val RESULT_HINT_SEEN = "result_hint_seen"
         const val CAMERA_ASKED = "camera_asked"
+        const val LIVE_TRANSLATION = "live_translation"
     }
 }

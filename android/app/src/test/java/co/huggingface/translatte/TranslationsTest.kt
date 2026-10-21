@@ -14,6 +14,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 import org.junit.runner.RunWith
+import uniffi.translatte_ffi.StageTimings
 import uniffi.translatte_ffi.TranslationResult
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -26,6 +27,7 @@ class TranslationsTest {
         4u,
         listOf(testRegion(text, text, 0f, 0f)),
         null,
+        StageTimings(0u, 0u, 0u),
     )
 
     /** Each call to the fake engine waits for the test to hand it a result, ignoring cancellation like the native call. */
@@ -131,7 +133,7 @@ class TranslationsTest {
         val t = translations(engine)
         val job = t.start { bitmap() }
         yield()
-        engine.calls[0].complete(Result.success(TranslationResult(4u, 4u, emptyList(), null)))
+        engine.calls[0].complete(Result.success(TranslationResult(4u, 4u, emptyList(), null, StageTimings(0u, 0u, 0u))))
         job.join()
         assertEquals(Phase.Failed("No text found. Try moving closer or reducing glare."), t.phase)
         assertNull(t.lastSuccess)

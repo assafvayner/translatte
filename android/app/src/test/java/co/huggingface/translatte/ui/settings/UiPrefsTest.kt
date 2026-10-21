@@ -19,6 +19,7 @@ class UiPrefsTest {
         assertEquals(ThemeSetting.SYSTEM, prefs.theme)
         assertFalse(prefs.resultHintSeen)
         assertFalse(prefs.cameraAsked)
+        assertTrue(prefs.liveTranslation)
     }
 
     @Test
@@ -27,10 +28,12 @@ class UiPrefsTest {
             theme = ThemeSetting.AMERICANO
             resultHintSeen = true
             cameraAsked = true
+            liveTranslation = false
         }
         val reread = UiPrefs(context)
         assertEquals(ThemeSetting.AMERICANO, reread.theme)
         assertTrue(reread.resultHintSeen)
         assertTrue(reread.cameraAsked)
+        assertFalse(reread.liveTranslation)
     }
 }
