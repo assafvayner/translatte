@@ -23,6 +23,7 @@ pub struct Detector {
 
 impl Detector {
     pub fn load(path: &Path) -> Result<Self> {
+        let _pin = super::affinity::pin();
         let session = super::session_builder(false)?.commit_from_file(path)?;
         Ok(Self {
             session,
@@ -41,6 +42,7 @@ impl TextDetector for Detector {
             return Ok(Vec::new());
         }
         let input = det_preprocess(img, long_side.min(RESIZE_LONG));
+        let _pin = super::affinity::pin();
         let outputs = self
             .session
             .run(ort::inputs![Tensor::from_array(input.tensor)?])?;

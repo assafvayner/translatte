@@ -26,6 +26,7 @@ pub struct Recognizer {
 
 impl Recognizer {
     pub fn load(onnx: &Path, dict: &Path) -> Result<Self> {
+        let _pin = super::affinity::pin();
         let session = super::session_builder(true)?.commit_from_file(onnx)?;
         let charset = Charset::from_dict_str(&std::fs::read_to_string(dict)?);
         Ok(Self { session, charset })
@@ -33,6 +34,7 @@ impl Recognizer {
 
     fn run_batch(&mut self, crops: &[&RgbImage]) -> Result<Vec<(String, f32)>> {
         let tensor = rec_preprocess_batch(crops);
+        let _pin = super::affinity::pin();
         let outputs = self
             .session
             .run(ort::inputs![Tensor::from_array(tensor)?])?;

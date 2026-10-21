@@ -59,6 +59,6 @@ for json in "$FIXTURES"/*.json; do
   push "$FIXTURES/$image" "$DEV/bench/$image"
 done
 
-ENVS="$(env | grep '^TRANSLATTE_OCR_' | tr '\n' ' ' || true)"
+ENVS="$(env | grep '^TRANSLATTE_OCR_' | sed "s/=\(.*\)/='\1'/" | tr '\n' ' ' || true)"
 adb shell "cd $DEV && chmod 755 translatte && LD_LIBRARY_PATH=$DEV $ENVS \
   ${BENCH_TASKSET:+taskset $BENCH_TASKSET} ./translatte bench bench --only '$LANGS' --models models --manifest manifest.json $*"

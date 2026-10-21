@@ -4145,6 +4145,7 @@ dependencies = [
  "hf-hub",
  "image",
  "imageproc",
+ "libc",
  "ndarray",
  "openssl",
  "ort",

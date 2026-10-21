@@ -1,3 +1,4 @@
+pub mod affinity;
 pub mod charset;
 pub mod ctc;
 pub mod det_post;
@@ -60,12 +61,14 @@ pub(crate) fn env_or(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-/// ONNX Runtime session settings shared by the OCR models. The detector's activations (for a
+/// ONNX Runtime session settings shared by the OCR models: one thread per big core (see
+/// [`affinity`]), else 4. The detector's activations (for a
 /// 960px image) are large, and ORT's arena would keep them allocated while the translator runs,
 /// so it gets plain allocations instead; the recognizer's small arena is kept.
 fn session_builder(arena: bool) -> ort::Result<ort::session::builder::SessionBuilder> {
+    let threads = affinity::big_core_count().unwrap_or(4);
     let builder = ort::session::Session::builder()?
-        .with_intra_threads(env_or("TRANSLATTE_OCR_THREADS", 4))?;
+        .with_intra_threads(env_or("TRANSLATTE_OCR_THREADS", threads))?;
     if arena {
         return Ok(builder);
     }
