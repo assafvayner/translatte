@@ -2,11 +2,11 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""Stage Mozilla's translations xx->en models for the assafvayner/translatte-pair-models mirror.
+"""Stage Mozilla's translations xx->en and en->xx models for the assafvayner/translatte-pair-models mirror.
 
-Downloads every file in scripts/pair_models_upstream.json (the latest release of each xx->en pair, as
-picked by the pair-models spike from Remote Settings), checks its size and sha256, and writes
-<staging>/<src>-en/<file> plus the model card (README.md) and the MPL-2.0 text (LICENSE). Files are
+Downloads every file in scripts/pair_models_upstream.json (the latest release of each pair, as picked by
+scripts/build_pair_models_upstream.py from Remote Settings), checks its size and sha256, and writes
+<staging>/<src>-<tgt>/<file> plus the model card (README.md) and the MPL-2.0 text (LICENSE). Files are
 copied byte for byte. Upload the result with `hf upload`.
 """
 
@@ -32,11 +32,14 @@ def sha256(path: Path) -> str:
 
 
 def model_card(upstream: dict) -> str:
-    langs = sorted({src.split("-")[0] for src in upstream} | {"en"})
+    codes = {lang for p in upstream.values() for lang in (p["remote_settings_from"], p["remote_settings_to"])}
+    langs = sorted({lang.split("-")[0] for lang in codes})
     rows = "\n".join(
-        f"| `{src}` | `{src}-en/` | {pair['version']} | {pair['total_size'] / 1e6:.1f} MB |"
-        for src, pair in upstream.items()
+        f"| `{p['remote_settings_from']}` | `{p['remote_settings_to']}` | `{key}/` | {p['version']} "
+        f"| {p['total_size'] / 1e6:.1f} MB |"
+        for key, p in upstream.items()
     )
+    to_en = sum(key.endswith("-en") for key in upstream)
     return f"""---
 license: mpl-2.0
 language: [{", ".join(langs)}]
@@ -46,25 +49,28 @@ tags: [translation, marian, bergamot, on-device]
 
 # translatte pair models
 
-Small int8 translation models, one per source language into English, mirrored unmodified for on-device
-downloads by the translatte app.
+Small int8 translation models, one per language pair to and from English ({to_en} `xx → en` and
+{len(upstream) - to_en} `en → xx`), mirrored unmodified for on-device downloads by the translatte app.
 
 All models were trained and released by Mozilla's [translations]({PROJECT}) project, the engine behind
 Firefox's on-device translations, under the [Mozilla Public License 2.0](LICENSE). Each directory holds the
-latest release of that `xx → en` pair listed in the project's [model registry]({REGISTRY}), byte for byte
+latest release of that pair listed in the project's [model registry]({REGISTRY}), byte for byte
 (sizes and sha256 checked against the release records). Thanks to the Mozilla translations team.
 
-Each `<src>-en/` directory contains:
+Each `<src>-<tgt>/` directory contains:
 
 - `model.<pair>.intgemm.alphas.bin`: the Marian student model (int8)
-- `vocab.<pair>.spm`: the SentencePiece vocabulary (`zh-Hant` has separate `srcvocab`/`trgvocab` files)
+- `vocab.<pair>.spm`: the SentencePiece vocabulary (some CJK pairs have separate `srcvocab`/`trgvocab` files)
 - `lex.50.50.<pair>.s2t.bin`: the lexical shortlist
 
 Run them with [bergamot-translator]({PROJECT}/tree/main/inference) (MPL-2.0) using
 `gemm-precision: int8shiftAlphaAll` and the shortlist.
 
-| Source | Directory | Release | Size |
-| --- | --- | --- | --- |
+Directories use the release records' language codes except `zh` for Simplified Chinese (`zh-Hans`).
+Pairs without a general release (currently `mt-en` and `nn-en`) carry the latest alpha.
+
+| From | To | Directory | Release | Size |
+| --- | --- | --- | --- | --- |
 {rows}
 """
 
@@ -75,19 +81,19 @@ def main() -> None:
     ap.add_argument("--staging", type=Path, default=Path("out/pair-models-mirror"))
     args = ap.parse_args()
     upstream = json.loads(args.upstream.read_text())
-    for src, pair in upstream.items():
-        d = args.staging / f"{src}-en"
+    for key, pair in upstream.items():
+        d = args.staging / key
         d.mkdir(parents=True, exist_ok=True)
         for kind, f in sorted(pair["files"].items()):
             dest = d / f["name"]
             if dest.exists() and dest.stat().st_size == f["size"] and sha256(dest) == f["sha256"]:
                 continue
             data = fetch(f["url"])
-            assert len(data) == f["size"], (src, kind, len(data))
-            assert hashlib.sha256(data).hexdigest() == f["sha256"], (src, kind)
-            assert data[:2] != b"\x1f\x8b", f"{src} {kind} is gzipped; the engine reads plain files"
+            assert len(data) == f["size"], (key, kind, len(data))
+            assert hashlib.sha256(data).hexdigest() == f["sha256"], (key, kind)
+            assert data[:2] != b"\x1f\x8b", f"{key} {kind} is gzipped; the engine reads plain files"
             dest.write_bytes(data)
-            print(f"{src}-en/{f['name']} {len(data)}")
+            print(f"{key}/{f['name']} {len(data)}")
     license_text = fetch(MPL_URL).decode()
     assert license_text.startswith("Mozilla Public License Version 2.0")
     (args.staging / "LICENSE").write_text(license_text)
