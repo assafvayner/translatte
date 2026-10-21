@@ -22,7 +22,7 @@ class LiveEventLog(private val emit: (String) -> Unit) {
 
     fun update(nowMs: Long, prev: List<TrackedRegion>, next: List<TrackedRegion>, result: TranslationResult, intervalMs: Long?, ptsMs: Long?) {
         val t = elapsed(nowMs)
-        emit(updateJson(t, result, next.filter { it.lastSeenMs == nowMs }.map { it.id }, next.size, intervalMs, ptsMs))
+        emit(updateJson(t, result, next.filter { it.missedSinceMs == null }.map { it.id }, next.size, intervalMs, ptsMs))
         diff(prev, next, result.regions).forEach { emit(json(t, it)) }
     }
 

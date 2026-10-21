@@ -19,7 +19,7 @@ class LiveEventsTest {
         angle = 0f,
     )
 
-    private fun tracked(id: Long, r: Region) = TrackedRegion(id, r, r.corners, 0)
+    private fun tracked(id: Long, r: Region) = TrackedRegion(id, r, r.corners, null)
 
     private fun result(regions: List<Region>) = TranslationResult(
         imageWidth = 720u,
@@ -65,9 +65,9 @@ class LiveEventsTest {
         log.reset(1600, first)
         assertEquals(
             listOf(
-                """{"t_ms":250,"ev":"update","regions":1,"shown":1,"seen":[],"det_ms":120,"rec_ms":85,"tr_ms":40,"w":720,"h":1280,"pts_ms":3000}""",
+                """{"t_ms":250,"ev":"update","regions":1,"shown":1,"seen":[4],"det_ms":120,"rec_ms":85,"tr_ms":40,"w":720,"h":1280,"pts_ms":3000}""",
                 """{"t_ms":250,"ev":"add","id":4,"src":"say \"hi\"\n","tr":null,"box":[0,0,40,20]}""",
-                """{"t_ms":500,"ev":"update","regions":1,"shown":1,"seen":[],"det_ms":120,"rec_ms":85,"tr_ms":40,"w":720,"h":1280,"interval_ms":250}""",
+                """{"t_ms":500,"ev":"update","regions":1,"shown":1,"seen":[4],"det_ms":120,"rec_ms":85,"tr_ms":40,"w":720,"h":1280,"interval_ms":250}""",
                 """{"t_ms":600,"ev":"remove","id":4,"src":"say \"hi\"\n","tr":null,"box":[0,0,40,20],"reason":"reset"}""",
             ),
             lines,

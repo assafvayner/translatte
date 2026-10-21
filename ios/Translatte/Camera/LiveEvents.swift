@@ -24,7 +24,7 @@ final class LiveEventLog {
 
     func update(nowMs: Int64, prev: [TrackedRegion], next: [TrackedRegion], result: TranslationResult, intervalMs: Int64?, ptsMs: Int64?) {
         let t = elapsed(nowMs)
-        let seen = next.filter { $0.lastSeenMs == nowMs }.map(\.id)
+        let seen = next.filter { $0.missedSinceMs == nil }.map(\.id)
         emit(Self.updateJson(tMs: t, result: result, seen: seen, shown: next.count, intervalMs: intervalMs, ptsMs: ptsMs))
         Self.diff(prev: prev, next: next, incoming: result.regions).forEach { emit(Self.json(tMs: t, $0)) }
     }
