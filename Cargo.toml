@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["bergamot", "core", "cli", "ffi"]
+members = ["bergamot", "ncnn", "core", "cli", "ffi"]
 
 [workspace.dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
