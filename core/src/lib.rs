@@ -1,6 +1,7 @@
 #[cfg(feature = "download")]
 pub mod download;
 pub mod error;
+pub mod frame;
 pub mod geometry;
 pub mod layout;
 #[cfg(feature = "pair")]
