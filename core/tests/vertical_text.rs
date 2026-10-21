@@ -83,6 +83,20 @@ fn reads_japanese_columns_top_to_bottom() {
     );
 }
 
+#[test]
+fn lone_tall_glyph_stays_horizontal() {
+    let Some(lines) = read("lone_glyph.png", "rec-latin") else {
+        eprintln!("TRANSLATTE_MODELS not set; skipping");
+        return;
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let l = &lines[0];
+    assert!(l.quad.is_tall(), "{l:?}");
+    assert_eq!(l.text, "1", "{l:?}");
+    assert_eq!(l.direction, Direction::Horizontal, "{l:?}");
+    assert!(l.quad.angle().abs() < 0.2, "{l:?}");
+}
+
 struct NoTranslator;
 
 impl Translator for NoTranslator {

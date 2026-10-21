@@ -36,8 +36,8 @@ def horizontal(text, size):
     return img
 
 
-def on_canvas(img, size=(400, 640)):
-    canvas = Image.new("RGB", size, (235, 235, 230))
+def on_canvas(img, size=(400, 640), bg=(235, 235, 230)):
+    canvas = Image.new("RGB", size, bg)
     canvas.paste(img, ((size[0] - img.width) // 2, (size[1] - img.height) // 2))
     return canvas
 
@@ -66,4 +66,5 @@ OUT.mkdir(parents=True, exist_ok=True)
 line = horizontal("PAIN FRAIS DU JOUR", 44)
 on_canvas(line.rotate(-90, expand=True)).save(OUT / "vertical_en_down.png")
 on_canvas(line.rotate(90, expand=True)).save(OUT / "vertical_en_up.png")
+on_canvas(horizontal("1", 120), bg="white").save(OUT / "lone_glyph.png")
 columns(["本日のおすすめ", "醤油ラーメン", "味噌ラーメン"], 44).save(OUT / "vertical_ja.png")

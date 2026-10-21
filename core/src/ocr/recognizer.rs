@@ -29,11 +29,19 @@ impl Recognizer {
 /// PaddleOCR's default for tall crops.
 const DIRECTION_MARGIN: f32 = 0.05;
 
-fn pick_direction(down: f32, up: f32) -> Direction {
-    if up > down + DIRECTION_MARGIN {
-        Direction::BottomToTop
+/// Picks a tall crop's direction from its downward and upward readings. A lone glyph ("1", "l",
+/// one CJK character) is tall without being a vertical line, so a reading of at most one glyph
+/// falls back to horizontal.
+fn pick_direction(down: &(String, f32), up: &(String, f32)) -> Direction {
+    let (direction, (text, _)) = if up.1 > down.1 + DIRECTION_MARGIN {
+        (Direction::BottomToTop, up)
     } else {
-        Direction::TopToBottom
+        (Direction::TopToBottom, down)
+    };
+    if text.chars().filter(|c| !c.is_whitespace()).count() <= 1 {
+        Direction::Horizontal
+    } else {
+        direction
     }
 }
 
@@ -63,26 +71,19 @@ impl Recognizer {
 
 impl TextRecognizer for Recognizer {
     fn recognize(&mut self, img: &RgbImage, quad: &Quad) -> Result<Line> {
-        if !quad.is_tall() {
-            let (text, confidence) = self.read(img, quad)?;
-            return Ok(Line {
-                quad: *quad,
-                text,
-                confidence,
-                direction: Direction::Horizontal,
-            });
-        }
-        let down_quad = quad.turned(Direction::TopToBottom);
-        let up_quad = quad.turned(Direction::BottomToTop);
-        let down = self.read(img, &down_quad)?;
-        let up = self.read(img, &up_quad)?;
-        let direction = pick_direction(down.1, up.1);
-        let ((text, confidence), quad) = match direction {
-            Direction::BottomToTop => (up, up_quad),
-            _ => (down, down_quad),
+        let (direction, (text, confidence)) = if quad.is_tall() {
+            let down = self.read(img, &quad.turned(Direction::TopToBottom))?;
+            let up = self.read(img, &quad.turned(Direction::BottomToTop))?;
+            match pick_direction(&down, &up) {
+                Direction::Horizontal => (Direction::Horizontal, self.read(img, quad)?),
+                Direction::TopToBottom => (Direction::TopToBottom, down),
+                Direction::BottomToTop => (Direction::BottomToTop, up),
+            }
+        } else {
+            (Direction::Horizontal, self.read(img, quad)?)
         };
         Ok(Line {
-            quad,
+            quad: quad.turned(direction),
             text,
             confidence,
             direction,
@@ -94,17 +95,58 @@ impl TextRecognizer for Recognizer {
 mod tests {
     use super::*;
 
+    fn r(text: &str, confidence: f32) -> (String, f32) {
+        (text.into(), confidence)
+    }
+
     #[test]
     fn top_to_bottom_wins_ties_and_small_margins() {
-        assert_eq!(pick_direction(0.80, 0.80), Direction::TopToBottom);
+        let pick = |down, up| pick_direction(&r("本日", down), &r("PAIN", up));
+        assert_eq!(pick(0.80, 0.80), Direction::TopToBottom);
         assert_eq!(
-            pick_direction(0.80, 0.80 + DIRECTION_MARGIN / 2.0),
+            pick(0.80, 0.80 + DIRECTION_MARGIN / 2.0),
             Direction::TopToBottom
         );
         assert_eq!(
-            pick_direction(0.60, 0.60 + DIRECTION_MARGIN * 2.0),
+            pick(0.60, 0.60 + DIRECTION_MARGIN * 2.0),
             Direction::BottomToTop
         );
-        assert_eq!(pick_direction(0.90, 0.40), Direction::TopToBottom);
+        assert_eq!(pick(0.90, 0.40), Direction::TopToBottom);
+    }
+
+    #[test]
+    fn single_glyph_readings_are_horizontal() {
+        assert_eq!(
+            pick_direction(&r("1", 0.99), &r("-", 0.5)),
+            Direction::Horizontal
+        );
+        assert_eq!(
+            pick_direction(&r("<", 0.54), &r(" X ", 0.61)),
+            Direction::Horizontal
+        );
+        assert_eq!(
+            pick_direction(&r("", 0.0), &r("", 0.0)),
+            Direction::Horizontal
+        );
+        assert_eq!(
+            pick_direction(&r("동", 0.98), &r("울", 0.49)),
+            Direction::Horizontal
+        );
+    }
+
+    #[test]
+    fn the_winning_reading_decides_not_the_loser() {
+        assert_eq!(
+            pick_direction(&r("H", 0.26), &r("오늘", 0.9)),
+            Direction::BottomToTop
+        );
+        assert_eq!(
+            pick_direction(&r("お願い", 0.99), &r("x", 0.3)),
+            Direction::TopToBottom
+        );
+        assert_eq!(
+            pick_direction(&r("o", 0.9), &r("TE", 0.3)),
+            Direction::Horizontal
+        );
     }
 }
