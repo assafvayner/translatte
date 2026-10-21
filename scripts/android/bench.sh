@@ -40,7 +40,7 @@ push() {
 # Pushes $1 to $2 unless a file of the same size is already there.
 push_if_changed() {
   local want have
-  want="$(stat -c %s "$1" 2>/dev/null || stat -f %z "$1")"
+  want="$(stat -L -c %s "$1" 2>/dev/null || stat -L -f %z "$1")"
   have="$(adb shell "stat -c %s '$2' 2>/dev/null" | tr -d '\r' || true)"
   [[ "$want" == "$have" ]] || push "$1" "$2"
 }
