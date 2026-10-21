@@ -88,7 +88,7 @@ fun OverlayImage(
             )
             if (!showOriginal) {
                 drawIntoCanvas { c ->
-                    boxes.forEachIndexed { i, box -> if (i !in flipped) box.draw(c.nativeCanvas, fit) }
+                    boxes.forEachIndexed { i, box -> if (i !in flipped) box.draw(c.nativeCanvas, fit.scale, fit.left, fit.top) }
                 }
             }
         }
@@ -133,8 +133,8 @@ private class Fit(bitmap: Bitmap, container: Size) {
     val top = rect.top
 }
 
-/** A region as a rotated rectangle in image pixels. */
-private class RegionBox(val region: Region) {
+/** A region as a rotated rectangle in image pixels; drawn by the result viewer and the live camera overlay. */
+internal class RegionBox(val region: Region, previous: RegionBox? = null) {
     private val c = region.corners
     val width = max(dist(0, 1), dist(3, 2))
     val height = max(dist(0, 3), dist(1, 2))
@@ -143,8 +143,15 @@ private class RegionBox(val region: Region) {
 
     private val background = Paint().apply { color = region.background.argb() }
 
-    /** The fitted text for the last on-screen box size; refitting only happens on resize. */
+    /** The fitted text for the last on-screen box size; refitting only happens on a resize of [LAYOUT_TOLERANCE] or more. */
     private var layout: Pair<Pair<Float, Float>, StaticLayout>? = null
+
+    init {
+        val old = previous?.region
+        if (old != null && old.translatedText == region.translatedText && old.foreground == region.foreground) {
+            layout = previous.layout
+        }
+    }
 
     private fun dist(a: Int, b: Int) = hypot(c[a].x - c[b].x, c[a].y - c[b].y)
 
@@ -158,16 +165,17 @@ private class RegionBox(val region: Region) {
     }
 
     private fun layoutFor(w: Float, h: Float): StaticLayout {
-        layout?.let { (size, l) -> if (size == (w to h)) return l }
+        layout?.let { (size, l) -> if (abs(size.first - w) < LAYOUT_TOLERANCE && abs(size.second - h) < LAYOUT_TOLERANCE) return l }
         return fitText(region.translatedText.orEmpty(), region.foreground.argb(), w, h).also { layout = (w to h) to it }
     }
 
-    fun draw(canvas: Canvas, fit: Fit) {
-        val w = width * fit.scale
-        val h = height * fit.scale
+    /** Draws at image-to-view [scale] and offset ([left], [top]), shifted by ([dx], [dy]) image pixels. */
+    fun draw(canvas: Canvas, scale: Float, left: Float, top: Float, dx: Float = 0f, dy: Float = 0f) {
+        val w = width * scale
+        val h = height * scale
         val pad = max(1f, h * 0.05f)
         canvas.save()
-        canvas.translate(fit.left + cx * fit.scale, fit.top + cy * fit.scale)
+        canvas.translate(left + (cx + dx) * scale, top + (cy + dy) * scale)
         canvas.rotate(Math.toDegrees(region.angle.toDouble()).toFloat())
         canvas.drawRect(-w / 2, -h / 2, w / 2, h / 2, background)
         val layout = layoutFor(w - 2 * pad, h - 2 * pad)
@@ -176,6 +184,8 @@ private class RegionBox(val region: Region) {
         canvas.restore()
     }
 }
+
+private const val LAYOUT_TOLERANCE = 4f
 
 private fun Rgb.argb() =
     android.graphics.Color.rgb(r.toInt(), g.toInt(), b.toInt())

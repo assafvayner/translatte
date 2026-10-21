@@ -1,7 +1,7 @@
 import AVFoundation
 import UIKit
 
-/// The in-app camera's capture session. `-mock-camera <path>` swaps in a still image so the simulator,
+/// The in-app camera's capture session, plus live frames while live translation is on. `-mock-camera <path>` swaps in a still image so the simulator,
 /// which has no camera, can run the camera screen and its UI tests.
 final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
     /// Captures are capped near 12 MP: OCR downsamples to 2048px anyway, and 48 MP stills cost
@@ -22,6 +22,14 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
     private var rotation: AVCaptureDevice.RotationCoordinator?
     private var configured = false
     private var captures: [Int64: PhotoCapture] = [:]
+    private let frameQueue = DispatchQueue(label: "translatte.camera.frames")
+    private let videoOutput = AVCaptureVideoDataOutput()
+    /// Owned by `queue`.
+    private var framesWanted = false
+    /// Owned by `frameQueue`.
+    private var loggedFrameSize = false
+    private let handlerLock = NSLock()
+    private var frameHandler: (@Sendable (CVPixelBuffer) -> Void)?
 
     init(mockImagePath: String?) {
         mockData = mockImagePath.flatMap { FileManager.default.contents(atPath: $0) }
@@ -42,6 +50,32 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
         queue.async { [self] in
             if session.isRunning { session.stopRunning() }
         }
+    }
+
+    /// Receives live frames on a background queue.
+    func onFrame(_ handler: @escaping @Sendable (CVPixelBuffer) -> Void) {
+        handlerLock.withLock { frameHandler = handler }
+    }
+
+    /// Adds or removes the live frame output; without it the camera is snap-only, as before.
+    func setFramesEnabled(_ on: Bool) {
+        guard !isMock else { return }
+        queue.async { [self] in
+            framesWanted = on
+            if configured { applyFrames() }
+        }
+    }
+
+    private func applyFrames() {
+        let attached = session.outputs.contains(videoOutput)
+        guard attached != framesWanted else { return }
+        session.beginConfiguration()
+        if framesWanted {
+            if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
+        } else {
+            session.removeOutput(videoOutput)
+        }
+        session.commitConfiguration()
     }
 
     /// Flash off and 1×, as each visit to the camera starts.
@@ -102,9 +136,15 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
         if let dimensions = Self.captureDimensions(device.activeFormat.supportedMaxPhotoDimensions) {
             output.maxPhotoDimensions = dimensions
         }
+        videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.automaticallyConfiguresOutputBufferDimensions = false
+        videoOutput.deliversPreviewSizedOutputBuffers = true
+        videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         session.commitConfiguration()
         self.device = device
         rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        applyFrames()
     }
 
     /// The largest supported size within `maxCapturePixels`, or the smallest when none fits.
@@ -112,6 +152,19 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
         let pixels = { (d: CMVideoDimensions) in Int(d.width) * Int(d.height) }
         let sorted = supported.sorted { pixels($0) < pixels($1) }
         return sorted.last { pixels($0) <= maxCapturePixels } ?? sorted.first
+    }
+}
+
+extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        #if DEBUG
+        if !loggedFrameSize {
+            loggedFrameSize = true
+            print("live frames: \(CVPixelBufferGetWidth(buffer))x\(CVPixelBufferGetHeight(buffer))")
+        }
+        #endif
+        handlerLock.withLock { frameHandler }?(buffer)
     }
 }
 

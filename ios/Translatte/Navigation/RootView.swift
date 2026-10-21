@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     let camera: CameraController
+    let live: LiveTranslator
     @EnvironmentObject private var model: TranslatorModel
     @EnvironmentObject private var downloads: Downloads
     @EnvironmentObject private var navigator: AppNavigator
@@ -10,7 +11,7 @@ struct RootView: View {
         Group {
             switch navigator.screen {
             case .setup: ModelsView(setup: true)
-            case .camera: CameraScreen(camera: camera)
+            case .camera: CameraScreen(camera: camera, live: live)
             case .home: HomeScreen()
             case .result: ResultScreen()
             }

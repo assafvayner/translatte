@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import co.huggingface.translatte.ui.camera.LiveFrame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -133,15 +134,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * mid-translation, and clears the warning once memory recovers. Runs on the engine dispatcher.
      */
     private suspend fun checkMemory() {
-        val app = getApplication<Application>()
-        val info = ActivityManager.MemoryInfo().also(app.getSystemService(ActivityManager::class.java)::getMemoryInfo)
-        if (info.availMem < MIN_FREE_MEMORY && !translatte.modelsLoaded) {
-            throw LowMemoryException(
-                "Not enough free memory to load the models (${formatSize(info.availMem)} free, needs " +
-                    "${formatSize(MIN_FREE_MEMORY)}). Close other apps and try again.",
-            )
+        if (!translatte.modelsLoaded) {
+            val app = getApplication<Application>()
+            val info = ActivityManager.MemoryInfo().also(app.getSystemService(ActivityManager::class.java)::getMemoryInfo)
+            if (info.availMem < MIN_FREE_MEMORY) {
+                throw LowMemoryException(
+                    "Not enough free memory to load the models (${formatSize(info.availMem)} free, needs " +
+                        "${formatSize(MIN_FREE_MEMORY)}). Close other apps and try again.",
+                )
+            }
         }
-        withContext(Dispatchers.Main) { memoryWarning = null }
+        if (memoryWarning != null) withContext(Dispatchers.Main) { memoryWarning = null }
     }
 
     /** Bytes still to fetch for [ids], counting partial downloads that will resume. */
@@ -173,6 +176,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reopenLast() = translations.reopenLast()
+
+    fun showLive(image: Bitmap, result: TranslationResult) = translations.show(image, result)
+
+    /** Translates one live camera frame from the current source language on the engine dispatcher. */
+    suspend fun translateFrame(frame: LiveFrame): TranslationResult {
+        val source = sourceCode
+        return withContext(translatte.engineDispatcher) {
+            try {
+                checkMemory()
+            } catch (e: LowMemoryException) {
+                if (memoryWarning != e.message) withContext(Dispatchers.Main) { memoryWarning = e.message }
+                throw e
+            }
+            engine.translateFrame(frame.rgba, frame.width.toUInt(), frame.height.toUInt(), frame.rotation.toUInt(), source).also {
+                translatte.modelsLoaded = true
+            }
+        }
+    }
 
     private suspend fun translateOnEngine(bitmap: Bitmap, onStage: (String) -> Unit): TranslationResult {
         val source = sourceCode

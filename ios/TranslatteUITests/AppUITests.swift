@@ -125,8 +125,31 @@ final class AppUITests: XCTestCase {
         XCTAssertFalse(app.element("original-0").exists)
     }
 
+    func testLiveTranslationPaintsTheCameraAndSnapFreezesIt() throws {
+        let app = try XCUIApplication.withModels(["-mock-camera", TestEnv.bonjour, "-source", "fr", "-liveTranslation", "YES"])
+        XCTAssertTrue(app.element("camera-screen").waitForExistence(timeout: 30))
+        let live = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'live-region-'")).firstMatch
+        XCTAssertTrue(live.waitForExistence(timeout: 300), "live translation didn't paint the camera")
+
+        app.buttons["camera-shutter"].tap()
+        XCTAssertTrue(app.element("result-screen").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.element("region-0").waitForExistence(timeout: 5), "snap shows the live result without running the pipeline again")
+    }
+
+    func testLiveTranslationCanBeTurnedOff() throws {
+        let app = try XCUIApplication.withModels()
+        app.buttons["settings-button"].tap()
+        let toggle = app.switches["live-translation"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.value as? String, "1", "on by default")
+        toggle.tap()
+        XCTAssertTrue(app.waitUntil(toggle, "value == '0'"))
+        toggle.tap()
+        XCTAssertTrue(app.waitUntil(toggle, "value == '1'"), "leave it on for the other tests")
+    }
+
     func testAFailedTranslationShowsTheErrorWithoutRetry() throws {
-        let failing = try XCUIApplication.withModels(["-mock-camera", TestEnv.bonjour, "-source", "fr", "-mock-translation-error", "Translation failed"])
+        let failing = try XCUIApplication.withModels(["-mock-camera", TestEnv.bonjour, "-source", "fr", "-mock-translation-error", "Translation failed", "-liveTranslation", "NO"])
         XCTAssertTrue(failing.element("camera-screen").waitForExistence(timeout: 30))
         failing.buttons["camera-shutter"].tap()
         XCTAssertTrue(failing.element("result-error").waitForExistence(timeout: 300))

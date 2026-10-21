@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import co.huggingface.translatte.BuildConfig
@@ -35,7 +38,13 @@ import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.Dimens
 
 @Composable
-fun SettingsScreen(theme: ThemeSetting, onTheme: (ThemeSetting) -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(
+    theme: ThemeSetting,
+    onTheme: (ThemeSetting) -> Unit,
+    onBack: () -> Unit,
+    live: Boolean = true,
+    onLive: (Boolean) -> Unit = {},
+) {
     BackHandler(onBack = onBack)
     val uri = LocalUriHandler.current
     var fontLicense by rememberSaveable { mutableStateOf(false) }
@@ -50,6 +59,14 @@ fun SettingsScreen(theme: ThemeSetting, onTheme: (ThemeSetting) -> Unit, onBack:
                         CheckRow(t.label, selected = t == theme, onClick = { onTheme(t) }, subtitle = t.description)
                     }
                 }
+            }
+            SectionCard("Camera") {
+                ListRow(
+                    "Live translation (experimental)",
+                    Modifier.toggleable(value = live, role = Role.Switch, onValueChange = onLive),
+                    subtitle = "Translates what the camera sees as you point it. Off: translate when you take a photo.",
+                    trailing = { Switch(checked = live, onCheckedChange = null) },
+                )
             }
             SectionCard("About") {
                 ListRow("Version", subtitle = BuildConfig.VERSION_NAME)

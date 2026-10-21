@@ -93,7 +93,7 @@ private struct OriginalText: View {
 }
 
 /// A rotated box in the region's colors with its translation (or original, when peeked) shrunk to fit.
-private struct RegionLabel: View {
+struct RegionLabel: View {
     let region: Region
     let scale: CGFloat
     let rtl: Bool

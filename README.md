@@ -104,6 +104,17 @@ files dir> --es autotest_from fr` on `am start`, the latter writing `autotest.js
 photo; `run-as co.huggingface.translatte sh -c 'echo xet_data=debug > files/rust_log'` sets `RUST_LOG` (logcat
 tag `translatte`).
 
+## Live camera (experimental)
+
+With "Live translation (experimental)" on in Settings (the default), the camera translates preview frames
+continuously and paints English over the preview; the shutter freezes the latest live result into the result
+viewer (or takes a photo when nothing has been translated yet). Frames go through `Engine::translate_frame`
+(raw RGBA plus a clockwise rotation, about 960x720), at most one at a time and at most one per second when the phone
+runs hot. A cache of recent translations, shared with photos, means only new text reaches the translation model.
+Both apps keep the same rules in `LiveRules` and `LiveOverlayTracker`. Debug builds show updates/s and per-stage
+milliseconds on the camera and log each update; on Android, `scripts/android/live-stats.sh [seconds]` summarizes
+them from logcat. The iOS simulator has no camera, so with `-mock-camera <image>` the still is fed as frames.
+
 ## Tests
 
 ```bash

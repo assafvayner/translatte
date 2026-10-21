@@ -5,9 +5,11 @@ import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -94,5 +96,16 @@ class SettingsScreenTest {
         assertEquals(ThemeSetting.AMERICANO, chosen)
         compose.onNodeWithText("Light").assertExists()
         compose.onNodeWithText("Dark").assertExists()
+    }
+
+    @Test
+    fun liveTranslationIsASwitch() {
+        var live = true
+        compose.setContent {
+            TranslatteTheme(dark = false) { SettingsScreen(ThemeSetting.SYSTEM, {}, {}, live = live, onLive = { live = it }) }
+        }
+        compose.onNodeWithText("Live translation (experimental)").assertExists()
+        compose.onNode(isToggleable()).performScrollTo().assertIsOn().performClick()
+        assertEquals(false, live)
     }
 }

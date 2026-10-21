@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 #[cfg(feature = "download")]
 use translatte_core::download::Downloader;
+use translatte_core::frame::upright_rgb;
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest, ModelEntry, ModelKind};
 use translatte_core::model_store::{InstallState, ModelStore};
@@ -140,12 +141,31 @@ pub struct Region {
     pub angle: f32,
 }
 
+/// Milliseconds each pipeline stage took, for the live camera's debug readout.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct StageTimings {
+    pub detect_ms: u32,
+    pub recognize_ms: u32,
+    pub translate_ms: u32,
+}
+
+impl From<translatte_core::pipeline::StageTimings> for StageTimings {
+    fn from(t: translatte_core::pipeline::StageTimings) -> Self {
+        Self {
+            detect_ms: t.detect_ms,
+            recognize_ms: t.recognize_ms,
+            translate_ms: t.translate_ms,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct TranslationResult {
     pub image_width: u32,
     pub image_height: u32,
     pub regions: Vec<Region>,
     pub translation_error: Option<String>,
+    pub timings: StageTimings,
 }
 
 impl TranslationResult {
@@ -167,6 +187,7 @@ impl TranslationResult {
             image_height: height,
             regions,
             translation_error: out.translation_error,
+            timings: out.timings.into(),
         }
     }
 }
@@ -400,6 +421,33 @@ impl Engine {
         ))
     }
 
+    /// Runs the same pipeline as `translate_image` on a camera frame: tightly packed RGBA rows of
+    /// `width` x `height`, turned upright by rotating clockwise by `rotation_degrees` (0, 90, 180 or
+    /// 270). Region coordinates, `image_width` and `image_height` are in the upright frame. Always
+    /// translates; shares the pipeline and translation cache with `translate_image`. Blocking; call
+    /// it off the main thread.
+    pub fn translate_frame(
+        &self,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        rotation_degrees: u32,
+        source: String,
+    ) -> Result<TranslationResult, FfiError> {
+        let src = self.store.manifest().language(&source)?;
+        let tgt = self.store.target_language()?;
+        let img = upright_rgb(rgba, width, height, rotation_degrees)?;
+
+        let mut cached = self.lock_cached();
+        let pipeline = self.pipeline(&mut cached, src, true)?;
+        let out = pipeline.run(&img, src, tgt, &mut |_| {})?;
+        Ok(TranslationResult::from_output(
+            out,
+            img.width(),
+            img.height(),
+        ))
+    }
+
     /// Frees loaded models (e.g. when the app is backgrounded).
     pub fn unload(&self) {
         *self.lock_cached() = None;
@@ -554,6 +602,11 @@ mod tests {
                 angle: 0.5,
             }],
             translation_error: None,
+            timings: translatte_core::pipeline::StageTimings {
+                detect_ms: 1,
+                recognize_ms: 2,
+                translate_ms: 3,
+            },
         };
         let r = TranslationResult::from_output(out, 10, 20);
         assert_eq!((r.image_width, r.image_height), (10, 20));
@@ -570,6 +623,66 @@ mod tests {
         assert_eq!(region.background, Rgb { r: 1, g: 2, b: 3 });
         assert_eq!(region.foreground, Rgb { r: 4, g: 5, b: 6 });
         assert_eq!(region.translated_text.as_deref(), Some("Exit"));
+        assert_eq!(
+            r.timings,
+            StageTimings {
+                detect_ms: 1,
+                recognize_ms: 2,
+                translate_ms: 3
+            }
+        );
+    }
+
+    #[test]
+    fn bad_frames_are_reported_not_panicked() {
+        let dir = tempfile_dir().join("frames");
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let err = engine
+            .translate_frame(vec![0; 3], 1, 1, 0, "fr".into())
+            .unwrap_err();
+        assert!(err.to_string().contains("expected 4"), "{err}");
+        let err = engine
+            .translate_frame(vec![0; 4], 1, 1, 45, "fr".into())
+            .unwrap_err();
+        assert!(err.to_string().contains("rotation"), "{err}");
+        let err = engine
+            .translate_frame(vec![0; 4], 1, 1, 0, "xx".into())
+            .unwrap_err();
+        assert!(err.to_string().contains("unknown language"), "{err}");
+    }
+
+    #[test]
+    fn translate_frame_matches_translate_image_with_real_models() {
+        let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
+            eprintln!("TRANSLATTE_MODELS not set; skipping");
+            return;
+        };
+        let engine = Engine::new(models.to_string_lossy().into(), manifest_json()).unwrap();
+        let png = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../core/tests/data/bonjour.png"
+        ))
+        .unwrap();
+        let rgba = image::load_from_memory(&png).unwrap().to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let photo = engine
+            .translate_image(png, "fr".into(), true, None)
+            .unwrap();
+
+        let frame = engine
+            .translate_frame(rgba.clone().into_raw(), w, h, 0, "fr".into())
+            .unwrap();
+        assert_eq!((frame.image_width, frame.image_height), (w, h));
+        assert_eq!(frame.regions, photo.regions);
+        assert!(frame.timings.detect_ms + frame.timings.recognize_ms > 0);
+
+        // A sensor-landscape frame that needs a clockwise quarter turn to be upright.
+        let sideways = image::imageops::rotate270(&rgba);
+        let turned = engine
+            .translate_frame(sideways.into_raw(), h, w, 90, "fr".into())
+            .unwrap();
+        assert_eq!((turned.image_width, turned.image_height), (w, h));
+        assert_eq!(turned.regions, photo.regions);
     }
 
     #[test]

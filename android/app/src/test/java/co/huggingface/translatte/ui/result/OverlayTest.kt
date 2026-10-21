@@ -24,6 +24,7 @@ import org.junit.runner.RunWith
 import uniffi.translatte_ffi.Point
 import uniffi.translatte_ffi.Region
 import uniffi.translatte_ffi.Rgb
+import uniffi.translatte_ffi.StageTimings
 import uniffi.translatte_ffi.TranslationResult
 
 fun testRegion(translated: String, source: String, x: Float, y: Float) = Region(
@@ -40,6 +41,7 @@ fun testResult() = TranslationResult(
     imageHeight = 100u,
     regions = listOf(testRegion("Hello", "Bonjour", 10f, 10f), testRegion("Exit", "Sortie", 10f, 60f)),
     translationError = null,
+    timings = StageTimings(0u, 0u, 0u),
 )
 
 @RunWith(AndroidJUnit4::class)

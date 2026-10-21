@@ -15,7 +15,19 @@ final class TranslationRunsTests: XCTestCase {
             foreground: Rgb(r: 255, g: 255, b: 255),
             angle: 0
         )
-        return TranslationResult(imageWidth: 10, imageHeight: 10, regions: Array(repeating: region, count: regions), translationError: error)
+        return TranslationResult(
+            imageWidth: 10, imageHeight: 10, regions: Array(repeating: region, count: regions), translationError: error,
+            timings: StageTimings(detectMs: 0, recognizeMs: 0, translateMs: 0)
+        )
+    }
+
+    func testALiveResultSupersedesTheRunningOneAndBecomesTheLastSuccess() {
+        var runs = TranslationRuns()
+        let running = runs.start()
+        let live = output(regions: 1)
+        runs.show(image: photo, output: live)
+        XCTAssertFalse(runs.isCurrent(running))
+        XCTAssertEqual(runs.lastSuccess?.result, live)
     }
 
     func testANewRunSupersedesTheRunningOne() {

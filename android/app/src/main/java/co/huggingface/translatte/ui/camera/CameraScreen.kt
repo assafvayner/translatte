@@ -2,15 +2,25 @@ package co.huggingface.translatte.ui.camera
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.os.PowerManager
+import android.util.Size
+import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.ViewPort
 import androidx.camera.core.ZoomState
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -53,6 +63,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,29 +77,44 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Observer
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.Dimens
 import co.huggingface.translatte.ui.theme.InnerShape
 import co.huggingface.translatte.ui.theme.SheetShape
+import uniffi.translatte_ffi.TranslationResult
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.launch
 
 /** Fixed espresso scrims and cream text, the same in both themes and on iOS. */
-private val Scrim = Color(0x9916110E)
-private val OnScrim = Color(0xFFF1E6D8)
+internal val Scrim = Color(0x9916110E)
+internal val OnScrim = Color(0xFFF1E6D8)
 private val ScrimEdge = Color(0x8C16110E)
+
+/** Preview and live frames are cropped to one shared view port, so the live overlay lines up with the preview. */
+private val FourByThree = ResolutionSelector.Builder()
+    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+    .build()
 
 /**
  * The landing screen: a CameraX viewfinder with controls on a fixed dark scrim in either theme.
  * Binding follows the activity lifecycle, so the camera stops in the background, and unbinds when
- * the screen is left.
+ * the screen is left. With [live], frames are translated continuously and painted over the preview.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraScreen(
     direction: String,
     languageBar: @Composable () -> Unit,
+    live: Boolean,
+    sourceCode: String,
+    translateFrame: suspend (LiveFrame) -> TranslationResult,
+    onLiveSnap: (Bitmap, TranslationResult) -> Unit,
     onBack: () -> Unit,
     onCaptured: (File) -> Unit,
     onPermissionResult: (granted: Boolean) -> Unit,
@@ -118,6 +144,55 @@ fun CameraScreen(
     var maxZoom by remember { mutableFloatStateOf(1f) }
     var error by remember { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf(false) }
+    var capturing by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+    val power = remember { context.getSystemService(PowerManager::class.java) }
+    val thermalHot = remember { AtomicBoolean(power.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE) }
+    DisposableEffect(power) {
+        val listener = PowerManager.OnThermalStatusChangedListener {
+            thermalHot.set(it >= PowerManager.THERMAL_STATUS_SEVERE)
+        }
+        power.addThermalStatusListener(ContextCompat.getMainExecutor(context), listener)
+        onDispose { power.removeThermalStatusListener(listener) }
+    }
+    val liveTranslator = remember { LiveTranslator(scope, translateFrame) { thermalHot.get() } }
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val analysis = remember {
+        ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                    .setResolutionStrategy(
+                        ResolutionStrategy(Size(960, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
+                    )
+                    .build(),
+            )
+            .build()
+            .also { it.setAnalyzer(analysisExecutor, liveTranslator) }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            analysis.clearAnalyzer()
+            analysisExecutor.shutdown()
+        }
+    }
+    var resumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumed = true
+            if (event == Lifecycle.Event.ON_PAUSE) resumed = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(live, resumed) {
+        liveTranslator.enabled = live && resumed
+        if (!live) liveTranslator.reset()
+    }
+    LaunchedEffect(sourceCode) { liveTranslator.reset() }
 
     LaunchedEffect(granted) {
         if (!granted) return@LaunchedEffect
@@ -134,12 +209,28 @@ fun CameraScreen(
             ContextCompat.getMainExecutor(context),
         )
     }
-    DisposableEffect(provider, lifecycleOwner) {
+    var viewPort by remember { mutableStateOf<ViewPort?>(null) }
+    DisposableEffect(previewView) {
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (viewPort == null) viewPort = previewView.viewPort
+        }
+        previewView.addOnLayoutChangeListener(listener)
+        if (viewPort == null) viewPort = previewView.viewPort
+        onDispose { previewView.removeOnLayoutChangeListener(listener) }
+    }
+    DisposableEffect(provider, lifecycleOwner, live, viewPort) {
         val p = provider ?: return@DisposableEffect onDispose {}
-        val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+        val port = viewPort ?: return@DisposableEffect onDispose {}
+        val preview = Preview.Builder().setResolutionSelector(FourByThree).build()
+            .also { it.surfaceProvider = previewView.surfaceProvider }
+        val group = UseCaseGroup.Builder().setViewPort(port).apply {
+            addUseCase(preview)
+            addUseCase(capture)
+            if (live) addUseCase(analysis)
+        }.build()
         p.unbindAll()
         camera = try {
-            p.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+            p.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, group)
         } catch (e: IllegalArgumentException) {
             error = "No back camera available."
             null
@@ -171,9 +262,13 @@ fun CameraScreen(
             ImageCapture.OutputFileOptions.Builder(file).build(),
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) = onCaptured(file)
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    capturing = false
+                    onCaptured(file)
+                }
 
                 override fun onError(e: ImageCaptureException) {
+                    capturing = false
                     file.delete()
                     error = "Couldn't take the photo: ${e.message}"
                 }
@@ -181,8 +276,29 @@ fun CameraScreen(
         )
     }
 
+    fun snap() {
+        if (capturing) return
+        capturing = true
+        scope.launch {
+            val frozen = liveTranslator.snapshot()
+            if (frozen != null) {
+                capturing = false
+                onLiveSnap(frozen.first, frozen.second)
+            } else {
+                shoot()
+            }
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (granted) AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        if (granted && live) {
+            LiveOverlay(liveTranslator, Modifier.fillMaxSize())
+        }
+        LiveReadout(
+            liveTranslator,
+            Modifier.align(Alignment.TopStart).windowInsetsPadding(WindowInsets.safeDrawing).padding(start = 16.dp, top = 64.dp),
+        )
         val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val navBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         Box(
@@ -242,7 +358,7 @@ fun CameraScreen(
                         .padding(7.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .clickable { shoot() }
+                        .clickable { snap() }
                         .semantics { contentDescription = "Take photo" },
                 )
                 Surface(

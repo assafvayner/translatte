@@ -191,6 +191,36 @@ final class TranslatorModel: ObservableObject {
         phase = .done
     }
 
+    /// Shows a live camera frame and its translation in the result viewer without running the pipeline again.
+    func showLive(image: UIImage, result: TranslationResult) {
+        runs.show(image: image, output: result)
+        self.image = image
+        self.result = result
+        phase = .done
+    }
+
+    /// Translates one live camera frame from the current source language on the worker queue.
+    func translateFrame(_ frame: LiveFrame) async throws -> TranslationResult {
+        guard let engine else { throw AppError(errorDescription: "The engine isn't ready") }
+        let source = sourceCode
+        do {
+            let result = try await onWorker { [self] in
+                try checkMemory()
+                let output = try engine.translateFrame(
+                    rgba: frame.rgba, width: UInt32(frame.width), height: UInt32(frame.height),
+                    rotationDegrees: UInt32(frame.rotation), source: source
+                )
+                modelsLoaded = true
+                return output
+            }
+            if notice != nil { notice = nil }
+            return result
+        } catch let error as AppError {
+            if notice != error.localizedDescription { notice = error.localizedDescription }
+            throw error
+        }
+    }
+
     var hasAutotestImage: Bool {
         UserDefaults.standard.string(forKey: "autotest-image") != nil
     }

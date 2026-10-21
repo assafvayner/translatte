@@ -18,6 +18,7 @@ import co.huggingface.translatte.MainViewModel
 import co.huggingface.translatte.Phase
 import co.huggingface.translatte.ui.camera.CameraAccess
 import co.huggingface.translatte.ui.camera.CameraScreen
+import co.huggingface.translatte.ui.camera.LiveRules
 import co.huggingface.translatte.ui.camera.cameraGranted
 import co.huggingface.translatte.ui.home.HomeScreen
 import co.huggingface.translatte.ui.home.LanguageBar
@@ -42,6 +43,7 @@ fun MainNav(
     var screen by rememberSaveable { mutableStateOf(Nav.landing(hasCamera, cameraGranted(context), prefs.cameraAsked)) }
     var resultOrigin by rememberSaveable { mutableStateOf(Screen.Home) }
     var hintSeen by remember { mutableStateOf(prefs.resultHintSeen) }
+    var live by remember { mutableStateOf(prefs.liveTranslation) }
     LaunchedEffect(screen) { onScreenChange(screen) }
     val back: () -> Unit = { Nav.back(screen, resultOrigin)?.let { screen = it } }
 
@@ -62,6 +64,14 @@ fun MainNav(
         Screen.Camera -> CameraScreen(
             direction = direction,
             languageBar = languageBar,
+            live = LiveRules.isActive(live, vm.sourceLanguages.any { it.code == vm.sourceCode }),
+            sourceCode = vm.sourceCode,
+            translateFrame = vm::translateFrame,
+            onLiveSnap = { bitmap, result ->
+                vm.showLive(bitmap, result)
+                resultOrigin = Screen.Camera
+                screen = Screen.Result
+            },
             onBack = back,
             onCaptured = { file ->
                 vm.translate(file)
@@ -114,6 +124,15 @@ fun MainNav(
             BackHandler(onBack = back)
             languagesScreen(back)
         }
-        Screen.Settings -> SettingsScreen(theme, onTheme, onBack = back)
+        Screen.Settings -> SettingsScreen(
+            theme,
+            onTheme,
+            onBack = back,
+            live = live,
+            onLive = {
+                live = it
+                prefs.liveTranslation = it
+            },
+        )
     }
 }

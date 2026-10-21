@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use image::RgbImage;
 use serde::Serialize;
 
@@ -38,10 +40,24 @@ impl Stage {
     }
 }
 
+/// Wall time of each pipeline stage in one run, for the live camera's debug readout.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StageTimings {
+    pub detect_ms: u32,
+    pub recognize_ms: u32,
+    pub translate_ms: u32,
+}
+
+fn millis(d: Duration) -> u32 {
+    d.as_millis().min(u32::MAX as u128) as u32
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PipelineOutput {
     pub regions: Vec<TranslatedRegion>,
     pub translation_error: Option<String>,
+    #[serde(skip)]
+    pub timings: StageTimings,
 }
 
 pub struct Pipeline<D, R, T> {
@@ -85,9 +101,20 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         src: &Language,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<Vec<Line>> {
+        Ok(self.timed_ocr(img, src, on_stage)?.0)
+    }
+
+    fn timed_ocr(
+        &mut self,
+        img: &RgbImage,
+        src: &Language,
+        on_stage: &mut dyn FnMut(Stage),
+    ) -> Result<(Vec<Line>, StageTimings)> {
         self.check_source(src)?;
         on_stage(Stage::Detecting);
+        let start = Instant::now();
         let quads = self.detector.detect(img)?;
+        let detected = Instant::now();
         let mut lines = Vec::new();
         for (i, q) in quads.iter().enumerate() {
             on_stage(Stage::Recognizing {
@@ -99,7 +126,12 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
                 lines.push(line);
             }
         }
-        Ok(lines)
+        let timings = StageTimings {
+            detect_ms: millis(detected - start),
+            recognize_ms: millis(detected.elapsed()),
+            translate_ms: 0,
+        };
+        Ok((lines, timings))
     }
 
     /// Prepares the translator for `src` to `tgt` (e.g. when the user picks the languages), so the
@@ -118,7 +150,8 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         tgt: &Language,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<PipelineOutput> {
-        let mut blocks = group_lines(self.ocr(img, src, on_stage)?, src);
+        let (lines, mut timings) = self.timed_ocr(img, src, on_stage)?;
+        let mut blocks = group_lines(lines, src);
         blocks.retain(|b| !b.text.trim().is_empty());
         let texts: Vec<String> = blocks.iter().map(|b| b.text.clone()).collect();
         let mut translation_error = None;
@@ -126,10 +159,12 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         if let Some(t) = &mut self.translator {
             if !texts.is_empty() {
                 on_stage(Stage::Translating { done: 0, total: 1 });
+                let start = Instant::now();
                 match t.translate(&texts, src, tgt) {
                     Ok(out) => translations = out,
                     Err(e) => translation_error = Some(e.to_string()),
                 }
+                timings.translate_ms = millis(start.elapsed());
             }
         }
         translations.resize(texts.len(), None);
@@ -151,6 +186,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         Ok(PipelineOutput {
             regions,
             translation_error,
+            timings,
         })
     }
 }
@@ -347,5 +383,39 @@ mod tests {
             3
         );
         assert_eq!(p.translator.as_ref().unwrap().0, 1);
+    }
+
+    struct SlowDet(Vec<Quad>);
+    impl TextDetector for SlowDet {
+        fn detect(&mut self, _img: &RgbImage) -> Result<Vec<Quad>> {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            Ok(self.0.clone())
+        }
+    }
+
+    struct SlowUpper;
+    impl Translator for SlowUpper {
+        fn translate(
+            &mut self,
+            blocks: &[String],
+            _s: &Language,
+            _t: &Language,
+        ) -> Result<Vec<Option<String>>> {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            Ok(blocks.iter().map(|b| Some(b.to_uppercase())).collect())
+        }
+    }
+
+    #[test]
+    fn reports_how_long_each_stage_took() {
+        let img = RgbImage::from_pixel(200, 100, Rgb([255, 255, 255]));
+        let mut p = Pipeline::new(
+            SlowDet(vec![quad(10.0)]),
+            FakeRec(vec![("sortie", 0.9)], 0),
+            Some(SlowUpper),
+        );
+        let t = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap().timings;
+        assert!(t.detect_ms >= 5, "{t:?}");
+        assert!(t.translate_ms >= 5, "{t:?}");
     }
 }

@@ -3,14 +3,17 @@ use crate::model_store::ModelStore;
 use crate::ocr::detector::Detector;
 use crate::ocr::recognizer::Recognizer;
 use crate::pipeline::Pipeline;
+use crate::translate::cache::CachingTranslator;
 use crate::translate::pair::{PairTranslator, StoreLoader};
 use crate::{Result, TranslatteError};
 
-pub type LoadedPipeline = Pipeline<Detector, Recognizer, PairTranslator<StoreLoader>>;
+pub type LoadedPipeline =
+    Pipeline<Detector, Recognizer, CachingTranslator<PairTranslator<StoreLoader>>>;
 
 /// Loads the detector and the recognizer for `src`'s script pack and, when `translate` is set,
 /// a translator that loads `src`'s pair model on first use (or `warm`) and swaps it when another
-/// language with the same script pack is translated.
+/// language with the same script pack is translated, behind a cache of recent translations (see
+/// [`CachingTranslator`]).
 pub fn load_pipeline(
     store: &ModelStore,
     src: &Language,
@@ -33,7 +36,8 @@ pub fn load_pipeline(
         &store.model_file(pack, "inference.onnx")?,
         &store.model_file(pack, "dict.txt")?,
     )?;
-    let translator = translate.then(|| PairTranslator::new(StoreLoader::new(store.clone())));
+    let translator = translate
+        .then(|| CachingTranslator::new(PairTranslator::new(StoreLoader::new(store.clone()))));
     Ok(Pipeline::new(detector, recognizer, translator).with_script_pack(pack.as_str()))
 }
 
