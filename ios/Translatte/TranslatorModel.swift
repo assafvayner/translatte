@@ -204,7 +204,7 @@ final class TranslatorModel: ObservableObject {
         guard let engine else { throw AppError(errorDescription: "The engine isn't ready") }
         let source = sourceCode
         do {
-            return try await onWorker { [self] in
+            let result = try await onWorker { [self] in
                 try checkMemory()
                 let output = try engine.translateFrame(
                     rgba: frame.rgba, width: UInt32(frame.width), height: UInt32(frame.height),
@@ -213,6 +213,8 @@ final class TranslatorModel: ObservableObject {
                 modelsLoaded = true
                 return output
             }
+            if notice != nil { notice = nil }
+            return result
         } catch let error as AppError {
             if notice != error.localizedDescription { notice = error.localizedDescription }
             throw error

@@ -4,7 +4,8 @@ import SwiftUI
 struct TranslatteApp: App {
     @StateObject private var model: TranslatorModel
     @StateObject private var camera: CameraController
-    @StateObject private var live: LiveTranslator
+    /// Held without observing: only LiveOverlay and LiveReadout redraw on live updates.
+    @State private var live: LiveTranslator
     @StateObject private var navigator: AppNavigator
     @StateObject private var dialogs = DialogCenter()
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
@@ -18,7 +19,7 @@ struct TranslatteApp: App {
         _camera = StateObject(wrappedValue: camera)
         let live = LiveTranslator { [model] frame in try await model.translateFrame(frame) }
         camera.onFrame { [weak live] buffer in live?.offer(buffer) }
-        _live = StateObject(wrappedValue: live)
+        _live = State(wrappedValue: live)
         _navigator = StateObject(wrappedValue: AppNavigator(
             modelsReady: model.modelsReady,
             cameraAccess: camera.isMock ? .authorized : .current()

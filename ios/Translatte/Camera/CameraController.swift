@@ -26,8 +26,10 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
     private let videoOutput = AVCaptureVideoDataOutput()
     /// Owned by `queue`.
     private var framesWanted = false
+    /// Owned by `frameQueue`.
+    private var loggedFrameSize = false
     private let handlerLock = NSLock()
-    private var frameHandler: ((CVPixelBuffer) -> Void)?
+    private var frameHandler: (@Sendable (CVPixelBuffer) -> Void)?
 
     init(mockImagePath: String?) {
         mockData = mockImagePath.flatMap { FileManager.default.contents(atPath: $0) }
@@ -51,7 +53,7 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
     }
 
     /// Receives live frames on a background queue.
-    func onFrame(_ handler: @escaping (CVPixelBuffer) -> Void) {
+    func onFrame(_ handler: @escaping @Sendable (CVPixelBuffer) -> Void) {
         handlerLock.withLock { frameHandler = handler }
     }
 
@@ -136,6 +138,8 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
         }
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.automaticallyConfiguresOutputBufferDimensions = false
+        videoOutput.deliversPreviewSizedOutputBuffers = true
         videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
         session.commitConfiguration()
         self.device = device
@@ -154,6 +158,12 @@ final class CameraController: NSObject, ObservableObject, @unchecked Sendable {
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        #if DEBUG
+        if !loggedFrameSize {
+            loggedFrameSize = true
+            print("live frames: \(CVPixelBufferGetWidth(buffer))x\(CVPixelBufferGetHeight(buffer))")
+        }
+        #endif
         handlerLock.withLock { frameHandler }?(buffer)
     }
 }
