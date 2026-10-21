@@ -20,6 +20,12 @@ pub struct Line {
 
 pub trait TextDetector {
     fn detect(&mut self, img: &RgbImage) -> Result<Vec<Quad>>;
+
+    /// Detects with the image's long side scaled to at most `long_side` instead of the default.
+    fn detect_at(&mut self, img: &RgbImage, long_side: u32) -> Result<Vec<Quad>> {
+        let _ = long_side;
+        self.detect(img)
+    }
 }
 
 pub trait TextRecognizer {
@@ -46,7 +52,7 @@ pub trait TextRecognizer {
 
 /// A positive integer from the environment variable `key`, else `default`; lets OCR settings be
 /// tuned on a device without rebuilding.
-fn env_or(key: &str, default: usize) -> usize {
+pub(crate) fn env_or(key: &str, default: usize) -> usize {
     std::env::var(key)
         .ok()
         .and_then(|v| v.parse().ok())

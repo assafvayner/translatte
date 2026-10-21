@@ -58,6 +58,9 @@ enum Command {
         /// Write the recognized lines (text, confidence) per fixture to this JSON file.
         #[arg(long)]
         text: Option<PathBuf>,
+        /// Run the fixtures, in name order, once each as consecutive live camera frames.
+        #[arg(long)]
+        live: bool,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -132,6 +135,7 @@ fn real_main() -> Result<i32> {
             translate,
             only,
             text,
+            live,
             models,
         } => {
             let args = bench::BenchArgs {
@@ -141,6 +145,7 @@ fn real_main() -> Result<i32> {
                 translate,
                 only,
                 text,
+                live,
             };
             bench::run_bench(&args, &models.manifest, &models.models)?;
         }

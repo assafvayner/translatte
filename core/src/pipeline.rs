@@ -6,12 +6,15 @@ use serde::Serialize;
 use crate::geometry::Quad;
 use crate::layout::group_lines;
 use crate::manifest::Language;
-use crate::ocr::{Line, TextDetector, TextRecognizer};
+use crate::ocr::{env_or, Line, TextDetector, TextRecognizer};
 use crate::render::style_hints;
 use crate::translate::Translator;
 use crate::{Result, TranslatteError};
 
 const MIN_LINE_CONFIDENCE: f32 = 0.5;
+/// Long side camera frames are detected at (photos use the detector's default, 960). Overridable
+/// with `TRANSLATTE_OCR_LIVE_DET_SIDE`.
+const LIVE_DET_SIDE: usize = 960;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TranslatedRegion {
@@ -101,19 +104,34 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         src: &Language,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<Vec<Line>> {
-        Ok(self.timed_ocr(img, src, on_stage)?.0)
+        Ok(self.timed_ocr(img, src, false, on_stage)?.0)
+    }
+
+    /// OCR of a live camera frame as `run_frame` does it, with its timings.
+    pub fn ocr_frame(
+        &mut self,
+        img: &RgbImage,
+        src: &Language,
+    ) -> Result<(Vec<Line>, StageTimings)> {
+        self.timed_ocr(img, src, true, &mut |_| {})
     }
 
     fn timed_ocr(
         &mut self,
         img: &RgbImage,
         src: &Language,
+        live: bool,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<(Vec<Line>, StageTimings)> {
         self.check_source(src)?;
         on_stage(Stage::Detecting);
         let start = Instant::now();
-        let quads = self.detector.detect(img)?;
+        let quads = if live {
+            let side = env_or("TRANSLATTE_OCR_LIVE_DET_SIDE", LIVE_DET_SIDE) as u32;
+            self.detector.detect_at(img, side)?
+        } else {
+            self.detector.detect(img)?
+        };
         let detected = Instant::now();
         let total = quads.len();
         let mut lines = self.recognizer.recognize_all(img, &quads, &mut |done| {
@@ -144,7 +162,28 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         tgt: &Language,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<PipelineOutput> {
-        let (lines, mut timings) = self.timed_ocr(img, src, on_stage)?;
+        self.run_inner(img, src, tgt, false, on_stage)
+    }
+
+    /// `run` for a live camera frame, detected at `LIVE_DET_SIDE`.
+    pub fn run_frame(
+        &mut self,
+        img: &RgbImage,
+        src: &Language,
+        tgt: &Language,
+    ) -> Result<PipelineOutput> {
+        self.run_inner(img, src, tgt, true, &mut |_| {})
+    }
+
+    fn run_inner(
+        &mut self,
+        img: &RgbImage,
+        src: &Language,
+        tgt: &Language,
+        live: bool,
+        on_stage: &mut dyn FnMut(Stage),
+    ) -> Result<PipelineOutput> {
+        let (lines, mut timings) = self.timed_ocr(img, src, live, on_stage)?;
         let mut blocks = group_lines(lines, src);
         blocks.retain(|b| !b.text.trim().is_empty());
         let texts: Vec<String> = blocks.iter().map(|b| b.text.clone()).collect();

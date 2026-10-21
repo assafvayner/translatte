@@ -17,6 +17,8 @@ pub struct BenchArgs {
     pub translate: bool,
     pub only: Vec<String>,
     pub text: Option<PathBuf>,
+    /// Treat the fixtures, in name order, as consecutive camera frames: one `ocr_frame` each.
+    pub live: bool,
 }
 
 fn stats(name: &str, mut v: Vec<u32>) {
@@ -96,14 +98,25 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
                 img = image::imageops::resize(&img, nw.max(1), nh.max(1), FilterType::Triangle);
             }
         }
-        let lines = pipeline.ocr(&img, src, &mut |_| {})?;
         let mut rec = Vec::new();
         let mut min = StageTimings {
             detect_ms: u32::MAX,
             recognize_ms: u32::MAX,
             translate_ms: u32::MAX,
         };
-        for _ in 0..args.iters {
+        let lines = if args.live {
+            if samples.is_empty() {
+                pipeline.ocr(&img, src, &mut |_| {})?;
+            }
+            let (lines, t) = pipeline.ocr_frame(&img, src)?;
+            rec.push(t.recognize_ms);
+            min = t;
+            samples.push(t);
+            lines
+        } else {
+            pipeline.ocr(&img, src, &mut |_| {})?
+        };
+        for _ in 0..if args.live { 0 } else { args.iters } {
             let t = pipeline.run(&img, src, tgt, &mut |_| {})?.timings;
             rec.push(t.recognize_ms);
             min.detect_ms = min.detect_ms.min(t.detect_ms);

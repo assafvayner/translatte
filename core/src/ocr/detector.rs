@@ -33,10 +33,14 @@ impl Detector {
 
 impl TextDetector for Detector {
     fn detect(&mut self, img: &RgbImage) -> Result<Vec<Quad>> {
+        self.detect_at(img, RESIZE_LONG)
+    }
+
+    fn detect_at(&mut self, img: &RgbImage, long_side: u32) -> Result<Vec<Quad>> {
         if img.width() == 0 || img.height() == 0 {
             return Ok(Vec::new());
         }
-        let input = det_preprocess(img, RESIZE_LONG);
+        let input = det_preprocess(img, long_side.min(RESIZE_LONG));
         let outputs = self
             .session
             .run(ort::inputs![Tensor::from_array(input.tensor)?])?;

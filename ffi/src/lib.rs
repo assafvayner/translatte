@@ -440,7 +440,7 @@ impl Engine {
 
         let mut cached = self.lock_cached();
         let pipeline = self.pipeline(&mut cached, src, true)?;
-        let out = pipeline.run(&img, src, tgt, &mut |_| {})?;
+        let out = pipeline.run_frame(&img, src, tgt)?;
         Ok(TranslationResult::from_output(
             out,
             img.width(),
