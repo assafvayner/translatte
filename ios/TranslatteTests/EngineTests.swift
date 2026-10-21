@@ -22,7 +22,7 @@ final class EngineTests: XCTestCase {
         XCTAssertFalse(try engine.coreInstalled())
         XCTAssertTrue(try engine.sourceLanguages().isEmpty)
         XCTAssertEqual(try engine.targetLanguage().code, "en")
-        XCTAssertEqual(try engine.languagePacks().count, 28)
+        XCTAssertEqual(try engine.languagePacks().count, 52)
     }
 
     func testRustErrorsSurfaceAsSwiftErrors() throws {

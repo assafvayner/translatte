@@ -23,7 +23,7 @@ PAIR_REPO = "assafvayner/translatte-pair-models"
 SCRIPT_PACKS = {
     "rec-cjk": ("PaddlePaddle/PP-OCRv5_mobile_rec_onnx", "Chinese / Japanese"),
     "rec-latin": ("PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx", "Latin script"),
-    "rec-eslav": ("PaddlePaddle/eslav_PP-OCRv5_mobile_rec_onnx", "Cyrillic (Russian, Ukrainian, Belarusian)"),
+    "rec-eslav": ("PaddlePaddle/eslav_PP-OCRv5_mobile_rec_onnx", "Cyrillic script"),
     "rec-korean": ("PaddlePaddle/korean_PP-OCRv5_mobile_rec_onnx", "Korean"),
     "rec-arabic": ("PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx", "Arabic script"),
     "rec-devanagari": ("PaddlePaddle/devanagari_PP-OCRv5_mobile_rec_onnx", "Devanagari"),
@@ -34,7 +34,7 @@ SCRIPT_PACKS = {
 
 REVISIONS = {
     "PaddlePaddle/PP-OCRv5_mobile_det_onnx": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
-    PAIR_REPO: "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce",
+    PAIR_REPO: "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f",
     "PaddlePaddle/PP-OCRv5_mobile_rec_onnx": "ed152b8b495f84de93cda5709d768548a9127622",
     "PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx": "89d3a50e2c27e2e7cceeab0e944c25c807d5db4f",
     "PaddlePaddle/eslav_PP-OCRv5_mobile_rec_onnx": "9a32171fc5718746875e1a261818884517975013",
@@ -58,11 +58,17 @@ PAIR_FILES = {
 TARGET = {"code": "en", "name": "English", "script_pack": None, "rtl": False, "spaced": True}
 
 # Source languages: (code, name, script pack, mirror directory of its X->en pair model, rtl, spaced).
-# Hebrew and Vietnamese have pair models but no PP-OCRv5 recognizer, so they aren't listed.
+# Only languages whose alphabet the pack's dictionary covers are listed (check with scripts/ocr_coverage.py);
+# the other mirrored xx->en pairs (az, bn, el, gu, he, kn, ml, vi) have no pack that reads them. Mozilla's
+# Serbian model takes both scripts, but only the Latin one has a pack.
 LATIN = [
     ("fr", "French"), ("de", "German"), ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"),
     ("nl", "Dutch"), ("pl", "Polish"), ("cs", "Czech"), ("tr", "Turkish"), ("id", "Indonesian"),
-    ("ms", "Malay"), ("tl", "Filipino"),
+    ("ms", "Malay"), ("tl", "Filipino"), ("af", "Afrikaans"), ("bs", "Bosnian"), ("ca", "Catalan"),
+    ("da", "Danish"), ("et", "Estonian"), ("eu", "Basque"), ("fi", "Finnish"), ("gl", "Galician"),
+    ("hr", "Croatian"), ("hu", "Hungarian"), ("is", "Icelandic"), ("lt", "Lithuanian"), ("lv", "Latvian"),
+    ("mt", "Maltese"), ("nb", "Norwegian Bokmål"), ("nn", "Norwegian Nynorsk"), ("ro", "Romanian"),
+    ("sk", "Slovak"), ("sl", "Slovenian"), ("sq", "Albanian"), ("sr", "Serbian (Latin script)"), ("sv", "Swedish"),
 ]
 LANGUAGES = (
     [(c, n, "rec-latin", f"{c}-en", False, True) for c, n in LATIN]
@@ -75,6 +81,8 @@ LANGUAGES = (
         ("ko", "Korean", "rec-korean", "ko-en", False, True),
         ("ru", "Russian", "rec-eslav", "ru-en", False, True),
         ("uk", "Ukrainian", "rec-eslav", "uk-en", False, True),
+        ("be", "Belarusian", "rec-eslav", "be-en", False, True),
+        ("bg", "Bulgarian", "rec-eslav", "bg-en", False, True),
         ("ar", "Arabic", "rec-arabic", "ar-en", True, True),
         ("fa", "Persian", "rec-arabic", "fa-en", True, True),
         ("ur", "Urdu", "rec-arabic", "ur-en", True, True),
