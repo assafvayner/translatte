@@ -13,7 +13,9 @@ import co.huggingface.translatte.BuildConfig
 import co.huggingface.translatte.Images
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uniffi.translatte_ffi.TranslationResult
 
 private const val TAG = "translatte"
@@ -48,13 +50,18 @@ class LiveTranslator(
     private var busy = false
     private var lastStartMs: Long? = null
     private val tracker = LiveOverlayTracker()
+    @Volatile
     private var latest: Pair<LiveFrame, TranslationResult>? = null
+    private var failures = 0
+    private var lastFailMs: Long? = null
+    private val buffers = arrayOfNulls<ByteArray>(2)
     private var lastDoneMs: Long? = null
     private var generation = 0
 
     /** Clears the overlay and drops results still in flight (source change, live turned off). Main thread. */
     fun reset() {
         generation++
+        synchronized(lock) { failures = 0 }
         tracker.reset()
         overlay = emptyList()
         latest = null
@@ -63,10 +70,11 @@ class LiveTranslator(
     }
 
     /** The latest live frame, upright, and its result when snap should show them rather than take a photo. */
-    fun snapshot(): Pair<Bitmap, TranslationResult>? {
+    suspend fun snapshot(): Pair<Bitmap, TranslationResult>? {
         val (frame, result) = latest ?: return null
         if (!LiveRules.snapUsesLive(result)) return null
-        return Images.fromRgba(frame.rgba, frame.width, frame.height, frame.rotation) to result
+        val bitmap = withContext(Dispatchers.Default) { Images.fromRgba(frame.rgba, frame.width, frame.height, frame.rotation) }
+        return bitmap to result
     }
 
     /** Runs on the analysis executor for every frame; converts and translates only those [LiveRules] lets through. */
@@ -74,20 +82,22 @@ class LiveTranslator(
         image.use {
             if (!enabled || !take()) return
             val plane = it.planes[0]
-            val factor = LiveRules.downscaleFactor(it.width, it.height)
-            val frame = LiveFrame(
-                LiveRules.packRgba(plane.buffer, it.width, it.height, plane.rowStride, factor, swapRedBlue = false),
-                it.width / factor,
-                it.height / factor,
-                it.imageInfo.rotationDegrees,
+            val crop = it.cropRect
+            val factor = LiveRules.downscaleFactor(crop.width(), crop.height())
+            val free = if (latest?.first?.rgba === buffers[0]) 1 else 0
+            val rgba = LiveRules.packRgba(
+                plane.buffer, crop.width(), crop.height(), plane.rowStride, factor, swapRedBlue = false,
+                left = crop.left, top = crop.top, reuse = buffers[free],
             )
+            buffers[free] = rgba
+            val frame = LiveFrame(rgba, crop.width() / factor, crop.height() / factor, it.imageInfo.rotationDegrees)
             scope.launch { run(frame) }
         }
     }
 
     private fun take(): Boolean = synchronized(lock) {
         val now = SystemClock.elapsedRealtime()
-        if (!LiveRules.shouldTake(busy, hot(), now, lastStartMs)) {
+        if (busy || !LiveRules.shouldTake(busy, hot(), now, lastStartMs, failures, lastFailMs)) {
             false
         } else {
             busy = true
@@ -100,11 +110,16 @@ class LiveTranslator(
         val gen = generation
         try {
             val result = translate(frame)
+            synchronized(lock) { failures = 0 }
             if (gen == generation) publish(frame, result)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "live frame failed", e)
+            synchronized(lock) {
+                failures++
+                lastFailMs = SystemClock.elapsedRealtime()
+            }
         } finally {
             synchronized(lock) { busy = false }
         }

@@ -110,4 +110,41 @@ class LiveRulesTest {
         val bytes = ByteArray(16) { it.toByte() }
         assertArrayEquals(bytes, LiveRules.packRgba(ByteBuffer.wrap(bytes), 2, 2, rowStride = 8, factor = 1, swapRedBlue = false))
     }
+
+    @Test
+    fun backoffDoublesFromOneSecondUpToEight() {
+        assertEquals(0L, LiveRules.backoffMs(0))
+        assertEquals(1000L, LiveRules.backoffMs(1))
+        assertEquals(2000L, LiveRules.backoffMs(2))
+        assertEquals(4000L, LiveRules.backoffMs(3))
+        assertEquals(8000L, LiveRules.backoffMs(4))
+        assertEquals(8000L, LiveRules.backoffMs(40))
+    }
+
+    @Test
+    fun refusesFramesUntilTheBackoffElapses() {
+        assertFalse(LiveRules.shouldTake(busy = false, hot = false, nowMs = 1999, lastStartMs = 1000, failures = 1, lastFailMs = 1000))
+        assertTrue(LiveRules.shouldTake(busy = false, hot = false, nowMs = 2000, lastStartMs = 1000, failures = 1, lastFailMs = 1000))
+        assertFalse(LiveRules.shouldTake(busy = false, hot = false, nowMs = 4999, lastStartMs = 1000, failures = 2, lastFailMs = 3000))
+        assertTrue(LiveRules.shouldTake(busy = false, hot = false, nowMs = 10, lastStartMs = 0, failures = 0, lastFailMs = 5))
+    }
+
+    @Test
+    fun fillMatchesTheViewExactlyWhenTheAspectsAgree() {
+        assertEquals(FillTransform(2f, 0f, 0f), LiveRules.fill(540f, 1200f, 1080f, 2400f))
+    }
+
+    @Test
+    fun packsTheCropRectOnly() {
+        val out = LiveRules.packRgba(padded(), 1, 1, rowStride = 12, factor = 1, swapRedBlue = false, left = 1, top = 1)
+        assertArrayEquals(byteArrayOf(3, 13, 23, 33), out)
+    }
+
+    @Test
+    fun packsIntoTheGivenBufferWhenItFits() {
+        val reuse = ByteArray(16)
+        assertTrue(reuse === LiveRules.packRgba(padded(), 2, 2, rowStride = 12, factor = 1, swapRedBlue = false, reuse = reuse))
+        assertEquals(33.toByte(), reuse[15])
+        assertFalse(reuse === LiveRules.packRgba(padded(), 2, 2, rowStride = 12, factor = 1, swapRedBlue = false, reuse = ByteArray(8)))
+    }
 }

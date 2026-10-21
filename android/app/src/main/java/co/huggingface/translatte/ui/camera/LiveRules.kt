@@ -5,6 +5,7 @@ import uniffi.translatte_ffi.TranslationResult
 import java.nio.ByteBuffer
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.min
 
 /** Places an upright frame of image pixels over the preview: view = image * scale + (left, top). */
 data class FillTransform(val scale: Float, val left: Float, val top: Float)
@@ -17,14 +18,36 @@ object LiveRules {
     /** Minimum time between frame starts while the device is hot. */
     const val HOT_INTERVAL_MS = 1000L
 
+    /** Wait after the first failed frame; doubles with each further failure in a row. */
+    const val BACKOFF_BASE_MS = 1000L
+
+    /** The longest wait after failed frames. */
+    const val BACKOFF_MAX_MS = 8000L
+
     /** How long a tracked box takes to slide to its new place. */
     const val MOVE_MS = 150
 
     fun isActive(enabled: Boolean, sourceInstalled: Boolean): Boolean = enabled && sourceInstalled
 
-    /** Start a frame when none is in flight; on a hot device, also wait a second after the last start. */
-    fun shouldTake(busy: Boolean, hot: Boolean, nowMs: Long, lastStartMs: Long?): Boolean =
-        !busy && (!hot || lastStartMs == null || nowMs - lastStartMs >= HOT_INTERVAL_MS)
+    /** The wait after [failures] frames failed in a row: none for 0, then [BACKOFF_BASE_MS] doubling up to [BACKOFF_MAX_MS]. */
+    fun backoffMs(failures: Int): Long =
+        if (failures <= 0) 0L else min(BACKOFF_MAX_MS, BACKOFF_BASE_MS shl min(failures - 1, 16))
+
+    /**
+     * Start a frame when none is in flight and the [backoffMs] for [failures] has passed since
+     * [lastFailMs]; on a hot device, also wait a second after the last start.
+     */
+    fun shouldTake(
+        busy: Boolean,
+        hot: Boolean,
+        nowMs: Long,
+        lastStartMs: Long?,
+        failures: Int = 0,
+        lastFailMs: Long? = null,
+    ): Boolean =
+        !busy &&
+            (lastFailMs == null || nowMs - lastFailMs >= backoffMs(failures)) &&
+            (!hot || lastStartMs == null || nowMs - lastStartMs >= HOT_INTERVAL_MS)
 
     /** The pixel step that brings the long side within [MAX_FRAME_SIDE]. */
     fun downscaleFactor(width: Int, height: Int): Int =
@@ -47,15 +70,26 @@ object LiveRules {
     }
 
     /**
-     * Copies a 4-byte-per-pixel frame whose rows are [rowStride] bytes apart into tightly packed
-     * RGBA, keeping every [factor]th pixel of every [factor]th row (output: width / factor by
-     * height / factor). [swapRedBlue] reads BGRA.
+     * Copies a [width] x [height] block, starting at pixel ([left], [top]), of a 4-byte-per-pixel
+     * frame whose rows are [rowStride] bytes apart into tightly packed RGBA, keeping every
+     * [factor]th pixel of every [factor]th row (output: width / factor by height / factor).
+     * [swapRedBlue] reads BGRA. Writes into [reuse] when it is exactly the output size.
      */
-    fun packRgba(src: ByteBuffer, width: Int, height: Int, rowStride: Int, factor: Int, swapRedBlue: Boolean): ByteArray {
+    fun packRgba(
+        src: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        factor: Int,
+        swapRedBlue: Boolean,
+        left: Int = 0,
+        top: Int = 0,
+        reuse: ByteArray? = null,
+    ): ByteArray {
         val w = width / factor
         val h = height / factor
-        val out = ByteArray(w * h * 4)
-        if (factor == 1 && !swapRedBlue && rowStride == width * 4) {
+        val out = reuse?.takeIf { it.size == w * h * 4 } ?: ByteArray(w * h * 4)
+        if (factor == 1 && !swapRedBlue && left == 0 && top == 0 && rowStride == width * 4) {
             src.duplicate().apply { rewind() }.get(out)
             return out
         }
@@ -63,7 +97,7 @@ object LiveRules {
         val b = 2 - r
         var o = 0
         for (y in 0 until h) {
-            val row = y * factor * rowStride
+            val row = (top + y * factor) * rowStride + left * 4
             for (x in 0 until w) {
                 val i = row + x * factor * 4
                 out[o] = src.get(i + r)

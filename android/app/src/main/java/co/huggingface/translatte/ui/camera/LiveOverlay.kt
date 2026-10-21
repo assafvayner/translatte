@@ -3,6 +3,9 @@ package co.huggingface.translatte.ui.camera
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -11,6 +14,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import co.huggingface.translatte.ui.theme.AppType
+import co.huggingface.translatte.ui.theme.InnerShape
 import co.huggingface.translatte.ui.result.RegionBox
 import uniffi.translatte_ffi.Point
 
@@ -20,8 +26,16 @@ import uniffi.translatte_ffi.Point
  * their previous position over [LiveRules.MOVE_MS].
  */
 @Composable
-fun LiveOverlay(tracked: List<TrackedRegion>, imageSize: IntSize, modifier: Modifier = Modifier) {
-    val boxes = remember(tracked) { tracked.map { RegionBox(it.region) to center(it.from) } }
+fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
+    val tracked = translator.overlay
+    val imageSize = translator.imageSize
+    val cache = remember { HashMap<Long, RegionBox>() }
+    val boxes = remember(tracked) {
+        val next = tracked.map { RegionBox(it.region, cache[it.id]) to center(it.from) }
+        cache.clear()
+        tracked.forEachIndexed { i, t -> cache[t.id] = next[i].first }
+        next
+    }
     val progress = remember { Animatable(1f) }
     LaunchedEffect(tracked) {
         progress.snapTo(0f)
@@ -35,6 +49,16 @@ fun LiveOverlay(tracked: List<TrackedRegion>, imageSize: IntSize, modifier: Modi
             boxes.forEach { (box, from) ->
                 box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, (from.x - box.cx) * rest, (from.y - box.cy) * rest)
             }
+        }
+    }
+}
+
+/** The debug readout of [translator]'s latest update, read here so the rest of the screen doesn't recompose with it. */
+@Composable
+fun LiveReadout(translator: LiveTranslator, modifier: Modifier = Modifier) {
+    translator.readout?.let {
+        Surface(shape = InnerShape, color = Scrim, contentColor = OnScrim, modifier = modifier) {
+            Text(it, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = AppType.caption)
         }
     }
 }

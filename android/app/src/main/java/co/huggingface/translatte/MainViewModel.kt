@@ -134,15 +134,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * mid-translation, and clears the warning once memory recovers. Runs on the engine dispatcher.
      */
     private suspend fun checkMemory() {
-        val app = getApplication<Application>()
-        val info = ActivityManager.MemoryInfo().also(app.getSystemService(ActivityManager::class.java)::getMemoryInfo)
-        if (info.availMem < MIN_FREE_MEMORY && !translatte.modelsLoaded) {
-            throw LowMemoryException(
-                "Not enough free memory to load the models (${formatSize(info.availMem)} free, needs " +
-                    "${formatSize(MIN_FREE_MEMORY)}). Close other apps and try again.",
-            )
+        if (!translatte.modelsLoaded) {
+            val app = getApplication<Application>()
+            val info = ActivityManager.MemoryInfo().also(app.getSystemService(ActivityManager::class.java)::getMemoryInfo)
+            if (info.availMem < MIN_FREE_MEMORY) {
+                throw LowMemoryException(
+                    "Not enough free memory to load the models (${formatSize(info.availMem)} free, needs " +
+                        "${formatSize(MIN_FREE_MEMORY)}). Close other apps and try again.",
+                )
+            }
         }
-        withContext(Dispatchers.Main) { memoryWarning = null }
+        if (memoryWarning != null) withContext(Dispatchers.Main) { memoryWarning = null }
     }
 
     /** Bytes still to fetch for [ids], counting partial downloads that will resume. */
@@ -181,7 +183,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun translateFrame(frame: LiveFrame): TranslationResult {
         val source = sourceCode
         return withContext(translatte.engineDispatcher) {
-            checkMemory()
+            try {
+                checkMemory()
+            } catch (e: LowMemoryException) {
+                if (memoryWarning != e.message) withContext(Dispatchers.Main) { memoryWarning = e.message }
+                throw e
+            }
             engine.translateFrame(frame.rgba, frame.width.toUInt(), frame.height.toUInt(), frame.rotation.toUInt(), source).also {
                 translatte.modelsLoaded = true
             }

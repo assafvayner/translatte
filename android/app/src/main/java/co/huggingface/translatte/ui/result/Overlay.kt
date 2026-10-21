@@ -134,7 +134,7 @@ private class Fit(bitmap: Bitmap, container: Size) {
 }
 
 /** A region as a rotated rectangle in image pixels; drawn by the result viewer and the live camera overlay. */
-internal class RegionBox(val region: Region) {
+internal class RegionBox(val region: Region, previous: RegionBox? = null) {
     private val c = region.corners
     val width = max(dist(0, 1), dist(3, 2))
     val height = max(dist(0, 3), dist(1, 2))
@@ -143,8 +143,15 @@ internal class RegionBox(val region: Region) {
 
     private val background = Paint().apply { color = region.background.argb() }
 
-    /** The fitted text for the last on-screen box size; refitting only happens on resize. */
+    /** The fitted text for the last on-screen box size; refitting only happens on a resize of [LAYOUT_TOLERANCE] or more. */
     private var layout: Pair<Pair<Float, Float>, StaticLayout>? = null
+
+    init {
+        val old = previous?.region
+        if (old != null && old.translatedText == region.translatedText && old.foreground == region.foreground) {
+            layout = previous.layout
+        }
+    }
 
     private fun dist(a: Int, b: Int) = hypot(c[a].x - c[b].x, c[a].y - c[b].y)
 
@@ -158,7 +165,7 @@ internal class RegionBox(val region: Region) {
     }
 
     private fun layoutFor(w: Float, h: Float): StaticLayout {
-        layout?.let { (size, l) -> if (size == (w to h)) return l }
+        layout?.let { (size, l) -> if (abs(size.first - w) < LAYOUT_TOLERANCE && abs(size.second - h) < LAYOUT_TOLERANCE) return l }
         return fitText(region.translatedText.orEmpty(), region.foreground.argb(), w, h).also { layout = (w to h) to it }
     }
 
@@ -177,6 +184,8 @@ internal class RegionBox(val region: Region) {
         canvas.restore()
     }
 }
+
+private const val LAYOUT_TOLERANCE = 4f
 
 private fun Rgb.argb() =
     android.graphics.Color.rgb(r.toInt(), g.toInt(), b.toInt())
