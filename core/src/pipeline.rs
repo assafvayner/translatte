@@ -194,7 +194,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::BBox;
+    use crate::geometry::{BBox, Direction};
     use image::Rgb;
 
     struct FakeDet(Vec<Quad>);
@@ -213,6 +213,7 @@ mod tests {
                 quad: *quad,
                 text: text.into(),
                 confidence,
+                direction: Direction::Horizontal,
             })
         }
     }

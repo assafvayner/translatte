@@ -236,13 +236,14 @@ fn build_block(group: Group, lang: &Language) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{BBox, Pt};
+    use crate::geometry::{BBox, Direction, Pt};
 
     fn line(x0: f32, y0: f32, x1: f32, y1: f32, text: &str) -> Line {
         Line {
             quad: Quad::from_bbox(BBox { x0, y0, x1, y1 }),
             text: text.into(),
             confidence: 0.9,
+            direction: Direction::Horizontal,
         }
     }
 
@@ -487,6 +488,7 @@ mod tests {
             ]),
             text: "tilted".into(),
             confidence: 0.9,
+            direction: Direction::Horizontal,
         };
         let blocks = group_lines(vec![rotated.clone()], &lang(false, true));
         assert_eq!(blocks[0].quad, rotated.quad);
