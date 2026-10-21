@@ -44,6 +44,7 @@ fun MainNav(
     var resultOrigin by rememberSaveable { mutableStateOf(Screen.Home) }
     var hintSeen by remember { mutableStateOf(prefs.resultHintSeen) }
     var live by remember { mutableStateOf(prefs.liveTranslation) }
+    var ocrEngine by remember { mutableStateOf(prefs.ocrEngine) }
     LaunchedEffect(screen) { onScreenChange(screen) }
     val back: () -> Unit = { Nav.back(screen, resultOrigin)?.let { screen = it } }
 
@@ -132,6 +133,12 @@ fun MainNav(
             onLive = {
                 live = it
                 prefs.liveTranslation = it
+            },
+            ocrEngine = ocrEngine,
+            onOcrEngine = {
+                ocrEngine = it
+                prefs.ocrEngine = it
+                vm.setOcrEngine(it)
             },
         )
     }

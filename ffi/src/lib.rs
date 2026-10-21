@@ -11,6 +11,7 @@ use translatte_core::frame::upright_rgb;
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest, ModelEntry, ModelKind};
 use translatte_core::model_store::{InstallState, ModelStore};
+use translatte_core::ocr::OcrEngine as CoreOcrEngine;
 use translatte_core::pipeline::{PipelineOutput, Stage};
 use translatte_core::TranslatteError;
 
@@ -141,12 +142,33 @@ pub struct Region {
     pub angle: f32,
 }
 
-/// Milliseconds each pipeline stage took, for the live camera's debug readout.
-#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+/// Which runtime runs the OCR models (a debug setting for comparing them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum OcrEngine {
+    Ort,
+    NcnnFp32,
+    NcnnFp16,
+}
+
+impl From<OcrEngine> for CoreOcrEngine {
+    fn from(e: OcrEngine) -> Self {
+        match e {
+            OcrEngine::Ort => Self::Ort,
+            OcrEngine::NcnnFp32 => Self::NcnnFp32,
+            OcrEngine::NcnnFp16 => Self::NcnnFp16,
+        }
+    }
+}
+
+/// Milliseconds each pipeline stage took and the OCR engine's short name (`ort`, `ncnn32`,
+/// `ncnn16`), for the live camera's debug readout.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StageTimings {
     pub detect_ms: u32,
     pub recognize_ms: u32,
     pub translate_ms: u32,
+    #[uniffi(default = "ort")]
+    pub ocr_engine: String,
 }
 
 impl From<translatte_core::pipeline::StageTimings> for StageTimings {
@@ -155,6 +177,7 @@ impl From<translatte_core::pipeline::StageTimings> for StageTimings {
             detect_ms: t.detect_ms,
             recognize_ms: t.recognize_ms,
             translate_ms: t.translate_ms,
+            ocr_engine: t.ocr_engine.name().into(),
         }
     }
 }
@@ -268,6 +291,8 @@ struct Cached {
 pub struct Engine {
     store: ModelStore,
     cached: Mutex<Option<Cached>>,
+    /// Locked after `cached` when both are needed.
+    ocr_engine: Mutex<CoreOcrEngine>,
     #[cfg(feature = "download")]
     downloading: Mutex<()>,
 }
@@ -280,9 +305,23 @@ impl Engine {
         Ok(Arc::new(Self {
             store: ModelStore::new(manifest, PathBuf::from(models_dir)),
             cached: Mutex::new(None),
+            ocr_engine: Mutex::new(CoreOcrEngine::default()),
             #[cfg(feature = "download")]
             downloading: Mutex::new(()),
         }))
+    }
+
+    /// Runs OCR on `engine` from now on, reloading the OCR models of a loaded pipeline (the
+    /// translation model stays loaded). NCNN needs `inference.ncnn.param` and `.bin` next to each
+    /// OCR model's `inference.onnx`. On error the previous engine stays. Blocking; call it off the
+    /// main thread.
+    pub fn set_ocr_engine(&self, engine: OcrEngine) -> Result<(), FfiError> {
+        let mut cached = self.lock_cached();
+        if let Some(c) = cached.as_mut() {
+            c.pipeline.set_ocr_engine(&self.store, engine.into())?;
+        }
+        *self.ocr_engine.lock().unwrap_or_else(|e| e.into_inner()) = engine.into();
+        Ok(())
     }
 
     /// Deletes model files the manifest no longer describes (retired models such as the old
@@ -499,7 +538,8 @@ impl Engine {
         });
         if !reusable {
             *cached = None;
-            let pipeline = load_pipeline(&self.store, src, translate, Default::default())?;
+            let engine = *self.ocr_engine.lock().unwrap_or_else(|e| e.into_inner());
+            let pipeline = load_pipeline(&self.store, src, translate, engine)?;
             *cached = Some(Cached {
                 script_pack: src.script_pack.clone().unwrap_or_default(),
                 translate,
@@ -629,7 +669,8 @@ mod tests {
             StageTimings {
                 detect_ms: 1,
                 recognize_ms: 2,
-                translate_ms: 3
+                translate_ms: 3,
+                ocr_engine: "ort".into(),
             }
         );
     }
@@ -684,6 +725,74 @@ mod tests {
             .unwrap();
         assert_eq!((turned.image_width, turned.image_height), (w, h));
         assert_eq!(turned.regions, photo.regions);
+    }
+
+    #[test]
+    fn switching_the_ocr_engine_keeps_the_regions_with_real_models() {
+        let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
+            eprintln!("TRANSLATTE_MODELS not set; skipping");
+            return;
+        };
+        if !PathBuf::from(&models)
+            .join("det/inference.ncnn.param")
+            .exists()
+        {
+            eprintln!("no NCNN models (run scripts/convert_ocr_ncnn.py); skipping");
+            return;
+        }
+        let engine = Engine::new(models.to_string_lossy().into(), manifest_json()).unwrap();
+        let png = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../core/tests/data/bonjour.png"
+        ))
+        .unwrap();
+        let ort = engine
+            .translate_image(png.clone(), "fr".into(), true, None)
+            .unwrap();
+        assert_eq!(ort.timings.ocr_engine, "ort");
+        engine.set_ocr_engine(OcrEngine::NcnnFp32).unwrap();
+        let ncnn = engine
+            .translate_image(png.clone(), "fr".into(), true, None)
+            .unwrap();
+        assert_eq!(ncnn.timings.ocr_engine, "ncnn32");
+        assert_eq!(ncnn.regions, ort.regions);
+        engine.unload();
+        let reloaded = engine
+            .translate_image(png, "fr".into(), true, None)
+            .unwrap();
+        assert_eq!(reloaded.timings.ocr_engine, "ncnn32");
+    }
+
+    #[test]
+    fn a_missing_ncnn_model_keeps_the_previous_engine() {
+        let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
+            eprintln!("TRANSLATTE_MODELS not set; skipping");
+            return;
+        };
+        let dir = tempfile_dir().join("onnx-only");
+        for id in ["det", "rec-latin"] {
+            std::fs::create_dir_all(dir.join(id)).unwrap();
+            for f in ["inference.onnx", "dict.txt"] {
+                let from = PathBuf::from(&models).join(id).join(f);
+                if from.exists() {
+                    std::fs::copy(from, dir.join(id).join(f)).unwrap();
+                }
+            }
+        }
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let png = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../core/tests/data/bonjour.png"
+        ))
+        .unwrap();
+        engine
+            .translate_image(png.clone(), "fr".into(), false, None)
+            .unwrap();
+        assert!(engine.set_ocr_engine(OcrEngine::NcnnFp16).is_err());
+        let out = engine
+            .translate_image(png, "fr".into(), false, None)
+            .unwrap();
+        assert_eq!(out.timings.ocr_engine, "ort");
     }
 
     #[test]

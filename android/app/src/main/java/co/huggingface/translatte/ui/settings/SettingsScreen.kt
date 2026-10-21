@@ -36,6 +36,7 @@ import co.huggingface.translatte.ui.common.ListRow
 import co.huggingface.translatte.ui.common.SectionCard
 import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.Dimens
+import uniffi.translatte_ffi.OcrEngine
 
 @Composable
 fun SettingsScreen(
@@ -44,6 +45,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     live: Boolean = true,
     onLive: (Boolean) -> Unit = {},
+    ocrEngine: OcrEngine = OcrEngine.ORT,
+    onOcrEngine: (OcrEngine) -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val uri = LocalUriHandler.current
@@ -67,6 +70,15 @@ fun SettingsScreen(
                     subtitle = "Translates what the camera sees as you point it. Off: translate when you take a photo.",
                     trailing = { Switch(checked = live, onCheckedChange = null) },
                 )
+            }
+            if (BuildConfig.DEBUG) {
+                SectionCard("OCR engine") {
+                    Column(Modifier.selectableGroup()) {
+                        OcrEngine.entries.forEach { e ->
+                            CheckRow(e.label, selected = e == ocrEngine, onClick = { onOcrEngine(e) })
+                        }
+                    }
+                }
             }
             SectionCard("About") {
                 ListRow("Version", subtitle = BuildConfig.VERSION_NAME)

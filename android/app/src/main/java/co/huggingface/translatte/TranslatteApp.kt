@@ -12,6 +12,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import co.huggingface.translatte.ui.settings.UiPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,7 +30,10 @@ class TranslatteApp : Application() {
     val engine: Engine by lazy {
         val modelsDir = File(filesDir, "models").apply { mkdirs() }
         val manifest = assets.open("manifest.json").bufferedReader().use { it.readText() }
-        Engine(modelsDir.path, manifest)
+        Engine(modelsDir.path, manifest).also {
+            // Nothing is loaded yet, so this only records the choice.
+            if (BuildConfig.DEBUG) runCatching { it.setOcrEngine(UiPrefs(this).ocrEngine) }
+        }
     }
 
     /** Serializes calls that load, use or free models, so the engine never runs two at once. */

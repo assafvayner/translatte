@@ -82,6 +82,10 @@ final class TranslatorModel: ObservableObject {
                 if !usesHostModels {
                     worker.async { _ = try? engine.pruneModels() }
                 }
+                #if DEBUG
+                // Nothing is loaded yet, so this only records the choice.
+                try? engine.setOcrEngine(engine: OcrEngineSetting.stored.engine)
+                #endif
                 self.engine = engine
                 downloads.engine = engine
             }
@@ -240,6 +244,19 @@ final class TranslatorModel: ObservableObject {
                 Task { @MainActor in self.notice = error.localizedDescription }
             } catch {
                 NSLog("translatte: prepare failed: %@", errorMessage(error))
+            }
+        }
+    }
+
+    /// Debug builds: switches the OCR runtime, reloading only the OCR models if they're loaded.
+    func setOcrEngine(_ setting: OcrEngineSetting) {
+        guard let engine else { return }
+        worker.async {
+            do {
+                try engine.setOcrEngine(engine: setting.engine)
+                NSLog("translatte: OCR engine %@", setting.rawValue)
+            } catch {
+                NSLog("translatte: switching the OCR engine failed: %@", errorMessage(error))
             }
         }
     }

@@ -57,10 +57,10 @@ final class LiveRulesTests: XCTestCase {
 
     func testReadoutShowsTheRateAndStageTimes() {
         XCTAssertEqual(
-            LiveRules.readout(intervalMs: 400, timings: StageTimings(detectMs: 120, recognizeMs: 85, translateMs: 40)),
-            "2.5/s · det 120 · rec 85 · tr 40 ms"
+            LiveRules.readout(intervalMs: 400, timings: StageTimings(detectMs: 120, recognizeMs: 85, translateMs: 40, ocrEngine: "ncnn16")),
+            "ncnn16 · 2.5/s · det 120 · rec 85 · tr 40 ms"
         )
-        XCTAssertEqual(LiveRules.readout(intervalMs: nil, timings: noTimings), "–/s · det 0 · rec 0 · tr 0 ms")
+        XCTAssertEqual(LiveRules.readout(intervalMs: nil, timings: noTimings), "ort · –/s · det 0 · rec 0 · tr 0 ms")
     }
 
     func testFillCentersAndCropsLikeThePreview() {

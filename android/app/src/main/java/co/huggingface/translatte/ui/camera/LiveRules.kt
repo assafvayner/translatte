@@ -57,10 +57,10 @@ object LiveRules {
     fun snapUsesLive(result: TranslationResult?): Boolean =
         result != null && result.translationError == null && result.regions.any { it.translatedText != null }
 
-    /** Debug readout, e.g. "2.5/s · det 120 · rec 85 · tr 40 ms"; [intervalMs] is the time since the previous update. */
+    /** Debug readout, e.g. "ort · 2.5/s · det 120 · rec 85 · tr 40 ms"; [intervalMs] is the time since the previous update. */
     fun readout(intervalMs: Long?, timings: StageTimings): String {
         val rate = if (intervalMs == null || intervalMs <= 0) "–" else String.format(Locale.US, "%.1f", 1000.0 / intervalMs)
-        return "$rate/s · det ${timings.detectMs} · rec ${timings.recognizeMs} · tr ${timings.translateMs} ms"
+        return "${timings.ocrEngine} · $rate/s · det ${timings.detectMs} · rec ${timings.recognizeMs} · tr ${timings.translateMs} ms"
     }
 
     /** Scales an image to cover the view and centers it, cropping the overflow, as the camera preview does. */

@@ -23,6 +23,7 @@ import uniffi.translatte_ffi.FfiException
 import uniffi.translatte_ffi.LanguageInfo
 import uniffi.translatte_ffi.LanguagePack
 import uniffi.translatte_ffi.ModelInfo
+import uniffi.translatte_ffi.OcrEngine
 import uniffi.translatte_ffi.ProgressListener
 import uniffi.translatte_ffi.TranslationResult
 import java.io.File
@@ -103,6 +104,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sourceCode = code
         prefs.edit().putString("source", code).apply()
         prepare()
+    }
+
+    /** Debug builds: switches the OCR runtime, reloading only the OCR models if they're loaded. */
+    fun setOcrEngine(ocrEngine: OcrEngine) {
+        viewModelScope.launch(translatte.engineDispatcher) {
+            try {
+                engine.setOcrEngine(ocrEngine)
+                Log.i(TAG, "OCR engine: $ocrEngine")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "switching the OCR engine failed: $e")
+            }
+        }
     }
 
     /**
