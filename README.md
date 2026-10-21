@@ -115,6 +115,27 @@ Both apps keep the same rules in `LiveRules` and `LiveOverlayTracker`: a box mat
 milliseconds on the camera and log each update; on Android, `scripts/android/live-stats.sh [seconds]` summarizes
 them from logcat. The iOS simulator has no camera, so with `-mock-camera <image>` the still is fed as frames.
 
+### Testing live mode with recorded clips
+
+Debug builds can replay a video in place of the camera, at real time and aspect-filled like the preview, with
+the clip's rotation applied: `-mock-video <path>` on iOS, `--es mock_video <path>` on Android (a file in the
+app's external files dir; `--es mock_video_source <code>` picks the source language). It stops at the end and logs
+`live replay done`, or loops with `-mock-video-loop YES` / `--ez mock_video_loop true`. Debug builds also log
+each overlay update and box change (add, move, retext, remove with its reason) as `liveev {json}` lines (logcat tag
+`translatte`, the iOS app's stderr and `Documents/liveev.jsonl`).
+
+```bash
+scripts/live/make-clip.py out/live/synthetic.mp4           # text pans in, holds, slides off (needs ffmpeg)
+scripts/live/run-ios-sim.sh out/live/synthetic.mp4         # "iPhone 18 Pro" simulator
+LIVE_SOURCE=ja scripts/live/run-android.sh clip.mp4        # connected device with the debug app installed
+scripts/live/analyze.py out/live/ios-synthetic/liveev.jsonl --video out/live/ios-synthetic/screen.mp4
+```
+
+The run scripts save the screen recording, the log and `summary.json` under `out/live/`. The analyzer reports
+update rate and stage times, flicker (a text hidden and shown again within 3s) and each text's visible fraction,
+time to clear after a box's last match, churn, the most boxes at once, and frame age for replays; with `--video` it
+extracts a frame per second into `frames/`.
+
 ## Tests
 
 ```bash
