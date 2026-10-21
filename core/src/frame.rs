@@ -10,7 +10,10 @@ pub fn upright_rgb(
     height: u32,
     rotation_degrees: u32,
 ) -> Result<RgbImage> {
-    let expected = width as usize * height as usize * 4;
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(4))
+        .unwrap_or(usize::MAX);
     if rgba.len() != expected {
         return Err(TranslatteError::Image(format!(
             "frame is {} bytes, expected {expected} for {width}x{height} RGBA",

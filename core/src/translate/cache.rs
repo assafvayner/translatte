@@ -81,7 +81,11 @@ impl<T: Translator> Translator for CachingTranslator<T> {
         if misses.is_empty() {
             return Ok(out);
         }
-        let translated = self.inner.translate(&misses, src, tgt)?;
+        let translated = match self.inner.translate(&misses, src, tgt) {
+            Ok(translated) => translated,
+            Err(_) if out.iter().any(Option::is_some) => return Ok(out),
+            Err(e) => return Err(e),
+        };
         for (text, translation) in misses.into_iter().zip(translated) {
             let Some(translation) = translation else {
                 continue;
@@ -220,5 +224,16 @@ mod tests {
         assert!(t
             .translate(&blocks(&["boom"]), &lang("fr"), &lang("en"))
             .is_err());
+    }
+
+    #[test]
+    fn a_failed_batch_keeps_the_cached_blocks() {
+        let mut t = CachingTranslator::new(Recorder::default());
+        t.translate(&blocks(&["a"]), &lang("fr"), &lang("en"))
+            .unwrap();
+        let out = t
+            .translate(&blocks(&["a", "boom"]), &lang("fr"), &lang("en"))
+            .unwrap();
+        assert_eq!(out, vec![Some("A".to_string()), None]);
     }
 }
