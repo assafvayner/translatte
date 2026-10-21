@@ -554,6 +554,7 @@ mod tests {
                 angle: 0.5,
             }],
             translation_error: None,
+            timings: Default::default(),
         };
         let r = TranslationResult::from_output(out, 10, 20);
         assert_eq!((r.image_width, r.image_height), (10, 20));
