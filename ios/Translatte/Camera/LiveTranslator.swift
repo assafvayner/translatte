@@ -85,6 +85,7 @@ final class LiveTranslator: ObservableObject {
     private var latest: (frame: LiveFrame, result: TranslationResult)?
     private var lastDoneMs: Int64?
     private var generation = 0
+    private var pruner: Task<Void, Never>?
 
     init(translate: @escaping (LiveFrame) async throws -> TranslationResult) {
         self.translate = translate
@@ -98,6 +99,8 @@ final class LiveTranslator: ObservableObject {
     /// Clears the overlay and drops results still in flight (source change, live turned off, leaving the camera).
     func reset() {
         generation += 1
+        pruner?.cancel()
+        pruner = nil
         gate.clearFailures()
         tracker.reset()
         overlay = []
@@ -145,7 +148,8 @@ final class LiveTranslator: ObservableObject {
 
     private func publish(_ frame: LiveFrame, _ result: TranslationResult) {
         let now = Self.nowMs()
-        overlay = tracker.update(result.regions)
+        overlay = tracker.update(result.regions, nowMs: now)
+        if !overlay.isEmpty, pruner == nil { pruner = Task { await self.prune() } }
         imageSize = CGSize(width: Int(result.imageWidth), height: Int(result.imageHeight))
         latest = (frame, result)
         #if DEBUG
@@ -154,6 +158,16 @@ final class LiveTranslator: ObservableObject {
         NSLog("translatte: live %@ regions %d", line, result.regions.count)
         #endif
         lastDoneMs = now
+    }
+
+    private func prune() async {
+        while !Task.isCancelled, !overlay.isEmpty {
+            try? await Task.sleep(nanoseconds: UInt64(LiveRules.pruneIntervalMs) * 1_000_000)
+            guard !Task.isCancelled else { return }
+            let kept = tracker.prune(nowMs: Self.nowMs())
+            if kept.count != overlay.count { overlay = kept }
+        }
+        pruner = nil
     }
 
     private nonisolated static func nowMs() -> Int64 {

@@ -27,6 +27,9 @@ object LiveRules {
     /** How long a tracked box takes to slide to its new place. */
     const val MOVE_MS = 150
 
+    /** How often stale boxes are pruned while updates stall. */
+    const val PRUNE_INTERVAL_MS = 100L
+
     fun isActive(enabled: Boolean, sourceInstalled: Boolean): Boolean = enabled && sourceInstalled
 
     /** The wait after [failures] frames failed in a row: none for 0, then [BACKOFF_BASE_MS] doubling up to [BACKOFF_MAX_MS]. */

@@ -111,7 +111,7 @@ continuously and paints English over the preview; the shutter freezes the latest
 viewer (or takes a photo when nothing has been translated yet). Frames go through `Engine::translate_frame`
 (raw RGBA plus a clockwise rotation, about 960x720), at most one at a time and at most one per second when the phone
 runs hot. A cache of recent translations, shared with photos, means only new text reaches the translation model.
-Both apps keep the same rules in `LiveRules` and `LiveOverlayTracker`. Debug builds show updates/s and per-stage
+Both apps keep the same rules in `LiveRules` and `LiveOverlayTracker`: a box matched to the same text stays and slides, an unmatched box disappears 500 ms after its last match (checked every 100 ms, so stalled updates don't leave it behind) or at once when a new box overlaps it, and a frame with no text clears the overlay. Debug builds show updates/s and per-stage
 milliseconds on the camera and log each update; on Android, `scripts/android/live-stats.sh [seconds]` summarizes
 them from logcat. The iOS simulator has no camera, so with `-mock-camera <image>` the still is fed as frames.
 

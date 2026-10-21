@@ -14,67 +14,125 @@ final class LiveOverlayTrackerTests: XCTestCase {
         )
     }
 
-    func testTracksOnlyTranslatedRegions() {
+    func testTracksOnlyTranslatedRegionsWithoutAnOldMatch() {
         var t = LiveOverlayTracker()
-        let out = t.update([region("a", x: 0), region("b", x: 100, translated: .some(nil))])
+        let out = t.update([region("a", x: 0), region("b", x: 100, translated: .some(nil))], nowMs: 0)
         XCTAssertEqual(out.count, 1)
         XCTAssertEqual(out[0].region.sourceText, "a")
         XCTAssertEqual(out[0].from, out[0].region.corners)
-        XCTAssertEqual(out[0].missed, 0)
+        XCTAssertEqual(out[0].lastSeenMs, 0)
     }
 
     func testTheSameTextKeepsItsIdentityAndTranslationAndMovesFromItsOldBox() {
         var t = LiveOverlayTracker()
-        let first = t.update([region("a", x: 0, translated: "A")])[0]
-        let out = t.update([region("a", x: 5, translated: "A2")])
+        let first = t.update([region("a", x: 0, translated: "A")], nowMs: 0)[0]
+        let out = t.update([region("a", x: 5, translated: "A2")], nowMs: 1000)
         XCTAssertEqual(out.count, 1)
         XCTAssertEqual(out[0].id, first.id)
         XCTAssertEqual(out[0].region.translatedText, "A")
         XCTAssertEqual(out[0].from, first.region.corners)
         XCTAssertEqual(out[0].region.corners[0].x, 5)
+        XCTAssertEqual(out[0].lastSeenMs, 1000)
     }
 
     func testChangedTextReplacesTheRegion() {
         var t = LiveOverlayTracker()
-        let first = t.update([region("a", x: 0)])[0]
-        let out = t.update([region("b", x: 5)])
+        let first = t.update([region("a", x: 0)], nowMs: 0)[0]
+        let out = t.update([region("b", x: 5)], nowMs: 100)
         XCTAssertEqual(out.count, 1)
         XCTAssertNotEqual(out[0].id, first.id)
         XCTAssertEqual(out[0].region.translatedText, "B")
         XCTAssertEqual(out[0].from, out[0].region.corners)
     }
 
-    func testUnmatchedRegionsPersistForTwoUpdates() {
+    func testUnmatchedRegionsSurviveUntilTheyHaveGone500msUnseen() {
         var t = LiveOverlayTracker()
-        _ = t.update([region("a", x: 0)])
-        XCTAssertEqual(t.update([]).map(\.missed), [1])
-        XCTAssertEqual(t.update([]).map(\.missed), [2])
-        XCTAssertTrue(t.update([]).isEmpty)
+        let first = t.update([region("a", x: 0)], nowMs: 1000)[0]
+        let other = region("b", x: 200)
+        XCTAssertEqual(t.update([other], nowMs: 1499).first { $0.region.sourceText == "a" }?.id, first.id)
+        XCTAssertEqual(t.update([other], nowMs: 1500).map(\.region.sourceText), ["b"])
     }
 
-    func testLowOverlapIsNotAMatch() {
+    func testAnUnmatchedRegionKeepsItsLastSeenTime() {
         var t = LiveOverlayTracker()
-        let first = t.update([region("a", x: 0)])[0]
-        let out = t.update([region("a", x: 30)])
-        XCTAssertEqual(out.count, 2)
+        _ = t.update([region("a", x: 0)], nowMs: 1000)
+        let out = t.update([region("b", x: 200)], nowMs: 1300)
+        XCTAssertEqual(out.first { $0.region.sourceText == "a" }?.lastSeenMs, 1000)
+        XCTAssertEqual(out.first { $0.region.sourceText == "b" }?.lastSeenMs, 1300)
+    }
+
+    func testAnUnmatchedRegionIsDroppedWhenANewRegionOverlapsIt() {
+        var t = LiveOverlayTracker()
+        _ = t.update([region("a", x: 0)], nowMs: 0)
+        XCTAssertEqual(t.update([region("b", x: 35)], nowMs: 100).map(\.region.sourceText), ["b"])
+    }
+
+    func testTouchingEdgesDoNotOverlap() {
+        var t = LiveOverlayTracker()
+        _ = t.update([region("a", x: 0)], nowMs: 0)
+        XCTAssertEqual(t.update([region("b", x: 40)], nowMs: 100).map(\.region.sourceText), ["b", "a"])
+    }
+
+    func testOverlapRemovalAlsoCountsRegionsWithoutATranslation() {
+        var t = LiveOverlayTracker()
+        _ = t.update([region("a", x: 0)], nowMs: 0)
+        let out = t.update([region("b", x: 35, translated: .some(nil)), region("c", x: 200)], nowMs: 100)
+        XCTAssertEqual(out.map(\.region.sourceText), ["c"])
+    }
+
+    func testAnUpdateWithNoRegionsClearsEverything() {
+        var t = LiveOverlayTracker()
+        _ = t.update([region("a", x: 0)], nowMs: 0)
+        XCTAssertTrue(t.update([], nowMs: 10).isEmpty)
+        XCTAssertTrue(t.regions.isEmpty)
+    }
+
+    func testAMissingTranslationOfTheSameTextKeepsTheOldOne() {
+        var t = LiveOverlayTracker()
+        let first = t.update([region("a", x: 0, translated: "A")], nowMs: 0)[0]
+        let out = t.update([region("a", x: 5, translated: .some(nil))], nowMs: 1000)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[0].id, first.id)
+        XCTAssertEqual(out[0].region.translatedText, "A")
+        XCTAssertEqual(out[0].lastSeenMs, 1000)
+    }
+
+    func testAMissingTranslationOfDifferentTextDoesNotTakeTheOldRegion() {
+        var t = LiveOverlayTracker()
+        _ = t.update([region("a", x: 0, translated: "A")], nowMs: 0)
+        XCTAssertTrue(t.update([region("b", x: 5, translated: .some(nil))], nowMs: 100).isEmpty)
+    }
+
+    func testPruneDropsRegionsUnseenFor500ms() {
+        var t = LiveOverlayTracker()
+        _ = t.update([region("a", x: 0)], nowMs: 1000)
+        XCTAssertEqual(t.prune(nowMs: 1499).count, 1)
+        XCTAssertTrue(t.prune(nowMs: 1500).isEmpty)
+        XCTAssertTrue(t.regions.isEmpty)
+    }
+
+    func testLowOverlapIsNotAMatchAndDropsTheOldRegion() {
+        var t = LiveOverlayTracker()
+        let first = t.update([region("a", x: 0)], nowMs: 0)[0]
+        let out = t.update([region("a", x: 30)], nowMs: 100)
+        XCTAssertEqual(out.count, 1)
         XCTAssertNotEqual(out[0].id, first.id)
-        XCTAssertEqual(out[1].id, first.id)
-        XCTAssertEqual(out[1].missed, 1)
+        XCTAssertEqual(out[0].from, out[0].region.corners)
     }
 
     func testEachPreviousRegionMatchesOnce() {
         var t = LiveOverlayTracker()
-        let first = t.update([region("a", x: 0)])[0]
-        let out = t.update([region("a", x: 0), region("a", x: 2)])
+        let first = t.update([region("a", x: 0)], nowMs: 0)[0]
+        let out = t.update([region("a", x: 0), region("a", x: 2)], nowMs: 100)
         XCTAssertEqual(out.filter { $0.id == first.id }.count, 1)
         XCTAssertEqual(out.count, 2)
     }
 
     func testResetForgetsEverything() {
         var t = LiveOverlayTracker()
-        _ = t.update([region("a", x: 0)])
+        _ = t.update([region("a", x: 0)], nowMs: 0)
         t.reset()
-        XCTAssertTrue(t.update([]).isEmpty)
+        XCTAssertTrue(t.regions.isEmpty)
     }
 
     func testIoUOfBounds() {

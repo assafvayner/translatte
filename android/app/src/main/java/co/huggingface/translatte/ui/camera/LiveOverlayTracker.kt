@@ -6,25 +6,30 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** A live region whose identity survives updates; [from] is where its box was shown before this update. */
-data class TrackedRegion(val id: Long, val region: Region, val from: List<Point>, val missed: Int)
+data class TrackedRegion(val id: Long, val region: Region, val from: List<Point>, val lastSeenMs: Long)
 
 /**
  * Keeps the live overlay steady between updates, with the same rules as iOS's `LiveOverlayTracker`.
- * Each translated new region takes the not-yet-taken previous region it overlaps most (IoU at least
- * [MIN_IOU]). With the same source text, it keeps that region's identity and translation and slides
- * from the old box. With different text, it replaces it. Previous regions nothing took stay for
- * [MAX_MISSED] updates.
+ * Each new region takes the not-yet-taken previous region it overlaps most (IoU at least [MIN_IOU]).
+ * With the same source text, it keeps that region's identity and translation and slides from the old
+ * box, even when its own translation is missing; with different text, a translated one replaces it
+ * and an untranslated one is skipped. Previous regions nothing took stay until they have gone
+ * [MAX_UNSEEN_MS] without a match, unless a new region overlaps them. An update with no regions
+ * clears everything.
  */
 class LiveOverlayTracker {
     var regions: List<TrackedRegion> = emptyList()
         private set
     private var nextId = 0L
 
-    fun update(incoming: List<Region>): List<TrackedRegion> {
+    fun update(incoming: List<Region>, nowMs: Long): List<TrackedRegion> {
+        if (incoming.isEmpty()) {
+            regions = emptyList()
+            return regions
+        }
         val taken = BooleanArray(regions.size)
         val out = mutableListOf<TrackedRegion>()
         for (r in incoming) {
-            if (r.translatedText == null) continue
             var best = -1
             var bestIou = 0f
             regions.forEachIndexed { i, old ->
@@ -34,21 +39,29 @@ class LiveOverlayTracker {
                     bestIou = v
                 }
             }
-            if (best >= 0) taken[best] = true
             val old = regions.getOrNull(best)
-            out += if (old != null && old.region.sourceText == r.sourceText) {
-                TrackedRegion(old.id, r.copy(translatedText = old.region.translatedText), old.region.corners, 0)
-            } else {
-                TrackedRegion(nextId++, r, r.corners, 0)
+            if (old != null && old.region.sourceText == r.sourceText) {
+                taken[best] = true
+                out += TrackedRegion(old.id, r.copy(translatedText = old.region.translatedText), old.region.corners, nowMs)
+            } else if (r.translatedText != null) {
+                if (best >= 0) taken[best] = true
+                out += TrackedRegion(nextId++, r, r.corners, nowMs)
             }
         }
         regions.forEachIndexed { i, old ->
-            if (!taken[i] && old.missed < MAX_MISSED) {
-                out += TrackedRegion(old.id, old.region, old.region.corners, old.missed + 1)
+            if (!taken[i] && nowMs - old.lastSeenMs < MAX_UNSEEN_MS && incoming.none { intersects(old.region.corners, it.corners) }) {
+                out += TrackedRegion(old.id, old.region, old.region.corners, old.lastSeenMs)
             }
         }
         regions = out
         return out
+    }
+
+    /** Drops regions unseen for [MAX_UNSEEN_MS], for when updates stall. */
+    fun prune(nowMs: Long): List<TrackedRegion> {
+        val kept = regions.filter { nowMs - it.lastSeenMs < MAX_UNSEEN_MS }
+        if (kept.size != regions.size) regions = kept
+        return regions
     }
 
     fun reset() {
@@ -57,7 +70,12 @@ class LiveOverlayTracker {
 
     companion object {
         const val MIN_IOU = 0.3f
-        const val MAX_MISSED = 2
+        const val MAX_UNSEEN_MS = 500L
+
+        /** Whether the two quads' axis-aligned bounds overlap by a positive area. */
+        fun intersects(a: List<Point>, b: List<Point>): Boolean =
+            min(a.maxOf { it.x }, b.maxOf { it.x }) > max(a.minOf { it.x }, b.minOf { it.x }) &&
+                min(a.maxOf { it.y }, b.maxOf { it.y }) > max(a.minOf { it.y }, b.minOf { it.y })
 
         /** Intersection over union of the two quads' axis-aligned bounds. */
         fun iou(a: List<Point>, b: List<Point>): Float {

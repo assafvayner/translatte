@@ -14,6 +14,8 @@ import co.huggingface.translatte.Images
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.translatte_ffi.TranslationResult
@@ -57,10 +59,13 @@ class LiveTranslator(
     private val buffers = arrayOfNulls<ByteArray>(2)
     private var lastDoneMs: Long? = null
     private var generation = 0
+    private var pruner: Job? = null
 
     /** Clears the overlay and drops results still in flight (source change, live turned off). Main thread. */
     fun reset() {
         generation++
+        pruner?.cancel()
+        pruner = null
         synchronized(lock) { failures = 0 }
         tracker.reset()
         overlay = emptyList()
@@ -127,7 +132,8 @@ class LiveTranslator(
 
     private fun publish(frame: LiveFrame, result: TranslationResult) {
         val now = SystemClock.elapsedRealtime()
-        overlay = tracker.update(result.regions)
+        overlay = tracker.update(result.regions, now)
+        if (overlay.isNotEmpty() && pruner == null) pruner = scope.launch { prune() }
         imageSize = IntSize(result.imageWidth.toInt(), result.imageHeight.toInt())
         latest = frame to result
         if (BuildConfig.DEBUG) {
@@ -136,5 +142,14 @@ class LiveTranslator(
             Log.i(TAG, "live $line regions ${result.regions.size}")
         }
         lastDoneMs = now
+    }
+
+    private suspend fun prune() {
+        while (overlay.isNotEmpty()) {
+            delay(LiveRules.PRUNE_INTERVAL_MS)
+            val kept = tracker.prune(SystemClock.elapsedRealtime())
+            if (kept.size != overlay.size) overlay = kept
+        }
+        pruner = null
     }
 }

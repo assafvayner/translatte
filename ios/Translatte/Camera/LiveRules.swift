@@ -22,6 +22,8 @@ enum LiveRules {
     static let backoffMaxMs: Int64 = 8000
     /// How long a tracked box takes to slide to its new place.
     static let moveMs = 150
+    /// How often stale boxes are pruned while updates stall.
+    static let pruneIntervalMs: Int64 = 100
 
     static func isActive(enabled: Bool, sourceInstalled: Bool) -> Bool {
         enabled && sourceInstalled
