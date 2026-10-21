@@ -4,16 +4,27 @@ import SwiftUI
 /// The full-screen camera the app opens to once it's set up.
 struct CameraScreen: View {
     @ObservedObject var camera: CameraController
+    @ObservedObject var live: LiveTranslator
+    @AppStorage(LiveRules.storageKey) private var liveSetting = true
     @EnvironmentObject private var model: TranslatorModel
     @EnvironmentObject private var navigator: AppNavigator
     @Environment(\.scenePhase) private var scenePhase
     @State private var pickingLanguages = false
     @State private var capturing = false
 
+    private var liveActive: Bool {
+        LiveRules.isActive(enabled: liveSetting, sourceInstalled: model.sourceLanguages.contains { $0.code == model.sourceCode })
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             viewfinder
+            if liveActive {
+                LiveOverlay(tracked: live.overlay, imageSize: live.imageSize, rtl: model.targetIsRTL)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
             VStack(spacing: 0) {
                 LinearGradient(colors: [CameraStyle.edge, .clear], startPoint: .top, endPoint: .bottom)
                     .frame(height: 96)
@@ -25,6 +36,19 @@ struct CameraScreen: View {
                 topBar
                     .padding(.horizontal, Metrics.gutter)
                     .padding(.top, 8)
+                #if DEBUG
+                if let readout = live.readout {
+                    Text(readout)
+                        .font(Typography.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(CameraStyle.control, in: RoundedRectangle(cornerRadius: 8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Metrics.gutter)
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("live-readout")
+                }
+                #endif
                 Spacer()
                 bottomBar
             }
@@ -43,14 +67,29 @@ struct CameraScreen: View {
             }
             if navigator.cameraAccess == .authorized { camera.start() }
         }
-        .onDisappear { camera.stop() }
+        .onDisappear {
+            camera.stop()
+            live.enabled = false
+            live.reset()
+        }
         .onChange(of: scenePhase) { _, phase in
+            live.enabled = phase == .active && liveActive
             guard navigator.cameraAccess == .authorized else { return }
             if phase == .active {
                 camera.start()
             } else if phase == .background {
                 camera.stop()
             }
+        }
+        .onChange(of: liveActive, initial: true) { _, active in
+            live.enabled = active && scenePhase == .active
+            camera.setFramesEnabled(active)
+            if !active { live.reset() }
+        }
+        .onChange(of: model.sourceCode) { live.reset() }
+        .task(id: liveActive) {
+            guard liveActive, let mock = camera.mockImage else { return }
+            await live.runMock(mock)
         }
         .sheet(isPresented: $pickingLanguages) {
             LanguagePickerSheet().environmentObject(model)
@@ -130,6 +169,11 @@ struct CameraScreen: View {
     }
 
     private func shoot() {
+        if let frozen = live.snapshot() {
+            model.showLive(image: frozen.image, result: frozen.result)
+            navigator.showResult(from: .camera)
+            return
+        }
         guard !capturing else { return }
         capturing = true
         Task {

@@ -4,6 +4,7 @@ import SwiftUI
 struct TranslatteApp: App {
     @StateObject private var model: TranslatorModel
     @StateObject private var camera: CameraController
+    @StateObject private var live: LiveTranslator
     @StateObject private var navigator: AppNavigator
     @StateObject private var dialogs = DialogCenter()
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
@@ -15,6 +16,9 @@ struct TranslatteApp: App {
         let camera = CameraController(mockImagePath: UserDefaults.standard.string(forKey: "mock-camera"))
         _model = StateObject(wrappedValue: model)
         _camera = StateObject(wrappedValue: camera)
+        let live = LiveTranslator { [model] frame in try await model.translateFrame(frame) }
+        camera.onFrame { [weak live] buffer in live?.offer(buffer) }
+        _live = StateObject(wrappedValue: live)
         _navigator = StateObject(wrappedValue: AppNavigator(
             modelsReady: model.modelsReady,
             cameraAccess: camera.isMock ? .authorized : .current()
@@ -23,7 +27,7 @@ struct TranslatteApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(camera: camera)
+            RootView(camera: camera, live: live)
                 .font(Typography.body)
                 .accessibilityHidden(dialogs.current != nil)
                 .overlay { DialogHost() }
