@@ -2,15 +2,22 @@ package co.huggingface.translatte.ui.camera
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.os.PowerManager
+import android.util.Size
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.ZoomState
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -53,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,23 +80,34 @@ import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.Dimens
 import co.huggingface.translatte.ui.theme.InnerShape
 import co.huggingface.translatte.ui.theme.SheetShape
+import uniffi.translatte_ffi.TranslationResult
 import java.io.File
+import java.util.concurrent.Executors
 
 /** Fixed espresso scrims and cream text, the same in both themes and on iOS. */
 private val Scrim = Color(0x9916110E)
 private val OnScrim = Color(0xFFF1E6D8)
 private val ScrimEdge = Color(0x8C16110E)
 
+/** Preview and live frames share one aspect ratio, so the live overlay lines up with the preview. */
+private val FourByThree = ResolutionSelector.Builder()
+    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+    .build()
+
 /**
  * The landing screen: a CameraX viewfinder with controls on a fixed dark scrim in either theme.
  * Binding follows the activity lifecycle, so the camera stops in the background, and unbinds when
- * the screen is left.
+ * the screen is left. With [live], frames are translated continuously and painted over the preview.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraScreen(
     direction: String,
     languageBar: @Composable () -> Unit,
+    live: Boolean,
+    sourceCode: String,
+    translateFrame: suspend (LiveFrame) -> TranslationResult,
+    onLiveSnap: (Bitmap, TranslationResult) -> Unit,
     onBack: () -> Unit,
     onCaptured: (File) -> Unit,
     onPermissionResult: (granted: Boolean) -> Unit,
@@ -119,6 +138,39 @@ fun CameraScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf(false) }
 
+    val scope = rememberCoroutineScope()
+    val liveTranslator = remember {
+        val power = context.getSystemService(PowerManager::class.java)
+        LiveTranslator(scope, translateFrame) { power.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE }
+    }
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val analysis = remember {
+        ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                    .setResolutionStrategy(
+                        ResolutionStrategy(Size(960, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
+                    )
+                    .build(),
+            )
+            .build()
+            .also { it.setAnalyzer(analysisExecutor, liveTranslator) }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            analysis.clearAnalyzer()
+            analysisExecutor.shutdown()
+        }
+    }
+    LaunchedEffect(live) {
+        liveTranslator.enabled = live
+        if (!live) liveTranslator.reset()
+    }
+    LaunchedEffect(sourceCode) { liveTranslator.reset() }
+
     LaunchedEffect(granted) {
         if (!granted) return@LaunchedEffect
         val future = ProcessCameraProvider.getInstance(context)
@@ -134,12 +186,14 @@ fun CameraScreen(
             ContextCompat.getMainExecutor(context),
         )
     }
-    DisposableEffect(provider, lifecycleOwner) {
+    DisposableEffect(provider, lifecycleOwner, live) {
         val p = provider ?: return@DisposableEffect onDispose {}
-        val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+        val preview = Preview.Builder().setResolutionSelector(FourByThree).build()
+            .also { it.surfaceProvider = previewView.surfaceProvider }
+        val useCases = listOfNotNull(preview, capture, analysis.takeIf { live })
         p.unbindAll()
         camera = try {
-            p.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+            p.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, *useCases.toTypedArray())
         } catch (e: IllegalArgumentException) {
             error = "No back camera available."
             null
@@ -181,8 +235,27 @@ fun CameraScreen(
         )
     }
 
+    fun snap() {
+        val frozen = liveTranslator.snapshot()
+        if (frozen != null) onLiveSnap(frozen.first, frozen.second) else shoot()
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (granted) AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        if (granted && live) {
+            LiveOverlay(liveTranslator.overlay, liveTranslator.imageSize, Modifier.fillMaxSize())
+        }
+        liveTranslator.readout?.let {
+            Surface(
+                shape = InnerShape,
+                color = Scrim,
+                contentColor = OnScrim,
+                modifier = Modifier.align(Alignment.TopStart).windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(start = 16.dp, top = 64.dp),
+            ) {
+                Text(it, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = AppType.caption)
+            }
+        }
         val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val navBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         Box(
@@ -242,7 +315,7 @@ fun CameraScreen(
                         .padding(7.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .clickable { shoot() }
+                        .clickable { snap() }
                         .semantics { contentDescription = "Take photo" },
                 )
                 Surface(
