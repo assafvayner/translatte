@@ -74,6 +74,15 @@ class Translations(
         phase = Phase.Done
     }
 
+    /** Shows an already translated [image] (a live camera frame) as a finished translation. */
+    fun show(image: Bitmap, result: TranslationResult) {
+        supersede()
+        this.image = image
+        this.result = result
+        phase = Phase.Done
+        lastSuccess = Translated(image, result)
+    }
+
     private fun supersede(): Int {
         job?.cancel()
         return ++generation

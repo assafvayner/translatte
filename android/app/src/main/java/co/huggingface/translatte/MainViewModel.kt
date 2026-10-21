@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import co.huggingface.translatte.ui.camera.LiveFrame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -173,6 +174,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reopenLast() = translations.reopenLast()
+
+    fun showLive(image: Bitmap, result: TranslationResult) = translations.show(image, result)
+
+    /** Translates one live camera frame from the current source language on the engine dispatcher. */
+    suspend fun translateFrame(frame: LiveFrame): TranslationResult {
+        val source = sourceCode
+        return withContext(translatte.engineDispatcher) {
+            checkMemory()
+            engine.translateFrame(frame.rgba, frame.width.toUInt(), frame.height.toUInt(), frame.rotation.toUInt(), source).also {
+                translatte.modelsLoaded = true
+            }
+        }
+    }
 
     private suspend fun translateOnEngine(bitmap: Bitmap, onStage: (String) -> Unit): TranslationResult {
         val source = sourceCode

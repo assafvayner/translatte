@@ -138,4 +138,24 @@ class TranslationsTest {
         assertEquals(Phase.Failed("No text found. Try moving closer or reducing glare."), t.phase)
         assertNull(t.lastSuccess)
     }
+
+    @Test
+    fun aLiveResultSupersedesARunningTranslationAndBecomesTheLastSuccess() = runBlocking {
+        val engine = FakeEngine()
+        val t = translations(engine)
+        t.start { bitmap() }
+        yield()
+        val frame = bitmap()
+        val live = result("live")
+        t.show(frame, live)
+        assertEquals(Phase.Done, t.phase)
+        assertSame(frame, t.image)
+        assertSame(live, t.result)
+        assertSame(live, t.lastSuccess?.result)
+
+        engine.calls[0].complete(Result.success(result("stale")))
+        yield()
+        yield()
+        assertSame(live, t.result)
+    }
 }
