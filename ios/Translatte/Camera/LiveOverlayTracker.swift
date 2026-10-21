@@ -5,15 +5,15 @@ struct TrackedRegion: Equatable {
     let id: Int
     let region: Region
     let from: [Point]
-    let lastSeenMs: Int64
+    let missedSinceMs: Int64?
 }
 
 /// Keeps the live overlay steady between updates, with the same rules as Android's `LiveOverlayTracker`.
 /// Each new region takes the not-yet-taken previous region it overlaps most (IoU at least `minIoU`).
 /// With the same source text, it keeps that region's identity and translation and slides from the old
 /// box, even when its own translation is missing; with different text, a translated one replaces it
-/// and an untranslated one is skipped. Previous regions nothing took stay until they have gone
-/// `maxUnseenMs` without a match, unless a new region overlaps them. An update with no regions
+/// and an untranslated one is skipped. Previous regions nothing took stay, however long updates
+/// take, until `maxUnseenMs` after the first update that missed them, unless a new region overlaps them. An update with no regions
 /// clears everything.
 struct LiveOverlayTracker {
     static let minIoU: Float = 0.3
@@ -44,25 +44,27 @@ struct LiveOverlayTracker {
                 let old = regions[best]
                 var kept = r
                 kept.translatedText = old.region.translatedText
-                out.append(TrackedRegion(id: old.id, region: kept, from: old.region.corners, lastSeenMs: nowMs))
+                out.append(TrackedRegion(id: old.id, region: kept, from: old.region.corners, missedSinceMs: nil))
             } else if r.translatedText != nil {
                 if best >= 0 { taken[best] = true }
-                out.append(TrackedRegion(id: nextId, region: r, from: r.corners, lastSeenMs: nowMs))
+                out.append(TrackedRegion(id: nextId, region: r, from: r.corners, missedSinceMs: nil))
                 nextId += 1
             }
         }
         for (i, old) in regions.enumerated()
-        where !taken[i] && nowMs - old.lastSeenMs < Self.maxUnseenMs
-            && !incoming.contains(where: { Self.intersects(old.region.corners, $0.corners) }) {
-            out.append(TrackedRegion(id: old.id, region: old.region, from: old.region.corners, lastSeenMs: old.lastSeenMs))
+        where !taken[i] && !incoming.contains(where: { Self.intersects(old.region.corners, $0.corners) }) {
+            let missedSince = old.missedSinceMs ?? nowMs
+            if nowMs - missedSince < Self.maxUnseenMs {
+                out.append(TrackedRegion(id: old.id, region: old.region, from: old.region.corners, missedSinceMs: missedSince))
+            }
         }
         regions = out
         return out
     }
 
-    /// Drops regions unseen for `maxUnseenMs`, for when updates stall.
+    /// Drops missed regions `maxUnseenMs` after the update that missed them; never drops on a lack of updates.
     mutating func prune(nowMs: Int64) -> [TrackedRegion] {
-        let kept = regions.filter { nowMs - $0.lastSeenMs < Self.maxUnseenMs }
+        let kept = regions.filter { $0.missedSinceMs.map { nowMs - $0 < Self.maxUnseenMs } ?? true }
         if kept.count != regions.count { regions = kept }
         return regions
     }

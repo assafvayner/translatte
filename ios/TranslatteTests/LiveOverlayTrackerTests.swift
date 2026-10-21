@@ -20,7 +20,7 @@ final class LiveOverlayTrackerTests: XCTestCase {
         XCTAssertEqual(out.count, 1)
         XCTAssertEqual(out[0].region.sourceText, "a")
         XCTAssertEqual(out[0].from, out[0].region.corners)
-        XCTAssertEqual(out[0].lastSeenMs, 0)
+        XCTAssertNil(out[0].missedSinceMs)
     }
 
     func testTheSameTextKeepsItsIdentityAndTranslationAndMovesFromItsOldBox() {
@@ -32,7 +32,7 @@ final class LiveOverlayTrackerTests: XCTestCase {
         XCTAssertEqual(out[0].region.translatedText, "A")
         XCTAssertEqual(out[0].from, first.region.corners)
         XCTAssertEqual(out[0].region.corners[0].x, 5)
-        XCTAssertEqual(out[0].lastSeenMs, 1000)
+        XCTAssertNil(out[0].missedSinceMs)
     }
 
     func testChangedTextReplacesTheRegion() {
@@ -45,20 +45,34 @@ final class LiveOverlayTrackerTests: XCTestCase {
         XCTAssertEqual(out[0].from, out[0].region.corners)
     }
 
-    func testUnmatchedRegionsSurviveUntilTheyHaveGone500msUnseen() {
+    func testARegionMissedByAnUpdateExpiresAfter500msFromThatUpdate() {
         var t = LiveOverlayTracker()
-        let first = t.update([region("a", x: 0)], nowMs: 1000)[0]
+        let first = t.update([region("a", x: 0)], nowMs: 0)[0]
         let other = region("b", x: 200)
-        XCTAssertEqual(t.update([other], nowMs: 1499).first { $0.region.sourceText == "a" }?.id, first.id)
-        XCTAssertEqual(t.update([other], nowMs: 1500).map(\.region.sourceText), ["b"])
+        XCTAssertEqual(t.update([other], nowMs: 1800).first { $0.region.sourceText == "a" }?.id, first.id)
+        XCTAssertEqual(t.prune(nowMs: 2299).count, 2)
+        XCTAssertEqual(t.prune(nowMs: 2300).map(\.region.sourceText), ["b"])
     }
 
-    func testAnUnmatchedRegionKeepsItsLastSeenTime() {
+    func testAMissedRegionKeepsItsFirstMissedTime() {
         var t = LiveOverlayTracker()
         _ = t.update([region("a", x: 0)], nowMs: 1000)
-        let out = t.update([region("b", x: 200)], nowMs: 1300)
-        XCTAssertEqual(out.first { $0.region.sourceText == "a" }?.lastSeenMs, 1000)
-        XCTAssertEqual(out.first { $0.region.sourceText == "b" }?.lastSeenMs, 1300)
+        let other = region("b", x: 200)
+        let out = t.update([other], nowMs: 1300)
+        XCTAssertEqual(out.first { $0.region.sourceText == "a" }?.missedSinceMs, 1300)
+        XCTAssertNil(out.first { $0.region.sourceText == "b" }?.missedSinceMs)
+        XCTAssertEqual(t.update([other], nowMs: 1400).first { $0.region.sourceText == "a" }?.missedSinceMs, 1300)
+    }
+
+    func testAMissedRegionThatIsMatchedAgainStays() {
+        var t = LiveOverlayTracker()
+        let first = t.update([region("a", x: 0)], nowMs: 0)[0]
+        _ = t.update([region("b", x: 200)], nowMs: 1800)
+        let out = t.update([region("a", x: 0), region("b", x: 200)], nowMs: 2200)
+        let a = out.first { $0.region.sourceText == "a" }
+        XCTAssertEqual(a?.id, first.id)
+        XCTAssertNil(a?.missedSinceMs)
+        XCTAssertEqual(t.prune(nowMs: 5000).count, 2)
     }
 
     func testAnUnmatchedRegionIsDroppedWhenANewRegionOverlapsIt() {
@@ -94,7 +108,7 @@ final class LiveOverlayTrackerTests: XCTestCase {
         XCTAssertEqual(out.count, 1)
         XCTAssertEqual(out[0].id, first.id)
         XCTAssertEqual(out[0].region.translatedText, "A")
-        XCTAssertEqual(out[0].lastSeenMs, 1000)
+        XCTAssertNil(out[0].missedSinceMs)
     }
 
     func testAMissingTranslationOfDifferentTextDoesNotTakeTheOldRegion() {
@@ -103,12 +117,10 @@ final class LiveOverlayTrackerTests: XCTestCase {
         XCTAssertTrue(t.update([region("b", x: 5, translated: .some(nil))], nowMs: 100).isEmpty)
     }
 
-    func testPruneDropsRegionsUnseenFor500ms() {
+    func testARegionSurvivesALongGapBetweenUpdates() {
         var t = LiveOverlayTracker()
-        _ = t.update([region("a", x: 0)], nowMs: 1000)
-        XCTAssertEqual(t.prune(nowMs: 1499).count, 1)
-        XCTAssertTrue(t.prune(nowMs: 1500).isEmpty)
-        XCTAssertTrue(t.regions.isEmpty)
+        _ = t.update([region("a", x: 0)], nowMs: 0)
+        XCTAssertEqual(t.prune(nowMs: 1900).count, 1)
     }
 
     func testLowOverlapIsNotAMatchAndDropsTheOldRegion() {

@@ -6,15 +6,15 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** A live region whose identity survives updates; [from] is where its box was shown before this update. */
-data class TrackedRegion(val id: Long, val region: Region, val from: List<Point>, val lastSeenMs: Long)
+data class TrackedRegion(val id: Long, val region: Region, val from: List<Point>, val missedSinceMs: Long?)
 
 /**
  * Keeps the live overlay steady between updates, with the same rules as iOS's `LiveOverlayTracker`.
  * Each new region takes the not-yet-taken previous region it overlaps most (IoU at least [MIN_IOU]).
  * With the same source text, it keeps that region's identity and translation and slides from the old
  * box, even when its own translation is missing; with different text, a translated one replaces it
- * and an untranslated one is skipped. Previous regions nothing took stay until they have gone
- * [MAX_UNSEEN_MS] without a match, unless a new region overlaps them. An update with no regions
+ * and an untranslated one is skipped. Previous regions nothing took stay, however long updates
+ * take, until [MAX_UNSEEN_MS] after the first update that missed them, unless a new region overlaps them. An update with no regions
  * clears everything.
  */
 class LiveOverlayTracker {
@@ -42,24 +42,26 @@ class LiveOverlayTracker {
             val old = regions.getOrNull(best)
             if (old != null && old.region.sourceText == r.sourceText) {
                 taken[best] = true
-                out += TrackedRegion(old.id, r.copy(translatedText = old.region.translatedText), old.region.corners, nowMs)
+                out += TrackedRegion(old.id, r.copy(translatedText = old.region.translatedText), old.region.corners, null)
             } else if (r.translatedText != null) {
                 if (best >= 0) taken[best] = true
-                out += TrackedRegion(nextId++, r, r.corners, nowMs)
+                out += TrackedRegion(nextId++, r, r.corners, null)
             }
         }
         regions.forEachIndexed { i, old ->
-            if (!taken[i] && nowMs - old.lastSeenMs < MAX_UNSEEN_MS && incoming.none { intersects(old.region.corners, it.corners) }) {
-                out += TrackedRegion(old.id, old.region, old.region.corners, old.lastSeenMs)
+            if (taken[i] || incoming.any { intersects(old.region.corners, it.corners) }) return@forEachIndexed
+            val missedSince = old.missedSinceMs ?: nowMs
+            if (nowMs - missedSince < MAX_UNSEEN_MS) {
+                out += TrackedRegion(old.id, old.region, old.region.corners, missedSince)
             }
         }
         regions = out
         return out
     }
 
-    /** Drops regions unseen for [MAX_UNSEEN_MS], for when updates stall. */
+    /** Drops missed regions [MAX_UNSEEN_MS] after the update that missed them; never drops on a lack of updates. */
     fun prune(nowMs: Long): List<TrackedRegion> {
-        val kept = regions.filter { nowMs - it.lastSeenMs < MAX_UNSEEN_MS }
+        val kept = regions.filter { it.missedSinceMs == null || nowMs - it.missedSinceMs < MAX_UNSEEN_MS }
         if (kept.size != regions.size) regions = kept
         return regions
     }

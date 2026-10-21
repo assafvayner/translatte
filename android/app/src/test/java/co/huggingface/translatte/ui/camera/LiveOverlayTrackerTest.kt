@@ -2,6 +2,7 @@ package co.huggingface.translatte.ui.camera
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.translatte_ffi.Point
@@ -25,7 +26,7 @@ class LiveOverlayTrackerTest {
         assertEquals(1, out.size)
         assertEquals("a", out[0].region.sourceText)
         assertEquals(out[0].region.corners, out[0].from)
-        assertEquals(0L, out[0].lastSeenMs)
+        assertNull(out[0].missedSinceMs)
     }
 
     @Test
@@ -38,7 +39,7 @@ class LiveOverlayTrackerTest {
         assertEquals("A", out[0].region.translatedText)
         assertEquals(first.region.corners, out[0].from)
         assertEquals(5f, out[0].region.corners[0].x)
-        assertEquals(1000L, out[0].lastSeenMs)
+        assertNull(out[0].missedSinceMs)
     }
 
     @Test
@@ -53,22 +54,36 @@ class LiveOverlayTrackerTest {
     }
 
     @Test
-    fun unmatchedRegionsSurviveUntilTheyHaveGone500msUnseen() {
+    fun aRegionMissedByAnUpdateExpiresAfter500msFromThatUpdate() {
         val t = LiveOverlayTracker()
-        val first = t.update(listOf(region("a", 0f)), 1000)[0]
+        val first = t.update(listOf(region("a", 0f)), 0)[0]
         val other = region("b", 200f)
-        assertEquals(first.id, t.update(listOf(other), 1499).first { it.region.sourceText == "a" }.id)
-        val out = t.update(listOf(other), 1500)
-        assertEquals(listOf("b"), out.map { it.region.sourceText })
+        assertEquals(first.id, t.update(listOf(other), 1800).first { it.region.sourceText == "a" }.id)
+        assertEquals(2, t.prune(2299).size)
+        assertEquals(listOf("b"), t.prune(2300).map { it.region.sourceText })
     }
 
     @Test
-    fun anUnmatchedRegionKeepsItsLastSeenTime() {
+    fun aMissedRegionKeepsItsFirstMissedTime() {
         val t = LiveOverlayTracker()
         t.update(listOf(region("a", 0f)), 1000)
-        val out = t.update(listOf(region("b", 200f)), 1300)
-        assertEquals(1000L, out.first { it.region.sourceText == "a" }.lastSeenMs)
-        assertEquals(1300L, out.first { it.region.sourceText == "b" }.lastSeenMs)
+        val other = region("b", 200f)
+        val out = t.update(listOf(other), 1300)
+        assertEquals(1300L, out.first { it.region.sourceText == "a" }.missedSinceMs)
+        assertNull(out.first { it.region.sourceText == "b" }.missedSinceMs)
+        assertEquals(1300L, t.update(listOf(other), 1400).first { it.region.sourceText == "a" }.missedSinceMs)
+    }
+
+    @Test
+    fun aMissedRegionThatIsMatchedAgainStays() {
+        val t = LiveOverlayTracker()
+        val first = t.update(listOf(region("a", 0f)), 0)[0]
+        t.update(listOf(region("b", 200f)), 1800)
+        val out = t.update(listOf(region("a", 0f), region("b", 200f)), 2200)
+        val a = out.first { it.region.sourceText == "a" }
+        assertEquals(first.id, a.id)
+        assertNull(a.missedSinceMs)
+        assertEquals(2, t.prune(5000).size)
     }
 
     @Test
@@ -111,7 +126,7 @@ class LiveOverlayTrackerTest {
         assertEquals(1, out.size)
         assertEquals(first.id, out[0].id)
         assertEquals("A", out[0].region.translatedText)
-        assertEquals(1000L, out[0].lastSeenMs)
+        assertNull(out[0].missedSinceMs)
     }
 
     @Test
@@ -123,12 +138,10 @@ class LiveOverlayTrackerTest {
     }
 
     @Test
-    fun pruneDropsRegionsUnseenFor500ms() {
+    fun aRegionSurvivesALongGapBetweenUpdates() {
         val t = LiveOverlayTracker()
-        t.update(listOf(region("a", 0f)), 1000)
-        assertEquals(1, t.prune(1499).size)
-        assertTrue(t.prune(1500).isEmpty())
-        assertTrue(t.regions.isEmpty())
+        t.update(listOf(region("a", 0f)), 0)
+        assertEquals(1, t.prune(1900).size)
     }
 
     @Test
