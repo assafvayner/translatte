@@ -60,8 +60,8 @@ fun SettingsScreen(theme: ThemeSetting, onTheme: (ThemeSetting) -> Unit, onBack:
                 )
                 InfoRow(
                     "Translation",
-                    "Hy-MT2 1.8B by Tencent · Apache License 2.0",
-                    onOpen = { uri.openUri("https://huggingface.co/tencent/Hy-MT2-1.8B/blob/main/LICENSE.txt") },
+                    "Mozilla translations models and engine · Mozilla Public License 2.0",
+                    onOpen = { uri.openUri("https://github.com/mozilla/translations") },
                 )
                 InfoRow(
                     "Font",

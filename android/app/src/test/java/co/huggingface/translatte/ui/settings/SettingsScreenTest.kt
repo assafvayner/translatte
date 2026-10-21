@@ -70,7 +70,7 @@ class SettingsScreenTest {
         compose.setContent { TranslatteTheme(dark = false) { SettingsScreen(ThemeSetting.SYSTEM, {}, {}) } }
         compose.onNodeWithText(BuildConfig.VERSION_NAME).assertExists()
         compose.onNodeWithText("PP-OCRv5", substring = true).assertExists()
-        compose.onNodeWithText("Hy-MT2 1.8B by Tencent", substring = true).assertExists()
+        compose.onNodeWithText("Mozilla translations", substring = true).assertExists()
     }
 
     @Test

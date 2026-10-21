@@ -1,61 +1,39 @@
-use std::path::Path;
-
-use crate::manifest::{Language, DETECTOR_ID, TRANSLATOR_ID};
-use crate::model_store::{InstallState, ModelStore};
+use crate::manifest::{Language, DETECTOR_ID};
+use crate::model_store::ModelStore;
 use crate::ocr::detector::Detector;
 use crate::ocr::recognizer::Recognizer;
 use crate::pipeline::Pipeline;
-use crate::translate::batch::BatchTranslator;
-use crate::translate::llama::LlamaGenerator;
+use crate::translate::pair::{PairTranslator, StoreLoader};
 use crate::{Result, TranslatteError};
 
-pub type LoadedPipeline = Pipeline<Detector, Recognizer, BatchTranslator<LlamaGenerator>>;
+pub type LoadedPipeline = Pipeline<Detector, Recognizer, PairTranslator<StoreLoader>>;
 
-fn require_installed(store: &ModelStore, id: &str) -> Result<()> {
-    if store.state(id)? != InstallState::Installed {
-        return Err(TranslatteError::ModelNotInstalled(id.to_string()));
-    }
-    Ok(())
-}
-
-/// Loads the detector, the recognizer for `src`'s script pack and, when `translate` is set, the LLM.
+/// Loads the detector and the recognizer for `src`'s script pack and, when `translate` is set,
+/// a translator that loads `src`'s pair model on first use (or `warm`) and swaps it when another
+/// language with the same script pack is translated.
 pub fn load_pipeline(
     store: &ModelStore,
     src: &Language,
     translate: bool,
 ) -> Result<LoadedPipeline> {
-    load_pipeline_with(store, src, translate, None)
-}
-
-/// Like [`load_pipeline`], but `translator_gguf` replaces the installed translator model.
-pub fn load_pipeline_with(
-    store: &ModelStore,
-    src: &Language,
-    translate: bool,
-    translator_gguf: Option<&Path>,
-) -> Result<LoadedPipeline> {
     let Some(pack) = &src.script_pack else {
         return Err(TranslatteError::NoScriptPack(src.code.clone()));
     };
-    require_installed(store, DETECTOR_ID)?;
-    require_installed(store, pack)?;
-    if translate && translator_gguf.is_none() {
-        require_installed(store, TRANSLATOR_ID)?;
+    store.require_installed(DETECTOR_ID)?;
+    store.require_installed(pack)?;
+    if translate {
+        let pair = src
+            .pair_model
+            .as_ref()
+            .ok_or_else(|| TranslatteError::NoPairModel(src.code.clone()))?;
+        store.require_installed(pair)?;
     }
     let detector = Detector::load(&store.model_file(DETECTOR_ID, "inference.onnx")?)?;
     let recognizer = Recognizer::load(
         &store.model_file(pack, "inference.onnx")?,
         &store.model_file(pack, "dict.txt")?,
     )?;
-    let translator = if translate {
-        let path = match translator_gguf {
-            Some(p) => p.to_path_buf(),
-            None => store.model_file(TRANSLATOR_ID, "model.gguf")?,
-        };
-        Some(BatchTranslator::new(LlamaGenerator::load(&path)?))
-    } else {
-        None
-    };
+    let translator = translate.then(|| PairTranslator::new(StoreLoader::new(store.clone())));
     Ok(Pipeline::new(detector, recognizer, translator).with_script_pack(pack.as_str()))
 }
 
@@ -63,7 +41,7 @@ pub fn load_pipeline_with(
 mod tests {
     use super::*;
     use crate::manifest::tests::SAMPLE;
-    use crate::manifest::Manifest;
+    use crate::manifest::{Manifest, TARGET_LANGUAGE};
 
     fn store() -> (tempfile::TempDir, ModelStore) {
         let dir = tempfile::tempdir().unwrap();
@@ -74,13 +52,21 @@ mod tests {
         (dir, store)
     }
 
+    fn install(store: &ModelStore, id: &str) {
+        for f in &store.manifest().model(id).unwrap().files {
+            let p = store.root().join(&f.path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "abc").unwrap();
+        }
+    }
+
     #[test]
-    fn target_only_language_is_rejected() {
+    fn the_target_language_is_not_a_source() {
         let (_d, s) = store();
-        let he = s.manifest().language("he").unwrap();
+        let en = s.manifest().language(TARGET_LANGUAGE).unwrap();
         assert!(matches!(
-            load_pipeline(&s, he, false),
-            Err(TranslatteError::NoScriptPack(c)) if c == "he"
+            load_pipeline(&s, en, false),
+            Err(TranslatteError::NoScriptPack(c)) if c == "en"
         ));
     }
 
@@ -91,6 +77,12 @@ mod tests {
         assert!(matches!(
             load_pipeline(&s, fr, true),
             Err(TranslatteError::ModelNotInstalled(id)) if id == DETECTOR_ID
+        ));
+        install(&s, "det");
+        install(&s, "rec-latin");
+        assert!(matches!(
+            load_pipeline(&s, fr, true),
+            Err(TranslatteError::ModelNotInstalled(id)) if id == "pair-fr-en"
         ));
     }
 }

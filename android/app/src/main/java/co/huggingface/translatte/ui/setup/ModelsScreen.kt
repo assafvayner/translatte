@@ -43,7 +43,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import co.huggingface.translatte.DownloadState
 import co.huggingface.translatte.R
@@ -55,6 +54,7 @@ import co.huggingface.translatte.ui.common.SmallButton
 import co.huggingface.translatte.ui.common.SmallOutlinedButton
 import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.Dimens
+import uniffi.translatte_ffi.LanguagePack
 import uniffi.translatte_ffi.ModelInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,13 +64,36 @@ import uniffi.translatte_ffi.ModelState
 internal fun packChecked(core: Boolean, installed: Boolean, setup: Boolean, selected: Boolean): Boolean =
     core || installed || (setup && selected)
 
+/** The models among [ids] still to download, each once. */
+internal fun missingModels(models: List<ModelInfo>, ids: List<String>): List<String> =
+    ids.distinct().filter { id -> models.firstOrNull { it.id == id }?.state != ModelState.INSTALLED }
+
+/** Combined (bytes done, bytes total) of the models among [ids] in the current download, if any. */
+internal fun packProgress(progress: Map<String, Pair<Long, Long>>, ids: List<String>): Pair<Long, Long>? {
+    val parts = ids.mapNotNull { progress[it] }
+    return if (parts.isEmpty()) null else parts.sumOf { it.first } to parts.sumOf { it.second }
+}
+
+/** A row owns the running download only when every model it still needs is part of it. */
+internal fun ownsDownload(missing: List<String>, inFlight: Set<String>): Boolean =
+    missing.isNotEmpty() && inFlight.containsAll(missing)
+
+/** Installed packs show their size; the rest show what is left to download. */
+internal fun packStatus(pack: LanguagePack): String = when (pack.state) {
+    ModelState.INSTALLED -> "Installed · ${formatSize(pack.sizeBytes.toLong())}"
+    ModelState.INCOMPLETE -> "Incomplete · ${formatSize(pack.remainingBytes())}"
+    ModelState.NOT_INSTALLED -> formatSize(pack.remainingBytes())
+}
+
 /**
- * First-run setup ([setup] = true: core models plus chosen packs, one Download button) and the
- * Languages screen (per-pack download and delete).
+ * First-run setup ([setup] = true: the core models plus chosen languages, one Download button) and
+ * the Languages screen (per-language download and delete). A language pack is its OCR script pack
+ * plus its translation model; languages that share a script pack download it once.
  */
 @Composable
 fun ModelsScreen(
     models: List<ModelInfo>,
+    packs: List<LanguagePack>,
     downloads: DownloadState,
     setup: Boolean,
     error: String?,
@@ -80,30 +103,41 @@ fun ModelsScreen(
     onBack: (() -> Unit)?,
 ) {
     val context = LocalContext.current
-    var selected by rememberSaveable { mutableStateOf(setOf("rec-latin")) }
-    val pending = models.filter { it.state != ModelState.INSTALLED }
-    val wanted = if (setup) pending.filter { it.core || it.id in selected } else emptyList()
-    val needed = wanted.sumOf { it.remainingBytes() }
-    val hasPack = models.any { !it.core && (it.state == ModelState.INSTALLED || it.id in selected) }
+    var selected by rememberSaveable { mutableStateOf(setOf<String>()) }
+    val core = models.filter { it.core }
+    val wanted = if (setup) {
+        missingModels(models, core.map { it.id } + packs.filter { it.code in selected }.flatMap { it.modelIds })
+    } else {
+        emptyList()
+    }
+    val needed = models.filter { it.id in wanted }.sumOf { it.remainingBytes() }
+    val hasPack = packs.any { it.state == ModelState.INSTALLED || it.code in selected }
     var free by remember { mutableLongStateOf(Long.MAX_VALUE) }
     LaunchedEffect(downloads.finished, models) {
         free = withContext(Dispatchers.IO) { StatFs(context.filesDir.path).availableBytes }
     }
+    val progressOf = { ids: List<String>, installed: Boolean ->
+        if (downloads.running && !installed) packProgress(downloads.progress, ids) else null
+    }
+    val owns = { p: LanguagePack ->
+        p.state != ModelState.INSTALLED && ownsDownload(missingModels(models, p.modelIds), downloads.progress.keys)
+    }
 
-    val row: @Composable (ModelInfo) -> Unit = { m ->
-        ModelRow(
-            model = m,
-            progress = downloads.progress[m.id].takeIf { downloads.running && m.state != ModelState.INSTALLED },
-            size = formatSize(m.sizeBytes.toLong()),
-            onCheck = if (setup && !m.core && m.state != ModelState.INSTALLED) {
-                { checked: Boolean -> selected = if (checked) selected + m.id else selected - m.id }
+    val packRow: @Composable (LanguagePack) -> Unit = { p ->
+        val installed = p.state == ModelState.INSTALLED
+        PackRow(
+            title = p.name,
+            status = packStatus(p),
+            progress = if (owns(p)) progressOf(p.modelIds, installed) else null,
+            onCheck = if (setup && !installed) {
+                { checked: Boolean -> selected = if (checked) selected + p.code else selected - p.code }
             } else {
                 null
             },
-            checked = packChecked(m.core, m.state == ModelState.INSTALLED, setup, m.id in selected),
+            checked = packChecked(false, installed, setup, p.code in selected),
             actions = when {
-                setup || m.core -> null
-                downloads.busy -> if (m.id in downloads.progress && m.state != ModelState.INSTALLED) {
+                setup -> null
+                downloads.busy -> if (owns(p)) {
                     { SmallOutlinedButton("Cancel", onClick = onCancel) }
                 } else {
                     null
@@ -111,14 +145,14 @@ fun ModelsScreen(
                 else -> {
                     {
                         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (m.state != ModelState.INSTALLED) {
+                            if (!installed) {
                                 SmallButton(
-                                    if (m.state == ModelState.INCOMPLETE) "Resume" else "Download",
-                                    enabled = m.remainingBytes() <= free,
-                                ) { onDownload(listOf(m.id)) }
+                                    if (p.state == ModelState.INCOMPLETE) "Resume" else "Download",
+                                    enabled = p.remainingBytes() <= free,
+                                ) { onDownload(missingModels(models, p.modelIds)) }
                             }
-                            if (m.state != ModelState.NOT_INSTALLED || m.downloadedBytes > 0u) {
-                                SmallOutlinedButton("Delete") { onDelete(m.id) }
+                            if (p.deletable) {
+                                SmallOutlinedButton("Delete") { onDelete(p.code) }
                             }
                         }
                     }
@@ -159,7 +193,7 @@ fun ModelsScreen(
                         )
                     }
                     Button(
-                        onClick = { onDownload(wanted.map { it.id }) },
+                        onClick = { onDownload(wanted) },
                         enabled = wanted.isNotEmpty() && hasPack && needed <= free,
                         modifier = Modifier.fillMaxWidth().height(Dimens.buttonHeight),
                     ) { Text(if (needed > 0) "Download ${formatSize(needed)}" else "Download") }
@@ -179,8 +213,19 @@ fun ModelsScreen(
             verticalArrangement = Arrangement.spacedBy(Dimens.spacing),
         ) {
             if (setup) Hero()
-            SectionCard("Always included") { models.filter { it.core }.forEach { row(it) } }
-            SectionCard("Scripts to read") { models.filter { !it.core }.forEach { row(it) } }
+            SectionCard("Always included") {
+                core.forEach { m ->
+                    PackRow(
+                        title = m.displayName,
+                        status = "Required · ${formatSize(m.sizeBytes.toLong())}",
+                        progress = progressOf(listOf(m.id), m.state == ModelState.INSTALLED),
+                        onCheck = null,
+                        checked = true,
+                        actions = null,
+                    )
+                }
+            }
+            SectionCard("Languages to read") { packs.forEach { packRow(it) } }
         }
     }
 }
@@ -211,11 +256,13 @@ private fun Hero() {
 
 private fun ModelInfo.remainingBytes() = (sizeBytes - downloadedBytes).toLong()
 
+private fun LanguagePack.remainingBytes() = (sizeBytes - downloadedBytes).toLong()
+
 @Composable
-private fun ModelRow(
-    model: ModelInfo,
+private fun PackRow(
+    title: String,
+    status: String,
     progress: Pair<Long, Long>?,
-    size: String,
     onCheck: ((Boolean) -> Unit)?,
     checked: Boolean,
     actions: (@Composable () -> Unit)?,
@@ -239,22 +286,7 @@ private fun ModelRow(
                     modifier = Modifier.size(24.dp),
                 )
                 Column(Modifier.weight(1f)) {
-                    Text(model.displayName, style = AppType.headline)
-                    if (model.languages.isNotEmpty()) {
-                        Text(
-                            model.languages.joinToString(", "),
-                            style = AppType.caption,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    val status = when {
-                        model.core -> "Required · $size"
-                        model.state == ModelState.INSTALLED -> "Installed · $size"
-                        model.state == ModelState.INCOMPLETE -> "Incomplete · $size"
-                        else -> size
-                    }
+                    Text(title, style = AppType.headline)
                     Text(status, style = AppType.caption, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

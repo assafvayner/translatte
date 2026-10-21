@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// From / swap / To. From lists installed source packs only; To lists every language. Each opens a
-/// dropdown popover anchored to its chip, as on Android.
+/// From / To. From lists installed source languages in a dropdown popover anchored to its chip, as
+/// on Android; To is the fixed target language.
 struct LanguageBar: View {
     @EnvironmentObject private var model: TranslatorModel
 
@@ -14,24 +14,13 @@ struct LanguageBar: View {
                 languages: model.sourceLanguages,
                 selection: $model.sourceCode
             )
-            Button(action: model.swapLanguages) {
-                Image(systemName: "arrow.left.arrow.right")
-                    .iconFont(17, weight: .semibold)
-                    .frame(width: 44, height: 44)
-                    .foregroundStyle(Palette.onPrimaryContainer)
-                    .background(Palette.primaryContainer, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!model.canSwapLanguages)
-            .opacity(model.canSwapLanguages ? 1 : 0.45)
-            .accessibilityLabel("Swap languages")
-            .accessibilityIdentifier("swap-languages")
             LanguageTile(
                 title: "To",
                 dropdownTitle: "Translate to",
                 id: "to-picker",
-                languages: model.targetLanguages,
-                selection: $model.targetCode
+                languages: model.target.map { [$0] } ?? [],
+                selection: .constant(model.target?.code ?? ""),
+                enabled: false
             )
         }
         .padding(8)
@@ -40,13 +29,14 @@ struct LanguageBar: View {
     }
 }
 
-/// A FROM or TO chip and the dropdown popover it opens.
+/// A FROM or TO chip and, when enabled, the dropdown popover it opens.
 private struct LanguageTile: View {
     let title: String
     let dropdownTitle: String
     let id: String
     let languages: [LanguageInfo]
     @Binding var selection: String
+    var enabled = true
     @State private var picking = false
     @State private var width: CGFloat = 0
     /// Low in its window (the camera's language sheet) the dropdown opens above the chip.
@@ -59,7 +49,9 @@ private struct LanguageTile: View {
                 Overline(title)
                 HStack(spacing: 4) {
                     Text(name).font(Typography.headline).lineLimit(1)
-                    Image(systemName: "chevron.down").iconFont(12, weight: .bold)
+                    if enabled {
+                        Image(systemName: "chevron.down").iconFont(12, weight: .bold)
+                    }
                 }
                 .foregroundStyle(Palette.text)
             }
@@ -75,6 +67,7 @@ private struct LanguageTile: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
         .accessibilityLabel(title)
         .accessibilityValue(name)
         .accessibilityIdentifier(id)

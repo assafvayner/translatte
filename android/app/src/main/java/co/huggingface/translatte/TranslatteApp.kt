@@ -47,12 +47,9 @@ class TranslatteApp : Application() {
      */
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
-        // Debug builds: `run-as <pkg> sh -c 'echo xet_data=debug > files/rust_log'` sets RUST_LOG, and
-        // files/translatte_threads sets TRANSLATTE_THREADS the same way.
+        // Debug builds: `run-as <pkg> sh -c 'echo xet_data=debug > files/rust_log'` sets RUST_LOG.
         if (base.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
-            for ((file, name) in listOf("rust_log" to "RUST_LOG", "translatte_threads" to "TRANSLATTE_THREADS")) {
-                File(base.filesDir, file).takeIf { it.exists() }?.let { Os.setenv(name, it.readText().trim(), true) }
-            }
+            File(base.filesDir, "rust_log").takeIf { it.exists() }?.let { Os.setenv("RUST_LOG", it.readText().trim(), true) }
         }
         configureDownloads(File(base.cacheDir, "hf").path)
         Platform.init(base)
@@ -71,7 +68,7 @@ class TranslatteApp : Application() {
             NotificationChannel(DOWNLOAD_CHANNEL, "Model downloads", NotificationManager.IMPORTANCE_LOW),
         )
 
-        // Free the ~3GB of loaded models once the app has been in the background for a while.
+        // Free the loaded models once the app has been in the background for a while.
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 releaseJob?.cancel()
@@ -87,8 +84,8 @@ class TranslatteApp : Application() {
     }
 
     /**
-     * A backgrounded app holding ~3GB is the low-memory killer's first pick (e.g. while the camera
-     * app is open), so free the models as soon as the system asks instead of waiting for the timer.
+     * A backgrounded app holding loaded models is an early pick for the low-memory killer (e.g. while
+     * the camera app is open), so free them as soon as the system asks instead of waiting for the timer.
      * They're prepared again when the app returns to the foreground.
      */
     override fun onTrimMemory(level: Int) {

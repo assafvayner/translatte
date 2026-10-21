@@ -82,7 +82,7 @@ impl From<InstallState> for ModelState {
 pub struct ModelInfo {
     pub id: String,
     pub display_name: String,
-    /// Core models are required and can't be deleted; the rest are script packs.
+    /// Core models are required and can't be deleted; the rest are script packs and pair models.
     pub core: bool,
     pub size_bytes: u64,
     /// Bytes already on disk, including partial downloads that will resume.
@@ -90,6 +90,24 @@ pub struct ModelInfo {
     pub state: ModelState,
     /// Names of the source languages this pack reads.
     pub languages: Vec<String>,
+}
+
+/// What a user downloads to read and translate a language: its OCR script pack and its
+/// translation model. Languages that share a script pack download it once.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LanguagePack {
+    pub code: String,
+    pub name: String,
+    /// The script pack, then the translation model; download both to install the pack.
+    pub model_ids: Vec<String>,
+    pub size_bytes: u64,
+    /// Bytes already on disk, including a script pack another language installed and partial
+    /// downloads that will resume.
+    pub downloaded_bytes: u64,
+    pub state: ModelState,
+    /// Deleting the pack would free space: its translation model, or a script pack no other
+    /// installed language needs, is on disk.
+    pub deletable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
@@ -224,7 +242,7 @@ struct Cached {
 }
 
 /// Entry point for native apps. Pipelines are cached per script pack, so switching between
-/// languages that share a pack (e.g. French and German) doesn't reload models.
+/// languages that share a pack (e.g. French and German) only swaps the translation model.
 #[derive(uniffi::Object)]
 pub struct Engine {
     store: ModelStore,
@@ -246,8 +264,8 @@ impl Engine {
         }))
     }
 
-    /// Deletes model files the manifest no longer describes (retired script packs, a replaced
-    /// translator, partial downloads of other upstream files), so they don't keep taking space
+    /// Deletes model files the manifest no longer describes (retired models such as the old
+    /// LLM translator, replaced files, partial downloads of other upstream files), so they don't keep taking space
     /// after an app update. Returns how many files or directories were removed. Call it once after
     /// creating the engine; it blocks, so call it off the main thread.
     pub fn prune_models(&self) -> Result<u32, FfiError> {
@@ -276,10 +294,36 @@ impl Engine {
             .collect()
     }
 
-    /// Deletes a script pack, including partial downloads. If the pack is in use, all loaded
-    /// models (the translator too) are freed first and this returns true. Fails while a download
-    /// is running, which could otherwise write the pack again.
-    pub fn delete_model(&self, id: String) -> Result<bool, FfiError> {
+    /// Every source language's pack, sorted by name.
+    pub fn language_packs(&self) -> Result<Vec<LanguagePack>, FfiError> {
+        let manifest = self.store.manifest();
+        let mut packs = Vec::new();
+        for l in self.store.source_languages() {
+            let ids = self.store.language_models(l);
+            let mut size_bytes = 0;
+            let mut downloaded_bytes = 0;
+            for id in &ids {
+                size_bytes += manifest.model(id).map_or(0, ModelEntry::total_size);
+                downloaded_bytes += self.store.downloaded_bytes(id)?;
+            }
+            packs.push(LanguagePack {
+                code: l.code.clone(),
+                name: l.name.clone(),
+                model_ids: ids.iter().map(|id| id.to_string()).collect(),
+                size_bytes,
+                downloaded_bytes,
+                state: self.store.language_state(&l.code)?.into(),
+                deletable: self.store.language_deletable(&l.code)?,
+            });
+        }
+        Ok(packs)
+    }
+
+    /// Deletes a language pack: its translation model, and its script pack unless another
+    /// installed language reads with it. If that script is the one loaded, all loaded models are
+    /// freed first and this returns true. Fails while a download is running, which could otherwise
+    /// write the files again.
+    pub fn delete_language(&self, code: String) -> Result<bool, FfiError> {
         #[cfg(feature = "download")]
         let _downloading = match self.downloading.try_lock() {
             Ok(guard) => guard,
@@ -290,12 +334,15 @@ impl Engine {
                 })
             }
         };
+        let language = self.store.manifest().language(&code)?;
         let mut cached = self.lock_cached();
-        let unloaded = cached.as_ref().is_some_and(|c| c.script_pack == id);
+        let unloaded = cached
+            .as_ref()
+            .is_some_and(|c| Some(&c.script_pack) == language.script_pack.as_ref());
         if unloaded {
             *cached = None;
         }
-        self.store.delete(&id)?;
+        self.store.delete_language(&code)?;
         Ok(unloaded)
     }
 
@@ -312,49 +359,39 @@ impl Engine {
             .collect())
     }
 
-    pub fn target_languages(&self) -> Vec<LanguageInfo> {
-        self.store
-            .target_languages()
-            .into_iter()
-            .map(LanguageInfo::from)
-            .collect()
+    /// The language every translation is into.
+    pub fn target_language(&self) -> Result<LanguageInfo, FfiError> {
+        Ok(self.store.target_language()?.into())
     }
 
-    /// Loads the models for `source` and prefills the translator's instruction prefix for
-    /// `source` to `target`, so the next `translate_image` for this pair starts translating sooner.
-    /// Call it when the languages are picked or change. Blocking; call it off the main thread.
-    pub fn prepare(&self, source: String, target: String) -> Result<(), FfiError> {
-        let manifest = self.store.manifest();
-        let src = manifest.language(&source)?;
-        let tgt = manifest.language(&target)?;
+    /// Loads the models for `source`, including its translation model, and runs that once, so the
+    /// next `translate_image` from `source` starts right away. Call it when the source language is
+    /// picked or changes and when the app returns to the foreground. Blocking; call it off the main
+    /// thread.
+    pub fn prepare(&self, source: String) -> Result<(), FfiError> {
+        let src = self.store.manifest().language(&source)?;
+        let tgt = self.store.target_language()?;
         let mut cached = self.lock_cached();
         Ok(self.pipeline(&mut cached, src, true)?.warm(src, tgt)?)
     }
 
-    /// Decodes a PNG or JPEG, runs OCR for `source` and, when `translate` is set, translates into
-    /// `target`. `attempt` seeds the translator's sampling: 0 for a new photo, and a higher value
-    /// on each retry of the same photo so it can come out differently. Blocking; call it off the main thread. The cache holds one pipeline, so a call with
-    /// `translate` unset replaces a cached translating pipeline with an OCR-only one, and the next
-    /// translating call (or `prepare`) reloads the translator.
+    /// Decodes a PNG or JPEG, runs OCR for `source` and, when `translate` is set, translates the
+    /// text into English. Blocking; call it off the main thread. The cache holds one pipeline, so a
+    /// call with `translate` unset replaces a cached translating pipeline with an OCR-only one, and
+    /// the next translating call (or `prepare`) loads the translation model again.
     pub fn translate_image(
         &self,
         image: Vec<u8>,
         source: String,
-        target: String,
         translate: bool,
-        attempt: u32,
         listener: Option<Arc<dyn ProgressListener>>,
     ) -> Result<TranslationResult, FfiError> {
-        let manifest = self.store.manifest();
-        let src = manifest.language(&source)?;
-        let tgt = manifest.language(&target)?;
+        let src = self.store.manifest().language(&source)?;
+        let tgt = self.store.target_language()?;
         let img = image::load_from_memory(&image)?.to_rgb8();
 
         let mut cached = self.lock_cached();
         let pipeline = self.pipeline(&mut cached, src, translate)?;
-        if let Some(t) = pipeline.translator_mut() {
-            t.generator_mut().set_seed(attempt);
-        }
         let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
         Ok(TranslationResult::from_output(
             out,
@@ -392,8 +429,8 @@ impl Engine {
 }
 
 impl Engine {
-    /// A panic mid-run can leave the cached pipeline in a bad state (e.g. llama.cpp's KV cache
-    /// half-updated), so a poisoned lock drops it rather than reusing it.
+    /// A panic mid-run can leave the cached pipeline in a bad state (e.g. a half-run native batch),
+    /// so a poisoned lock drops it rather than reusing it.
     fn lock_cached(&self) -> MutexGuard<'_, Option<Cached>> {
         self.cached.lock().unwrap_or_else(|poisoned| {
             let mut cached = poisoned.into_inner();
@@ -426,10 +463,11 @@ impl Engine {
 }
 
 fn pack_languages(manifest: &Manifest, model: &ModelEntry) -> Vec<String> {
+    let id = Some(model.id.as_str());
     manifest
         .languages
         .iter()
-        .filter(|l| l.script_pack.as_deref() == Some(model.id.as_str()))
+        .filter(|l| l.script_pack.as_deref() == id || l.pair_model.as_deref() == id)
         .map(|l| l.name.clone())
         .collect()
 }
@@ -477,6 +515,28 @@ mod tests {
         .unwrap()
     }
 
+    /// Writes sparse files of the manifest sizes, so `id` reads as installed.
+    fn install(dir: &std::path::Path, id: &str) {
+        let manifest = Manifest::from_json(&manifest_json()).unwrap();
+        for f in &manifest.model(id).unwrap().files {
+            let path = dir.join(&f.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::File::create(&path)
+                .unwrap()
+                .set_len(f.size)
+                .unwrap();
+        }
+    }
+
+    fn pack(engine: &Engine, code: &str) -> LanguagePack {
+        engine
+            .language_packs()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.code == code)
+            .unwrap()
+    }
+
     #[test]
     fn region_conversion_keeps_corner_order_and_colors() {
         let out = PipelineOutput {
@@ -514,16 +574,21 @@ mod tests {
 
     #[test]
     fn empty_models_dir_has_no_source_languages() {
-        let dir = tempfile_dir();
+        let dir = tempfile_dir().join("empty");
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         assert!(!engine.core_installed().unwrap());
         assert!(engine.source_languages().unwrap().is_empty());
-        assert!(engine.target_languages().iter().any(|l| l.code == "en"));
+        assert_eq!(engine.target_language().unwrap().code, "en");
+        let packs = engine.language_packs().unwrap();
+        assert_eq!(packs.len(), 28);
+        assert!(packs
+            .iter()
+            .all(|p| p.state == ModelState::NotInstalled && !p.deletable));
     }
 
     #[test]
-    fn lists_models_with_pack_languages() {
-        let dir = tempfile_dir();
+    fn lists_models_with_their_languages() {
+        let dir = tempfile_dir().join("models");
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         let models = engine.models().unwrap();
         let det = models.iter().find(|m| m.id == "det").unwrap();
@@ -536,32 +601,81 @@ mod tests {
             latin.languages
         );
         assert!(models.iter().all(|m| m.state == ModelState::NotInstalled));
-        assert!(engine.delete_model("det".into()).is_err());
-        assert!(!engine.delete_model("rec-latin".into()).unwrap());
+        assert!(!engine.delete_language("fr".into()).unwrap());
+        assert!(engine.delete_language("en".into()).is_ok());
     }
 
     #[test]
-    fn pruning_an_old_install_leaves_the_new_translator_to_download() {
-        let dir = tempfile_dir();
+    fn a_language_pack_counts_a_shared_script_pack_as_downloaded() {
+        let dir = tempfile_dir().join("packs");
+        for id in ["det", "rec-latin", "pair-fr-en"] {
+            install(&dir, id);
+        }
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let fr = pack(&engine, "fr");
+        assert_eq!(fr.model_ids, vec!["rec-latin", "pair-fr-en"]);
+        assert_eq!(fr.state, ModelState::Installed);
+        assert_eq!(fr.downloaded_bytes, fr.size_bytes);
+        assert!(fr.deletable);
+        let de = pack(&engine, "de");
+        let latin = engine
+            .models()
+            .unwrap()
+            .into_iter()
+            .find(|m| m.id == "rec-latin")
+            .unwrap();
+        assert_eq!(de.state, ModelState::NotInstalled);
+        assert_eq!(de.downloaded_bytes, latin.size_bytes);
+        assert!(!de.deletable, "French still needs the Latin pack");
+        let codes: Vec<_> = engine
+            .source_languages()
+            .unwrap()
+            .into_iter()
+            .map(|l| l.code)
+            .collect();
+        assert_eq!(codes, vec!["fr"]);
+    }
+
+    #[test]
+    fn deleting_a_language_keeps_a_script_pack_another_one_uses() {
+        let dir = tempfile_dir().join("delete-language");
+        for id in ["det", "rec-latin", "pair-fr-en", "pair-de-en"] {
+            install(&dir, id);
+        }
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        assert!(!engine.delete_language("de".into()).unwrap());
+        assert_eq!(pack(&engine, "de").state, ModelState::NotInstalled);
+        assert_eq!(pack(&engine, "fr").state, ModelState::Installed);
+        engine.delete_language("fr".into()).unwrap();
+        assert!(!dir.join("rec-latin").exists());
+        assert!(!dir.join("pair-fr-en").exists());
+    }
+
+    #[test]
+    fn pruning_an_old_install_removes_the_llm_and_retired_packs() {
+        let dir = tempfile_dir().join("prune");
         let old_gguf = dir.join("translator/model.gguf");
         std::fs::create_dir_all(old_gguf.parent().unwrap()).unwrap();
         std::fs::File::create(&old_gguf)
             .unwrap()
-            .set_len(2_489_909_760)
+            .set_len(1_133_080_448)
             .unwrap();
         std::fs::write(dir.join("translator/model.gguf.part"), "old").unwrap();
-        std::fs::create_dir_all(dir.join("rec-el")).unwrap();
-        std::fs::write(dir.join("rec-el/inference.onnx"), "x").unwrap();
+        for retired in ["rec-el", "rec-en"] {
+            std::fs::create_dir_all(dir.join(retired)).unwrap();
+            std::fs::write(dir.join(retired).join("inference.onnx"), "x").unwrap();
+        }
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
 
         assert_eq!(engine.prune_models().unwrap(), 3);
-        assert!(!old_gguf.exists());
-        assert!(!dir.join("rec-el").exists());
+        for gone in ["translator", "rec-el", "rec-en"] {
+            assert!(!dir.join(gone).exists(), "{gone}");
+        }
         let models = engine.models().unwrap();
-        let translator = models.iter().find(|m| m.id == "translator").unwrap();
-        assert_eq!(translator.state, ModelState::NotInstalled);
-        assert_eq!(translator.size_bytes, 1_133_080_448);
-        assert_eq!(translator.downloaded_bytes, 0);
+        assert!(models.iter().all(|m| m.id != "translator"));
+        let pair = models.iter().find(|m| m.id == "pair-fr-en").unwrap();
+        assert!(!pair.core);
+        assert_eq!(pair.languages, vec!["French"]);
         assert_eq!(engine.prune_models().unwrap(), 0);
     }
 
@@ -578,10 +692,10 @@ mod tests {
         let dir = tempfile_dir();
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         let downloading = engine.downloading.lock().unwrap();
-        let err = engine.delete_model("rec-latin".into()).unwrap_err();
+        let err = engine.delete_language("fr".into()).unwrap_err();
         assert!(err.to_string().contains("download is running"), "{err}");
         drop(downloading);
-        assert!(!engine.delete_model("rec-latin".into()).unwrap());
+        assert!(!engine.delete_language("fr".into()).unwrap());
     }
 
     #[cfg(feature = "download")]
@@ -623,19 +737,20 @@ mod tests {
 
     #[test]
     fn errors_are_reported_not_panicked() {
-        let dir = tempfile_dir();
+        let dir = tempfile_dir().join("errors");
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         let err = engine
-            .translate_image(vec![1, 2, 3], "fr".into(), "en".into(), false, 0, None)
+            .translate_image(vec![1, 2, 3], "fr".into(), false, None)
             .unwrap_err();
         assert!(err.to_string().contains("decode"), "{err}");
         let err = engine
-            .translate_image(vec![], "xx".into(), "en".into(), false, 0, None)
+            .translate_image(vec![], "xx".into(), false, None)
             .unwrap_err();
         assert!(err.to_string().contains("unknown language"), "{err}");
-        let err = engine.prepare("xx".into(), "en".into()).unwrap_err();
+        let err = engine.prepare("xx".into()).unwrap_err();
         assert!(err.to_string().contains("unknown language"), "{err}");
-        assert!(engine.prepare("fr".into(), "en".into()).is_err());
+        assert!(engine.prepare("fr".into()).is_err());
+        assert!(engine.delete_language("xx".into()).is_err());
         assert!(Engine::new("/tmp".into(), "{}".into()).is_err());
     }
 
@@ -670,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn translates_hello_world_with_real_models() {
+    fn translates_bonjour_with_real_models() {
         let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
             eprintln!("TRANSLATTE_MODELS not set; skipping");
             return;
@@ -678,25 +793,19 @@ mod tests {
         let engine = Engine::new(models.to_string_lossy().into(), manifest_json()).unwrap();
         let png = std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../core/tests/data/hello_world.png"
+            "/../core/tests/data/bonjour.png"
         ))
         .unwrap();
-        engine.prepare("en".into(), "de".into()).unwrap();
+        engine.prepare("fr".into()).unwrap();
         let recorder = Arc::new(Recorder(Mutex::new(Vec::new())));
         let r = engine
-            .translate_image(
-                png,
-                "en".into(),
-                "de".into(),
-                true,
-                0,
-                Some(recorder.clone()),
-            )
+            .translate_image(png, "fr".into(), true, Some(recorder.clone()))
             .unwrap();
         assert_eq!(r.regions.len(), 1);
-        assert_eq!(r.regions[0].source_text, "HELLO WORLD");
-        let de = r.regions[0].translated_text.clone().unwrap().to_lowercase();
-        assert!(de.contains("hallo"), "{de}");
+        assert_eq!(r.regions[0].source_text.to_lowercase(), "bonjour le monde");
+        let en = r.regions[0].translated_text.clone().unwrap().to_lowercase();
+        assert!(en.contains("world") || en.contains("hello"), "{en}");
+        assert!(r.translation_error.is_none());
         let stages = recorder.0.lock().unwrap();
         assert_eq!(stages.first().map(String::as_str), Some("Detecting"));
         assert!(stages.iter().any(|s| s == "Translating"));

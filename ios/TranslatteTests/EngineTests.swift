@@ -21,13 +21,14 @@ final class EngineTests: XCTestCase {
         let engine = try Engine(modelsDir: dir.path, manifestJson: try manifest())
         XCTAssertFalse(try engine.coreInstalled())
         XCTAssertTrue(try engine.sourceLanguages().isEmpty)
-        XCTAssertTrue(engine.targetLanguages().contains { $0.code == "ja" })
+        XCTAssertEqual(try engine.targetLanguage().code, "en")
+        XCTAssertEqual(try engine.languagePacks().count, 28)
     }
 
     func testRustErrorsSurfaceAsSwiftErrors() throws {
         let dir = FileManager.default.temporaryDirectory
         let engine = try Engine(modelsDir: dir.path, manifestJson: try manifest())
-        XCTAssertThrowsError(try engine.translateImage(image: Data([1, 2, 3]), source: "fr", target: "en", translate: false, attempt: 0, listener: nil))
+        XCTAssertThrowsError(try engine.translateImage(image: Data([1, 2, 3]), source: "fr", translate: false, listener: nil))
         XCTAssertThrowsError(try Engine(modelsDir: dir.path, manifestJson: "{}"))
     }
 
@@ -36,12 +37,12 @@ final class EngineTests: XCTestCase {
         let engine = try Engine(modelsDir: dir.path, manifestJson: try manifest())
         let token = DownloadToken()
         token.cancel()
-        XCTAssertThrowsError(try engine.download(modelIds: ["rec-en"], listener: NoProgress(), token: token)) {
+        XCTAssertThrowsError(try engine.download(modelIds: ["rec-latin"], listener: NoProgress(), token: token)) {
             guard case FfiError.Cancelled = $0 else { return XCTFail("\($0)") }
         }
         XCTAssertThrowsError(try engine.download(modelIds: ["nope"], listener: NoProgress(), token: DownloadToken()))
-        XCTAssertFalse(try engine.deleteModel(id: "rec-en"))
-        XCTAssertThrowsError(try engine.deleteModel(id: "det"))
+        XCTAssertFalse(try engine.deleteLanguage(code: "fr"))
+        XCTAssertThrowsError(try engine.deleteLanguage(code: "xx"))
     }
 
     /// Fetches the smallest pack over HTTPS, checking TLS verification through the platform verifier.
@@ -52,26 +53,27 @@ final class EngineTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let engine = try Engine(modelsDir: dir.path, manifestJson: try manifest())
         let progress = RecordingProgress()
-        try engine.download(modelIds: ["rec-en"], listener: progress, token: DownloadToken())
-        let pack = try XCTUnwrap(try engine.models().first { $0.id == "rec-en" })
+        try engine.download(modelIds: ["rec-latin"], listener: progress, token: DownloadToken())
+        let pack = try XCTUnwrap(try engine.models().first { $0.id == "rec-latin" })
         XCTAssertEqual(pack.state, .installed)
         XCTAssertEqual(pack.downloadedBytes, pack.sizeBytes)
         XCTAssertEqual(progress.last, pack.sizeBytes)
-        XCTAssertFalse(try engine.deleteModel(id: "rec-en"))
-        XCTAssertEqual(try engine.models().first { $0.id == "rec-en" }?.state, .notInstalled)
+        XCTAssertFalse(try engine.deleteLanguage(code: "fr"))
+        XCTAssertEqual(try engine.models().first { $0.id == "rec-latin" }?.state, .notInstalled)
     }
 
-    func testTranslatesHelloWorld() throws {
+    func testTranslatesBonjour() throws {
         guard let models = ProcessInfo.processInfo.environment["TRANSLATTE_MODELS"], !models.isEmpty else {
             throw XCTSkip("TRANSLATTE_MODELS not set")
         }
         let engine = try Engine(modelsDir: models, manifestJson: try manifest())
-        let png = try Data(contentsOf: repo.appendingPathComponent("core/tests/data/hello_world.png"))
-        let result = try engine.translateImage(image: png, source: "en", target: "de", translate: true, attempt: 0, listener: nil)
+        let png = try Data(contentsOf: repo.appendingPathComponent("core/tests/data/bonjour.png"))
+        try engine.prepare(source: "fr")
+        let result = try engine.translateImage(image: png, source: "fr", translate: true, listener: nil)
         XCTAssertEqual(result.regions.count, 1)
-        XCTAssertEqual(result.regions.first?.sourceText, "HELLO WORLD")
+        XCTAssertEqual(result.regions.first?.sourceText.lowercased(), "bonjour le monde")
         let translated = try XCTUnwrap(result.regions.first?.translatedText).lowercased()
-        XCTAssertTrue(translated.contains("hallo"), translated)
+        XCTAssertTrue(translated.contains("world") || translated.contains("hello"), translated)
         XCTAssertNil(result.translationError)
     }
 }

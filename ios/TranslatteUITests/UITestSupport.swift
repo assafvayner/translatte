@@ -6,8 +6,8 @@ enum TestEnv {
         ProcessInfo.processInfo.environment[key].flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    static var helloWorld: String {
-        "\(value("TRANSLATTE_REPO") ?? "")/core/tests/data/hello_world.png"
+    static var bonjour: String {
+        "\(value("TRANSLATTE_REPO") ?? "")/core/tests/data/bonjour.png"
     }
 
     /// A plain white photo with no text in it.

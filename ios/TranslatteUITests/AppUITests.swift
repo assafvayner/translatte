@@ -36,10 +36,10 @@ final class AppUITests: XCTestCase {
 
     func testCameraShutterOpensTheResultAndBackReturnsToWhereItCameFrom() throws {
         let app = try XCUIApplication.withModels([
-            "-mock-camera", TestEnv.helloWorld, "-source", "en", "-target", "de", "-resultHintSeen", "NO",
+            "-mock-camera", TestEnv.bonjour, "-source", "fr", "-resultHintSeen", "NO",
         ])
         XCTAssertTrue(app.element("camera-screen").waitForExistence(timeout: 30), "with a camera the app opens on it")
-        XCTAssertEqual(app.buttons["camera-language-chip"].label, "English → German")
+        XCTAssertEqual(app.buttons["camera-language-chip"].label, "French → English")
 
         app.buttons["camera-shutter"].tap()
         XCTAssertTrue(app.element("result-screen").waitForExistence(timeout: 10))
@@ -81,39 +81,33 @@ final class AppUITests: XCTestCase {
     }
 
     func testCameraLanguageChipOpensThePickers() throws {
-        let app = try XCUIApplication.withModels(["-mock-camera", TestEnv.helloWorld])
+        let app = try XCUIApplication.withModels(["-mock-camera", TestEnv.bonjour])
         XCTAssertTrue(app.element("camera-screen").waitForExistence(timeout: 30))
         app.buttons["camera-language-chip"].tap()
         XCTAssertTrue(app.element("from-picker").waitForExistence(timeout: 5))
         XCTAssertTrue(app.element("to-picker").exists)
-        XCTAssertTrue(app.element("swap-languages").exists)
-        app.buttons["to-picker"].tap()
-        XCTAssertTrue(app.staticTexts["TRANSLATE TO"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.element("swap-languages").exists)
+        XCTAssertFalse(app.buttons["to-picker"].isEnabled, "English is the only target")
     }
 
-    func testLanguagePickersAreDropdownsAndCloseOnSelect() throws {
-        let app = try XCUIApplication.withModels(["-source", "en", "-target", "de"])
+    func testTheFromPickerIsADropdownAndToIsFixed() throws {
+        let app = try XCUIApplication.withModels(["-source", "fr"])
         XCTAssertTrue(app.element("home").waitForExistence(timeout: 30))
         app.buttons["from-picker"].tap()
         XCTAssertTrue(app.staticTexts["TRANSLATE FROM"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["language-en"].isSelected, "the current source is checked")
-        XCTAssertFalse(app.buttons["language-he"].exists, "From lists installed sources only (no Hebrew pack)")
-        app.buttons["language-en"].tap()
+        XCTAssertTrue(app.buttons["language-fr"].isSelected, "the current source is checked")
+        XCTAssertFalse(app.buttons["language-th"].exists, "From lists installed sources only (no Thai pack in the test models)")
+        app.buttons["language-fr"].tap()
         XCTAssertTrue(app.waitUntil(app.staticTexts["TRANSLATE FROM"], "exists == false"), "choosing closes the dropdown")
 
-        app.buttons["to-picker"].tap()
-        XCTAssertTrue(app.staticTexts["TRANSLATE TO"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["language-de"].isSelected)
-        XCTAssertTrue(app.buttons["language-he"].exists, "To lists every language")
-        let french = app.buttons["language-fr"]
-        if !french.isHittable { app.swipeUp() }
-        french.tap()
-        XCTAssertTrue(app.waitUntil(app.staticTexts["TRANSLATE TO"], "exists == false"))
-        XCTAssertEqual(app.buttons["to-picker"].value as? String, "French")
+        let to = app.buttons["to-picker"]
+        XCTAssertEqual(to.value as? String, "English")
+        XCTAssertFalse(to.isEnabled, "English is the only target")
+        XCTAssertFalse(app.element("swap-languages").exists)
     }
 
     func testOriginalModeShowsThePhotoTextAndTranslatedBringsTheBoxesBack() throws {
-        let app = try XCUIApplication.withModels(["-mock-camera", TestEnv.helloWorld, "-source", "en", "-target", "de"])
+        let app = try XCUIApplication.withModels(["-mock-camera", TestEnv.bonjour, "-source", "fr"])
         XCTAssertTrue(app.element("camera-screen").waitForExistence(timeout: 30))
         app.buttons["camera-shutter"].tap()
         let region = app.element("region-0")
@@ -131,23 +125,19 @@ final class AppUITests: XCTestCase {
         XCTAssertFalse(app.element("original-0").exists)
     }
 
-    func testFailedTranslationOffersRetry() throws {
-        let failing = try XCUIApplication.withModels(["-mock-camera", TestEnv.helloWorld, "-source", "en", "-target", "de", "-mock-translation-error", "Translation failed"])
+    func testAFailedTranslationShowsTheErrorWithoutRetry() throws {
+        let failing = try XCUIApplication.withModels(["-mock-camera", TestEnv.bonjour, "-source", "fr", "-mock-translation-error", "Translation failed"])
         XCTAssertTrue(failing.element("camera-screen").waitForExistence(timeout: 30))
         failing.buttons["camera-shutter"].tap()
-        let retry = failing.buttons["result-retry"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 300))
-        XCTAssertTrue(failing.element("result-error").exists)
-        retry.tap()
-        XCTAssertTrue(failing.element("result-error").waitForExistence(timeout: 300), "retry runs the same photo again")
-        XCTAssertTrue(failing.buttons["result-retry"].waitForExistence(timeout: 300))
+        XCTAssertTrue(failing.element("result-error").waitForExistence(timeout: 300))
+        XCTAssertFalse(failing.buttons["result-retry"].exists)
         failing.buttons["result-back"].tap()
         failing.buttons["camera-close"].tap()
         XCTAssertTrue(failing.element("empty-state").waitForExistence(timeout: 5), "failures don't become the last result")
     }
 
     func testNoTextCardHasNoRetry() throws {
-        let app = try XCUIApplication.withModels(["-mock-camera", try TestEnv.blankImage(), "-source", "en", "-target", "de"])
+        let app = try XCUIApplication.withModels(["-mock-camera", try TestEnv.blankImage(), "-source", "fr"])
         XCTAssertTrue(app.element("camera-screen").waitForExistence(timeout: 30))
         app.buttons["camera-shutter"].tap()
         let card = app.element("result-error")
@@ -166,7 +156,7 @@ final class AppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["THEME"].exists)
         XCTAssertTrue(app.element("theme-system").label.contains("translatte in light mode, americano in dark mode"))
         XCTAssertTrue(app.element("credit-ocr").label.contains("PP-OCRv5 by PaddlePaddle · Apache License 2.0"))
-        XCTAssertTrue(app.element("credit-translation").label.contains("Hy-MT2 1.8B by Tencent · Apache License 2.0"))
+        XCTAssertTrue(app.element("credit-translation").label.contains("Mozilla translations models and engine · Mozilla Public License 2.0"))
         let font = app.element("credit-font")
         XCTAssertTrue(font.label.contains("Fraunces · SIL Open Font License 1.1"), font.label)
         XCTAssertTrue(font.label.contains("Font"), font.label)

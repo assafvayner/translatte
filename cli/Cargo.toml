@@ -14,7 +14,7 @@ tls-rustls = ["translatte-core/tls-rustls"]
 tls-native = ["translatte-core/tls-native"]
 
 [dependencies]
-translatte-core = { path = "../core", features = ["llama", "download"] }
+translatte-core = { path = "../core", features = ["pair", "download"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 cosmic-text = "=0.12.1"

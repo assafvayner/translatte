@@ -26,13 +26,13 @@ final class DownloadsTests: XCTestCase {
     func testSuccessfulDownloadReportsProgressAndClearsTheRequest() async {
         let engine = FakeEngine()
         let downloads = makeDownloads(engine)
-        downloads.start(["rec-en"], allowMetered: true)
+        downloads.start(["rec-latin"], allowMetered: true)
         XCTAssertTrue(downloads.running)
-        XCTAssertEqual(downloads.progress["rec-en"], ByteProgress(done: 0, total: 100))
+        XCTAssertEqual(downloads.progress["rec-latin"], ByteProgress(done: 0, total: 100))
         engine.finish(with: .success(()))
         await waitUntil { !downloads.busy }
-        XCTAssertEqual(engine.calls, [["rec-en"]])
-        XCTAssertEqual(downloads.progress["rec-en"], ByteProgress(done: 100, total: 100))
+        XCTAssertEqual(engine.calls, [["rec-latin"]])
+        XCTAssertEqual(downloads.progress["rec-latin"], ByteProgress(done: 100, total: 100))
         XCTAssertNil(downloads.error)
         XCTAssertEqual(downloads.finished, 2, "one bump for the finished model, one for the run")
     }
@@ -40,21 +40,21 @@ final class DownloadsTests: XCTestCase {
     func testCancelStopsTheRunAndDropsPendingRequests() async {
         let engine = FakeEngine()
         let downloads = makeDownloads(engine)
-        downloads.start(["translator"], allowMetered: true)
-        downloads.start(["rec-en"], allowMetered: true)
+        downloads.start(["pair-fr-en"], allowMetered: true)
+        downloads.start(["rec-latin"], allowMetered: true)
         downloads.cancel()
         XCTAssertFalse(downloads.queued)
         XCTAssertTrue(downloads.running, "still unwinding")
         engine.finish(with: .failure(FfiError.Cancelled))
         await waitUntil { !downloads.busy }
-        XCTAssertEqual(engine.calls, [["translator"]])
+        XCTAssertEqual(engine.calls, [["pair-fr-en"]])
         XCTAssertNil(downloads.error)
     }
 
     func testFailureRetriesThenGivesUp() async {
         let engine = FakeEngine(autoFail: "connection reset")
         let downloads = makeDownloads(engine)
-        downloads.start(["rec-en"], allowMetered: true)
+        downloads.start(["rec-latin"], allowMetered: true)
         await waitUntil { !downloads.busy }
         XCTAssertEqual(engine.calls.count, Downloads.maxAttempts)
         XCTAssertEqual(downloads.error, "connection reset")
@@ -65,7 +65,7 @@ final class DownloadsTests: XCTestCase {
         let engine = FakeEngine()
         let downloads = Downloads(defaults: defaults, monitorNetwork: false, backoff: { _ in .seconds(60) })
         downloads.engine = engine
-        downloads.start(["rec-en"], allowMetered: true)
+        downloads.start(["rec-latin"], allowMetered: true)
         engine.finish(with: .failure(FfiError.Failed(reason: "timed out")))
         await waitUntil { !downloads.running }
         XCTAssertEqual(downloads.error, "Download interrupted, retrying: timed out")
@@ -79,7 +79,7 @@ final class DownloadsTests: XCTestCase {
         let engine = FakeEngine()
         let downloads = makeDownloads(engine)
         downloads.networkChanged(available: true, metered: true)
-        downloads.start(["translator"], allowMetered: false)
+        downloads.start(["pair-fr-en"], allowMetered: false)
         XCTAssertFalse(downloads.running)
         XCTAssertTrue(downloads.waitingForUnmetered)
 
@@ -102,7 +102,7 @@ final class DownloadsTests: XCTestCase {
     func testMeteredDownloadsDontWaitWhenAllowed() {
         let downloads = makeDownloads(FakeEngine())
         downloads.networkChanged(available: true, metered: true)
-        downloads.start(["rec-en"], allowMetered: true)
+        downloads.start(["rec-latin"], allowMetered: true)
         XCTAssertTrue(downloads.running)
         XCTAssertFalse(downloads.waitingForUnmetered)
     }
@@ -110,7 +110,7 @@ final class DownloadsTests: XCTestCase {
     func testNoNetworkQueues() {
         let downloads = makeDownloads(FakeEngine())
         downloads.networkChanged(available: false, metered: false)
-        downloads.start(["rec-en"], allowMetered: true)
+        downloads.start(["rec-latin"], allowMetered: true)
         XCTAssertFalse(downloads.running)
         XCTAssertTrue(downloads.queued)
         XCTAssertFalse(downloads.waitingForUnmetered)
@@ -119,12 +119,12 @@ final class DownloadsTests: XCTestCase {
     func testPendingRequestsSurviveRelaunch() async {
         let first = Downloads(defaults: defaults, monitorNetwork: false)
         first.networkChanged(available: false, metered: false)
-        first.start(["det", "rec-en"], allowMetered: false)
+        first.start(["det", "rec-latin"], allowMetered: false)
 
         let engine = FakeEngine()
         let relaunched = makeDownloads(engine)
-        XCTAssertEqual(relaunched.pending, [DownloadRequest(ids: ["det", "rec-en"], allowMetered: false)])
-        await waitUntil { engine.calls == [["det", "rec-en"]] }
+        XCTAssertEqual(relaunched.pending, [DownloadRequest(ids: ["det", "rec-latin"], allowMetered: false)])
+        await waitUntil { engine.calls == [["det", "rec-latin"]] }
         engine.finish(with: .success(()))
         await waitUntil { !relaunched.busy }
         XCTAssertTrue(makeDownloads(FakeEngine()).pending.isEmpty)
@@ -133,7 +133,7 @@ final class DownloadsTests: XCTestCase {
     func testRelaunchWaitsForTheFirstNetworkUpdate() async {
         let first = Downloads(defaults: defaults, monitorNetwork: false)
         first.networkChanged(available: false, metered: false)
-        first.start(["rec-en"], allowMetered: true)
+        first.start(["rec-latin"], allowMetered: true)
 
         let engine = FakeEngine()
         let relaunched = Downloads(defaults: defaults, backoff: { _ in .milliseconds(10) })
@@ -153,15 +153,9 @@ final class DownloadsTests: XCTestCase {
         XCTAssertFalse(Downloads.needsMeteredPrompt(bytes: 2_500_000_000, metered: false))
     }
 
-    func testModelStatusAndRemainingBytes() {
-        func info(core: Bool = false, state: ModelState, downloaded: UInt64 = 0) -> ModelInfo {
-            ModelInfo(id: "x", displayName: "X", core: core, sizeBytes: 8_000_000, downloadedBytes: downloaded, state: state, languages: [])
-        }
-        XCTAssertEqual(info(core: true, state: .notInstalled).status, "Required · 8.0 MB")
-        XCTAssertEqual(info(state: .installed, downloaded: 8_000_000).status, "Installed · 8.0 MB")
-        XCTAssertEqual(info(state: .incomplete, downloaded: 3_000_000).status, "Incomplete · 8.0 MB")
-        XCTAssertEqual(info(state: .notInstalled).status, "8.0 MB")
-        XCTAssertEqual(info(state: .incomplete, downloaded: 3_000_000).remainingBytes, 5_000_000)
+    func testModelRemainingBytes() {
+        let info = ModelInfo(id: "x", displayName: "X", core: false, sizeBytes: 8_000_000, downloadedBytes: 3_000_000, state: .incomplete, languages: [])
+        XCTAssertEqual(info.remainingBytes, 5_000_000)
     }
 }
 
@@ -178,8 +172,8 @@ private final class FakeEngine: ModelDownloading, @unchecked Sendable {
     }
 
     func models() throws -> [ModelInfo] {
-        ["det", "translator", "rec-en"].map {
-            ModelInfo(id: $0, displayName: $0, core: $0 != "rec-en", sizeBytes: 100, downloadedBytes: 0, state: .notInstalled, languages: [])
+        ["det", "pair-fr-en", "rec-latin"].map {
+            ModelInfo(id: $0, displayName: $0, core: $0 == "det", sizeBytes: 100, downloadedBytes: 0, state: .notInstalled, languages: [])
         }
     }
 

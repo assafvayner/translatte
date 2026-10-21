@@ -48,7 +48,6 @@ import co.huggingface.translatte.Phase
 import co.huggingface.translatte.ui.common.GlassCard
 import co.huggingface.translatte.ui.common.GlassChip
 import co.huggingface.translatte.ui.common.SegmentedToggle
-import co.huggingface.translatte.ui.common.SmallButton
 import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.common.GlassIconButton
 import co.huggingface.translatte.ui.common.GlassSurface
@@ -65,7 +64,6 @@ fun ResultScreen(
     direction: String,
     hintSeen: Boolean,
     onHintSeen: () -> Unit,
-    onRetry: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -146,10 +144,7 @@ fun ResultScreen(
             is Phase.Failed -> GlassCard(Modifier.align(Alignment.Center)) {
                 Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                 Text(phase.message, textAlign = TextAlign.Center, style = AppType.body)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onBack) { Text("Back") }
-                    if (phase.retryable) SmallButton("Retry", onClick = onRetry)
-                }
+                TextButton(onClick = onBack) { Text("Back") }
             }
             else -> {}
         }

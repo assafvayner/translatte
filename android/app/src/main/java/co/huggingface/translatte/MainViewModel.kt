@@ -20,6 +20,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.translatte_ffi.FfiException
 import uniffi.translatte_ffi.LanguageInfo
+import uniffi.translatte_ffi.LanguagePack
 import uniffi.translatte_ffi.ModelInfo
 import uniffi.translatte_ffi.ProgressListener
 import uniffi.translatte_ffi.TranslationResult
@@ -28,44 +29,20 @@ import java.io.File
 private const val TAG = "translatte"
 
 /**
- * Memory the loaded models need besides the memory-mapped weights (ONNX Runtime, llama.cpp's KV
- * cache and compute buffers): peak anonymous RSS was ~840MB translating a photo, plus margin.
- * Below this, loading risks the low-memory killer, so the app refuses.
+ * Memory the loaded models need, with margin: OCR plus a pair model peaked near 335MB (CJK) in the
+ * native benchmark on a Pixel 8. Below this, loading risks the low-memory killer, so the app refuses.
  */
-private const val MIN_FREE_MEMORY = 1_200_000_000L
-
-/**
- * Also keeping the weights resident (~2.6GB of file-backed RSS at peak), plus a margin. Well below
- * this the kernel evicts weight pages and re-reads them from flash during decode, which made
- * translation ~2x slower on a Pixel 8 (which typically has 3.0-3.6GB available).
- */
-private const val COMFORTABLE_FREE_MEMORY = 2_800_000_000L
+private const val MIN_FREE_MEMORY = 800_000_000L
 
 private class LowMemoryException(message: String) : Exception(message)
 
 /**
- * The saved [source] and [target] if both are still offered, else replacements: a choice can
- * disappear when an app update drops a language or its script pack is deleted. A replacement is
- * English if possible, else the first language in the (alphabetical) list, and never the same as
- * the other side; the target changes if only English is left to read. Same rule as iOS's
+ * The saved [source] if it's still offered, else the first language in the (alphabetical) list: a
+ * choice can disappear when an app update drops a language or its pack is deleted. Same rule as iOS's
  * `LanguageDirection.fallback`.
  */
-fun fallbackLanguages(
-    sources: List<LanguageInfo>,
-    targets: List<LanguageInfo>,
-    source: String,
-    target: String,
-): Pair<String, String> {
-    fun pick(languages: List<LanguageInfo>, avoid: String?) =
-        (languages.find { it.code == "en" && it.code != avoid } ?: languages.find { it.code != avoid })?.code
-    var s = if (sources.any { it.code == source }) source else pick(sources, target) ?: pick(sources, null) ?: ""
-    var t = if (targets.any { it.code == target }) target else pick(targets, s) ?: ""
-    if (s == t && (s != source || t != target)) t = pick(targets, s) ?: t
-    return s to t
-}
-
-/** Swapping makes the target the new source, so it must be readable with the installed packs. */
-fun canSwap(sourceLanguages: List<LanguageInfo>, target: String): Boolean = sourceLanguages.any { it.code == target }
+fun fallbackSource(sources: List<LanguageInfo>, source: String): String =
+    if (sources.any { it.code == source }) source else sources.firstOrNull()?.code ?: ""
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val translatte = app as TranslatteApp
@@ -76,15 +53,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var sourceLanguages by mutableStateOf<List<LanguageInfo>>(emptyList())
         private set
-    var targetLanguages by mutableStateOf<List<LanguageInfo>>(emptyList())
+    var packs by mutableStateOf<List<LanguagePack>>(emptyList())
+        private set
+    var target by mutableStateOf<LanguageInfo?>(null)
         private set
     var ready by mutableStateOf(false)
         private set
     var setupError by mutableStateOf<String?>(null)
         private set
     var sourceCode by mutableStateOf(prefs.getString("source", "") ?: "")
-        private set
-    var targetCode by mutableStateOf(prefs.getString("target", "en") ?: "en")
         private set
     val translations = Translations(viewModelScope, Dispatchers.IO, ::translateOnEngine, ::errorMessage)
     val image get() = translations.image
@@ -103,15 +80,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         try {
             models = engine.models()
+            packs = engine.languagePacks()
             sourceLanguages = engine.sourceLanguages()
-            targetLanguages = engine.targetLanguages()
+            target = engine.targetLanguage()
             val wasReady = ready
             ready = engine.coreInstalled() && sourceLanguages.isNotEmpty()
-            val (source, target) = fallbackLanguages(sourceLanguages, targetLanguages, sourceCode, targetCode)
-            if (target != targetCode) {
-                targetCode = target
-                prefs.edit().putString("target", target).apply()
-            }
+            val source = fallbackSource(sourceLanguages, sourceCode)
             if (source != sourceCode) {
                 setSource(source)
             } else if (ready && !wasReady) {
@@ -130,33 +104,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prepare()
     }
 
-    fun setTarget(code: String) {
-        targetCode = code
-        prefs.edit().putString("target", code).apply()
-        prepare()
-    }
-
-    fun swap() {
-        if (!canSwap(sourceLanguages, targetCode)) return
-        val (source, target) = sourceCode to targetCode
-        sourceCode = target
-        targetCode = source
-        prefs.edit().putString("source", target).putString("target", source).apply()
-        prepare()
-    }
-
     /**
-     * Loads the models and prefills the translator's prompt prefix for the picked languages, so a
-     * photo taken next skips that work. Called when the languages change and when the app returns
-     * to the foreground.
+     * Loads the models for the picked source language and runs the translation model once, so a photo
+     * taken next skips that work. Called when the source changes and when the app returns to the
+     * foreground.
      */
     fun prepare() {
         if (!ready || sourceCode.isEmpty()) return
-        val (source, target) = sourceCode to targetCode
+        val source = sourceCode
         viewModelScope.launch(translatte.engineDispatcher) {
             try {
                 checkMemory()
-                engine.prepare(source, target)
+                engine.prepare(source)
                 translatte.modelsLoaded = true
             } catch (e: LowMemoryException) {
                 withContext(Dispatchers.Main) { memoryWarning = e.message }
@@ -171,37 +130,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Before preparing or translating: when the models aren't loaded yet, refuses below
      * [MIN_FREE_MEMORY] rather than letting the low-memory killer take the app (or others) down
-     * mid-translation. Warns below [COMFORTABLE_FREE_MEMORY] and clears the warning once memory
-     * recovers. Runs on the engine dispatcher.
+     * mid-translation, and clears the warning once memory recovers. Runs on the engine dispatcher.
      */
     private suspend fun checkMemory() {
         val app = getApplication<Application>()
         val info = ActivityManager.MemoryInfo().also(app.getSystemService(ActivityManager::class.java)::getMemoryInfo)
-        val free = formatSize(info.availMem)
         if (info.availMem < MIN_FREE_MEMORY && !translatte.modelsLoaded) {
             throw LowMemoryException(
-                "Not enough free memory to load the translator ($free free, needs " +
+                "Not enough free memory to load the models (${formatSize(info.availMem)} free, needs " +
                     "${formatSize(MIN_FREE_MEMORY)}). Close other apps and try again.",
             )
         }
-        val warning = if (info.availMem < COMFORTABLE_FREE_MEMORY) {
-            "Low memory ($free free): translation will be slow. Close other apps to speed it up."
-        } else {
-            null
-        }
-        withContext(Dispatchers.Main) { memoryWarning = warning }
+        withContext(Dispatchers.Main) { memoryWarning = null }
     }
 
     /** Bytes still to fetch for [ids], counting partial downloads that will resume. */
     fun bytesToDownload(ids: List<String>): Long =
         models.filter { it.id in ids }.sumOf { (it.sizeBytes - it.downloadedBytes).toLong() }
 
-    fun deleteModel(id: String) {
+    fun deleteLanguage(code: String) {
         viewModelScope.launch {
             val error = withContext(translatte.engineDispatcher) {
                 runCatching {
-                    // Deleting the pack in use frees every loaded model, the translator included.
-                    if (engine.deleteModel(id)) translatte.modelsLoaded = false
+                    // Deleting the script in use frees every loaded model.
+                    if (engine.deleteLanguage(code)) translatte.modelsLoaded = false
                 }.exceptionOrNull()
             }
             refresh()
@@ -220,12 +172,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun retry() = translations.retry()
-
     fun reopenLast() = translations.reopenLast()
 
-    private suspend fun translateOnEngine(bitmap: Bitmap, attempt: Int, onStage: (String) -> Unit): TranslationResult {
-        val (source, target) = sourceCode to targetCode
+    private suspend fun translateOnEngine(bitmap: Bitmap, onStage: (String) -> Unit): TranslationResult {
+        val source = sourceCode
         val listener = object : ProgressListener {
             override fun onStage(stage: String, done: UInt, total: UInt) {
                 onStage(
@@ -240,7 +190,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         return withContext(translatte.engineDispatcher) {
             checkMemory()
-            engine.translateImage(Images.jpeg(bitmap), source, target, true, attempt.toUInt(), listener).also {
+            engine.translateImage(Images.jpeg(bitmap), source, true, listener).also {
                 translatte.modelsLoaded = true
             }
         }
@@ -253,13 +203,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         else -> e.toString()
     }
 
-    /**
-     * Debug-build hook for scripted device tests: translates [path] and writes timing and regions
-     * to [out] as JSON.
-     */
-    fun autotest(path: File, from: String?, to: String?, out: File) = viewModelScope.launch {
+    /** Debug-build hook for scripted device tests: translates [path] from [from] and writes timing and regions to [out] as JSON. */
+    fun autotest(path: File, from: String?, out: File) = viewModelScope.launch {
         from?.let(::setSource)
-        to?.let(::setTarget)
         val start = SystemClock.elapsedRealtime()
         translations.start { Images.load(path) }.join()
         val regions = JSONArray()

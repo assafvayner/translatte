@@ -73,11 +73,11 @@ fn downloads_small_pack_and_resumes_truncated_part() {
     let d = Downloader::with_source(&store, &rec);
     let cancel = AtomicBool::new(false);
 
-    d.download_model_blocking("rec-en", &cancel, |_| {})
+    d.download_model_blocking("rec-latin", &cancel, |_| {})
         .unwrap();
-    assert_eq!(store.state("rec-en").unwrap(), InstallState::Installed);
-    assert_eq!(store.state("rec-en").unwrap(), InstallState::Installed);
-    let onnx = file(&store, "rec-en", "inference.onnx");
+    assert_eq!(store.state("rec-latin").unwrap(), InstallState::Installed);
+    assert_eq!(store.state("rec-latin").unwrap(), InstallState::Installed);
+    let onnx = file(&store, "rec-latin", "inference.onnx");
     assert_eq!(
         rec.take(),
         vec![
@@ -95,22 +95,22 @@ fn downloads_small_pack_and_resumes_truncated_part() {
     f.set_len(cut).unwrap();
     drop(f);
     std::fs::rename(&installed, store.part_path(onnx)).unwrap();
-    assert_eq!(store.state("rec-en").unwrap(), InstallState::Corrupt);
+    assert_eq!(store.state("rec-latin").unwrap(), InstallState::Corrupt);
 
-    d.download_model_blocking("rec-en", &cancel, |_| {})
+    d.download_model_blocking("rec-latin", &cancel, |_| {})
         .unwrap();
     assert_eq!(
         rec.take(),
         vec![("inference.onnx".to_string(), Some(cut..onnx.size))]
     );
-    assert_eq!(store.state("rec-en").unwrap(), InstallState::Installed);
+    assert_eq!(store.state("rec-latin").unwrap(), InstallState::Installed);
     assert!(!store.part_path(onnx).exists());
 }
 
-/// Resumes the 1.1GB translator from a local copy missing its last 8 MiB, so only a range is
-/// fetched. Needs TRANSLATTE_MODELS pointing at an installed models dir.
+/// Resumes pair-ja-en's model from a local copy missing its last 8 MiB, so only a range is
+/// fetched. Needs TRANSLATTE_MODELS pointing at a models dir with pair-ja-en installed.
 #[test]
-fn resumes_translator_tail_from_local_copy() {
+fn resumes_a_pair_model_tail_from_local_copy() {
     if !enabled() {
         return;
     }
@@ -118,24 +118,29 @@ fn resumes_translator_tail_from_local_copy() {
         eprintln!("TRANSLATTE_MODELS not set; skipping");
         return;
     };
+    let models = std::path::Path::new(&models);
     let dir = tempfile::tempdir().unwrap();
     let store = ModelStore::new(manifest(), dir.path().to_path_buf());
-    let gguf = file(&store, "translator", "model.gguf");
-    let keep = gguf.size - (8 << 20);
-    let mut src = std::fs::File::open(std::path::Path::new(&models).join(&gguf.path)).unwrap();
-    std::fs::create_dir_all(dir.path().join("translator")).unwrap();
-    let mut part = std::fs::File::create(store.part_path(gguf)).unwrap();
+    std::fs::create_dir_all(dir.path().join("pair-ja-en")).unwrap();
+    for name in ["vocab.spm", "lex.bin"] {
+        let f = file(&store, "pair-ja-en", name);
+        std::fs::copy(models.join(&f.path), dir.path().join(&f.path)).unwrap();
+    }
+    let model = file(&store, "pair-ja-en", "model.bin");
+    let keep = model.size - (8 << 20);
+    let mut src = std::fs::File::open(models.join(&model.path)).unwrap();
+    let mut part = std::fs::File::create(store.part_path(model)).unwrap();
     src.seek(SeekFrom::Start(0)).unwrap();
     std::io::copy(&mut (&mut src).take(keep), &mut part).unwrap();
     drop(part);
 
     let rec = Recording::new();
     Downloader::with_source(&store, &rec)
-        .download_model_blocking("translator", &AtomicBool::new(false), |_| {})
+        .download_model_blocking("pair-ja-en", &AtomicBool::new(false), |_| {})
         .unwrap();
     assert_eq!(
         rec.take(),
-        vec![(gguf.source_path.clone(), Some(keep..gguf.size))]
+        vec![(model.source_path.clone(), Some(keep..model.size))]
     );
-    assert_eq!(store.state("translator").unwrap(), InstallState::Installed);
+    assert_eq!(store.state("pair-ja-en").unwrap(), InstallState::Installed);
 }

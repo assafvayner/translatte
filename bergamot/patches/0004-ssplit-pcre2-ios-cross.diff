@@ -1,0 +1,33 @@
+--- a/inference/3rd_party/ssplit-cpp/cmake/FindPCRE2.cmake
++++ b/inference/3rd_party/ssplit-cpp/cmake/FindPCRE2.cmake
+@@ -29,8 +29,8 @@
+   endif()
+ 
+   # Set configure options for internal pcre2 depeding on compiler
+-  if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$")
+-    # jit compilation isn't supported by wasm
++  if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    # jit compilation isn't supported by wasm, and iOS apps may not map executable memory
+     set(PCRE2_JIT_OPTION  "-DPCRE2_SUPPORT_JIT=OFF")
+   else()
+     set(PCRE2_JIT_OPTION  "-DPCRE2_SUPPORT_JIT=ON")
+@@ -63,7 +63,19 @@
+     )
+   endif(ANDROID)
+ 
++  # Likewise the iOS target (device or simulator), which CMake describes with these variables.
++  if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    LIST(APPEND PCRE2_CONFIGURE_OPTIONS
++      -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
++      -DCMAKE_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
++      -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
++      -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
++      -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
++      "-DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}"
++    )
++  endif()
+ 
++
+   # set include dirs and libraries for PCRE2
+   set(PCRE2_LIBRARIES ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}pcre2-8${CMAKE_STATIC_LIBRARY_SUFFIX})
+   set(PCRE2_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/include")

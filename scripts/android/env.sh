@@ -1,5 +1,6 @@
-# Sourced by the Android build scripts: NDK toolchain, ONNX Runtime and llama.cpp settings for
-# aarch64-linux-android. Expects ROOT to be the repo root.
+# Sourced by the Android build scripts: NDK toolchain and ONNX Runtime settings for
+# aarch64-linux-android; the bergamot crate's CMake build reads ANDROID_NDK and ANDROID_API_LEVEL
+# from here. Expects ROOT to be the repo root.
 
 TARGET=aarch64-linux-android
 API="${ANDROID_API_LEVEL:-31}"
@@ -41,10 +42,3 @@ if [[ ! -f "$ORT_DIR/lib/libonnxruntime.so" ]]; then
   unzip -o -j "$AAR" "jni/arm64-v8a/libonnxruntime.so" -d "$ORT_DIR/lib" >/dev/null
 fi
 export ORT_LIB_LOCATION="$ORT_DIR/lib" ORT_PREFER_DYNAMIC_LINK=1
-
-# llama-cpp-sys defaults Android to plain armv8-a, which lacks the int8 dot-product/matmul kernels Q4_K needs.
-# The Pixel 8 (Tensor G3) and other armv8.6+ phones support both. Repacking copies the weights into anonymous
-# memory on top of the mmap, which pushed a Pixel 8 into swap and made decode ~2x slower.
-# Changing either needs a clean llama-cpp-sys-2 build (cargo only reruns its build script for vars it saw set).
-export GGML_CPU_ARM_ARCH="${GGML_CPU_ARM_ARCH:-armv8.6-a+dotprod+i8mm}"
-export GGML_CPU_REPACK="${GGML_CPU_REPACK:-OFF}"

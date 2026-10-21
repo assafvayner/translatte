@@ -251,11 +251,9 @@ mod tests {
             code: "xx".into(),
             name: "X".into(),
             script_pack: None,
+            pair_model: None,
             rtl,
             spaced,
-            prompt_name: None,
-            prompt_name_zh: None,
-            zh_instruction: false,
         }
     }
 

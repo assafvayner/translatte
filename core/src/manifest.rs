@@ -6,13 +6,16 @@ use serde::{Deserialize, Serialize};
 use crate::{Result, TranslatteError};
 
 pub const DETECTOR_ID: &str = "det";
-pub const TRANSLATOR_ID: &str = "translator";
+/// The only language translated into: pair models translate from a source language into it.
+pub const TARGET_LANGUAGE: &str = "en";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelKind {
     Core,
     ScriptPack,
+    /// Translates one source language into [`TARGET_LANGUAGE`].
+    PairModel,
 }
 
 /// How a local file is produced from its upstream `source_path` when it is not a verbatim copy.
@@ -64,21 +67,15 @@ pub struct Language {
     pub code: String,
     pub name: String,
     pub script_pack: Option<String>,
+    /// Translates this language into [`TARGET_LANGUAGE`]. A language with a script pack and a pair
+    /// model is a source language.
+    #[serde(default)]
+    pub pair_model: Option<String>,
     #[serde(default)]
     pub rtl: bool,
     /// False for scripts written without spaces between words (zh, ja, th); controls how OCR lines are joined.
     #[serde(default = "default_true")]
     pub spaced: bool,
-    /// English name the translator's prompt uses, when it differs from the display `name`.
-    #[serde(default)]
-    pub prompt_name: Option<String>,
-    /// Chinese name the translator's Chinese instruction uses.
-    #[serde(default)]
-    pub prompt_name_zh: Option<String>,
-    /// Pairs involving this language get the Chinese instruction (Chinese varieties, and languages
-    /// the model only translates into reliably when instructed in Chinese).
-    #[serde(default)]
-    pub zh_instruction: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,30 +158,45 @@ impl Manifest {
                 )));
             }
         }
-        for core in [DETECTOR_ID, TRANSLATOR_ID] {
-            match self.model(core) {
-                Some(m) if m.kind == ModelKind::Core => {}
-                _ => {
-                    return Err(TranslatteError::Manifest(format!(
-                        "missing core model {core}"
-                    )))
-                }
+        match self.model(DETECTOR_ID) {
+            Some(m) if m.kind == ModelKind::Core => {}
+            _ => {
+                return Err(TranslatteError::Manifest(format!(
+                    "missing core model {DETECTOR_ID}"
+                )))
             }
         }
         for l in &self.languages {
             if let Some(pack) = &l.script_pack {
-                match self.model(pack) {
-                    Some(m) if m.kind == ModelKind::ScriptPack => {}
-                    _ => {
-                        return Err(TranslatteError::Manifest(format!(
-                            "language {} references unknown script pack {pack}",
-                            l.code
-                        )))
-                    }
+                self.expect_model(pack, ModelKind::ScriptPack, "script pack", &l.code)?;
+            }
+            if let Some(pair) = &l.pair_model {
+                if l.script_pack.is_none() {
+                    return Err(TranslatteError::Manifest(format!(
+                        "language {} has a pair model but no script pack to read it with",
+                        l.code
+                    )));
                 }
+                self.expect_model(pair, ModelKind::PairModel, "pair model", &l.code)?;
             }
         }
+        for m in self
+            .models
+            .iter()
+            .filter(|m| m.kind == ModelKind::PairModel)
+        {
+            validate_pair_files(m)?;
+        }
         Ok(())
+    }
+
+    fn expect_model(&self, id: &str, kind: ModelKind, what: &str, language: &str) -> Result<()> {
+        match self.model(id) {
+            Some(m) if m.kind == kind => Ok(()),
+            _ => Err(TranslatteError::Manifest(format!(
+                "language {language} references unknown {what} {id}"
+            ))),
+        }
     }
 }
 
@@ -229,6 +241,25 @@ fn validate_source(m: &ModelEntry) -> Result<()> {
     Ok(())
 }
 
+/// A pair model needs `model.bin`, `lex.bin` and either one shared `vocab.spm` or separate
+/// `srcvocab.spm` and `trgvocab.spm`.
+fn validate_pair_files(m: &ModelEntry) -> Result<()> {
+    let has = |name: &str| {
+        m.files
+            .iter()
+            .any(|f| Path::new(&f.path).file_name().is_some_and(|n| n == name))
+    };
+    let vocab = has("vocab.spm") != (has("srcvocab.spm") && has("trgvocab.spm"));
+    if has("model.bin") && has("lex.bin") && vocab {
+        Ok(())
+    } else {
+        Err(TranslatteError::Manifest(format!(
+            "pair model {} needs model.bin, lex.bin and vocab.spm (or srcvocab.spm and trgvocab.spm)",
+            m.id
+        )))
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -239,35 +270,92 @@ pub(crate) mod tests {
         {"id": "det", "kind": "core", "display_name": "Text detector",
          "source": {"repo": "acme/det", "revision": "0123456789abcdef0123456789abcdef01234567"},
          "files": [{"path": "det/inference.onnx", "size": 3, "source_path": "inference.onnx"}]},
-        {"id": "translator", "kind": "core", "display_name": "Translator",
-         "source": {"repo": "acme/translator-GGUF", "revision": "0123456789abcdef0123456789abcdef01234567"},
-         "files": [{"path": "translator/model.gguf", "size": 3, "source_path": "translator.Q4_K_M.gguf"}]},
         {"id": "rec-latin", "kind": "script_pack", "display_name": "Latin script",
          "source": {"repo": "acme/latin_rec", "revision": "0123456789abcdef0123456789abcdef01234567"},
          "files": [
            {"path": "rec-latin/inference.onnx", "size": 3, "source_path": "inference.onnx"},
            {"path": "rec-latin/dict.txt", "size": 3, "source_path": "inference.yml", "derive": "paddle_dict"}
+         ]},
+        {"id": "pair-fr-en", "kind": "pair_model", "display_name": "French → English",
+         "source": {"repo": "acme/pairs", "revision": "0123456789abcdef0123456789abcdef01234567"},
+         "files": [
+           {"path": "pair-fr-en/lex.bin", "size": 3, "source_path": "fr-en/lex.50.50.fren.s2t.bin"},
+           {"path": "pair-fr-en/model.bin", "size": 3, "source_path": "fr-en/model.fren.intgemm.alphas.bin"},
+           {"path": "pair-fr-en/vocab.spm", "size": 3, "source_path": "fr-en/vocab.fren.spm"}
+         ]},
+        {"id": "pair-de-en", "kind": "pair_model", "display_name": "German → English",
+         "source": {"repo": "acme/pairs", "revision": "0123456789abcdef0123456789abcdef01234567"},
+         "files": [
+           {"path": "pair-de-en/lex.bin", "size": 3, "source_path": "de-en/lex.50.50.deen.s2t.bin"},
+           {"path": "pair-de-en/model.bin", "size": 3, "source_path": "de-en/model.deen.intgemm.alphas.bin"},
+           {"path": "pair-de-en/vocab.spm", "size": 3, "source_path": "de-en/vocab.deen.spm"}
          ]}
       ],
       "languages": [
-        {"code": "fr", "name": "French", "script_pack": "rec-latin"},
-        {"code": "he", "name": "Hebrew", "script_pack": null, "rtl": true}
+        {"code": "en", "name": "English", "script_pack": null},
+        {"code": "fr", "name": "French", "script_pack": "rec-latin", "pair_model": "pair-fr-en"},
+        {"code": "de", "name": "German", "script_pack": "rec-latin", "pair_model": "pair-de-en"}
       ]
     }"#;
 
     #[test]
     fn parses_sample_manifest() {
         let m = Manifest::from_json(SAMPLE).unwrap();
-        assert_eq!(m.models.len(), 3);
+        assert_eq!(m.models.len(), 4);
         assert_eq!(m.model("rec-latin").unwrap().kind, ModelKind::ScriptPack);
         assert_eq!(m.model("rec-latin").unwrap().total_size(), 6);
-        let he = m.language("he").unwrap();
-        assert!(he.rtl);
-        assert!(he.spaced);
-        assert_eq!(he.script_pack, None);
-        assert_eq!(he.prompt_name, None);
-        assert_eq!(he.prompt_name_zh, None);
-        assert!(!he.zh_instruction);
+        let en = m.language(TARGET_LANGUAGE).unwrap();
+        assert!(!en.rtl);
+        assert!(en.spaced);
+        assert_eq!(en.script_pack, None);
+        assert_eq!(en.pair_model, None);
+    }
+
+    #[test]
+    fn parses_pair_models() {
+        let m = Manifest::from_json(SAMPLE).unwrap();
+        assert_eq!(m.model("pair-fr-en").unwrap().kind, ModelKind::PairModel);
+        assert_eq!(
+            m.language("fr").unwrap().pair_model.as_deref(),
+            Some("pair-fr-en")
+        );
+    }
+
+    #[test]
+    fn accepts_a_pair_model_with_separate_vocabularies() {
+        let two = SAMPLE.replace(
+            r#"{"path": "pair-fr-en/vocab.spm", "size": 3, "source_path": "fr-en/vocab.fren.spm"}"#,
+            r#"{"path": "pair-fr-en/srcvocab.spm", "size": 3, "source_path": "fr-en/srcvocab.fren.spm"},
+               {"path": "pair-fr-en/trgvocab.spm", "size": 3, "source_path": "fr-en/trgvocab.fren.spm"}"#,
+        );
+        Manifest::from_json(&two).unwrap();
+    }
+
+    #[test]
+    fn rejects_pair_models_missing_files() {
+        for name in ["lex.bin", "model.bin", "vocab.spm"] {
+            assert_rejected(SAMPLE.replace(&format!("pair-fr-en/{name}"), "pair-fr-en/other.bin"));
+        }
+        assert_rejected(SAMPLE.replace(
+            r#"{"path": "pair-fr-en/vocab.spm", "size": 3, "source_path": "fr-en/vocab.fren.spm"}"#,
+            r#"{"path": "pair-fr-en/srcvocab.spm", "size": 3, "source_path": "fr-en/srcvocab.fren.spm"}"#,
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_pair_model_references() {
+        assert_rejected(SAMPLE.replace(
+            r#""pair_model": "pair-fr-en""#,
+            r#""pair_model": "pair-xx-en""#,
+        ));
+        assert_rejected(SAMPLE.replace(
+            r#""pair_model": "pair-fr-en""#,
+            r#""pair_model": "rec-latin""#,
+        ));
+        assert_rejected(SAMPLE.replace(
+            r#""script_pack": "rec-latin", "pair_model": "pair-fr-en""#,
+            r#""script_pack": null, "pair_model": "pair-fr-en""#,
+        ));
     }
 
     #[test]
@@ -343,10 +431,9 @@ pub(crate) mod tests {
 
     #[test]
     fn rejects_missing_core_model() {
-        let bad = SAMPLE.replace(r#""id": "translator""#, r#""id": "something-else""#);
-        assert!(matches!(
-            Manifest::from_json(&bad),
-            Err(TranslatteError::Manifest(_))
+        assert_rejected(SAMPLE.replace(
+            r#""id": "det", "kind": "core""#,
+            r#""id": "det", "kind": "script_pack""#,
         ));
     }
 
@@ -380,7 +467,7 @@ pub(crate) mod tests {
 
     #[test]
     fn rejects_duplicate_language_codes() {
-        assert_rejected(SAMPLE.replace(r#""code": "he""#, r#""code": "fr""#));
+        assert_rejected(SAMPLE.replace(r#""code": "de""#, r#""code": "fr""#));
     }
 
     #[test]
@@ -392,20 +479,43 @@ pub(crate) mod tests {
         .unwrap();
         let m = Manifest::from_json(&s).unwrap();
         assert!(m.model("rec-cjk").is_some());
-        assert!(m.language("ja").unwrap().script_pack.is_some());
+        assert!(m.model("rec-en").is_none());
+        assert!(m.model("translator").is_none());
+        let en = m.language(TARGET_LANGUAGE).unwrap();
         assert_eq!(
-            m.language("zh-TW").unwrap().prompt_name.as_deref(),
-            Some("Traditional Chinese")
+            (en.script_pack.as_deref(), en.pair_model.as_deref()),
+            (None, None)
         );
-        assert_eq!(m.language("ja").unwrap().prompt_name, None);
-        for l in &m.languages {
-            assert!(l.prompt_name_zh.is_some(), "{} has no Chinese name", l.code);
+        let sources: Vec<_> = m
+            .languages
+            .iter()
+            .filter(|l| l.code != TARGET_LANGUAGE)
+            .collect();
+        assert_eq!(sources.len(), 28);
+        for l in &sources {
+            assert!(
+                l.script_pack.is_some() && l.pair_model.is_some(),
+                "{}",
+                l.code
+            );
         }
-        assert!(m.language("zh").unwrap().zh_instruction);
-        assert!(!m.language("ja").unwrap().zh_instruction);
-        let translator = m.model("translator").unwrap();
-        assert_eq!(translator.source.repo, "tencent/Hy-MT2-1.8B-GGUF");
-        assert_eq!(translator.files[0].source_path, "Hy-MT2-1.8B-Q4_K_M.gguf");
+        for gone in ["he", "vi", "kk", "mn", "bo", "km", "my", "bn", "gu"] {
+            assert!(m.language(gone).is_err(), "{gone} has no OCR script pack");
+        }
+        assert_eq!(
+            m.language("yue").unwrap().pair_model,
+            m.language("zh-TW").unwrap().pair_model
+        );
+        let hant = m.model("pair-zh-Hant-en").unwrap();
+        let names: Vec<_> = hant.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(names.contains(&"pair-zh-Hant-en/srcvocab.spm"), "{names:?}");
+        assert!(names.contains(&"pair-zh-Hant-en/trgvocab.spm"), "{names:?}");
+        let fr = m.model("pair-fr-en").unwrap();
+        assert_eq!(fr.source.repo, "assafvayner/translatte-pair-models");
+        assert!(fr
+            .files
+            .iter()
+            .any(|f| f.source_path == "fr-en/model.fren.intgemm.alphas.bin"));
         for model in m.models.iter().filter(|m| m.kind == ModelKind::ScriptPack) {
             let dict = model
                 .files

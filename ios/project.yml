@@ -34,10 +34,9 @@ targets:
       - framework: Frameworks/TranslatteFFI.xcframework
         embed: false
       - sdk: libc++.tbd
+      - sdk: libiconv.tbd
       - sdk: Foundation.framework
       - sdk: Accelerate.framework
-      - sdk: Metal.framework
-      - sdk: MetalKit.framework
       - sdk: CoreML.framework
       # Model downloads: TLS certificate checks and hf-xet's system info.
       - sdk: Security.framework
@@ -56,7 +55,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UIFileSharingEnabled: YES
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
-        # The translation model is ~1.1GB; without this entitlement iOS kills the app on device.
+        # Memory headroom on devices with a low per-app limit; the pair models no longer strictly need it.
         CODE_SIGN_ENTITLEMENTS: Translatte/Translatte.entitlements
         OTHER_LDFLAGS: ["-lc++"]
         DEAD_CODE_STRIPPING: YES

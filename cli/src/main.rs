@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use translatte_core::manifest::Language;
 use translatte_core::pipeline::Stage;
@@ -39,40 +39,34 @@ enum Command {
         #[command(flatten)]
         models: ModelArgs,
     },
-    /// Download the core models (detector, translator) and OCR script packs from upstream.
+    /// Download the core models and the packs (OCR script pack and translation model) of source languages.
     Fetch {
-        /// Script packs to install, e.g. rec-latin,rec-cjk.
-        #[arg(long, value_delimiter = ',', conflicts_with = "all_packs")]
-        packs: Vec<String>,
-        /// Install every script pack in the manifest.
+        /// Source languages to install, e.g. fr,ja.
+        #[arg(long, value_delimiter = ',', conflicts_with = "all")]
+        langs: Vec<String>,
+        /// Install every source language in the manifest.
         #[arg(long)]
-        all_packs: bool,
+        all: bool,
         #[command(flatten)]
         models: ModelArgs,
     },
-    /// List languages available as source (installed packs) and target.
+    /// List the installed source languages and the target language.
     Langs {
         #[command(flatten)]
         models: ModelArgs,
     },
-    /// Translate the text in an image.
+    /// Translate the text in an image into English.
     Run {
         image: PathBuf,
         #[arg(long)]
         from: String,
-        /// Target language; required unless --no-translate is set.
-        #[arg(long)]
-        to: Option<String>,
         #[arg(short, long, default_value = "out/translated.png")]
         output: PathBuf,
         #[arg(long)]
         json: Option<PathBuf>,
-        /// OCR only; skip loading the LLM and outline the detected text boxes instead.
+        /// OCR only; skip loading the translation model and outline the detected text boxes instead.
         #[arg(long)]
         no_translate: bool,
-        /// Translator GGUF to use instead of the installed one (e.g. to compare quantizations).
-        #[arg(long, conflicts_with = "no_translate")]
-        translator_gguf: Option<PathBuf>,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -109,13 +103,9 @@ fn real_main() -> Result<i32> {
                 return Ok(1);
             }
         }
-        Command::Fetch {
-            packs,
-            all_packs,
-            models,
-        } => {
+        Command::Fetch { langs, all, models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
-            fetch::run_fetch(&store, &packs, all_packs)?;
+            fetch::run_fetch(&store, &langs, all)?;
         }
         Command::Langs { models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
@@ -126,38 +116,32 @@ fn real_main() -> Result<i32> {
                     .join(" ")
             };
             println!("source: {}", codes(&store.available_source_languages()?));
-            println!("target: {}", codes(&store.target_languages()));
+            println!("target: {}", store.target_language()?.code);
         }
         Command::Run {
             image,
             from,
-            to,
             output,
             json,
             no_translate,
-            translator_gguf,
             models,
         } => {
-            if to.is_none() && !no_translate {
-                bail!("--to is required unless --no-translate is set");
-            }
             let mut img = image::open(&image)
                 .with_context(|| format!("opening {}", image.display()))?
                 .to_rgb8();
             let store = setup::load_store(&models.manifest, &models.models)?;
             let src = store.manifest().language(&from)?;
-            let tgt = match &to {
-                Some(code) => store.manifest().language(code)?,
-                None => src,
-            };
+            let tgt = store.target_language()?;
             let t0 = Instant::now();
-            let mut pipeline =
-                setup::build_pipeline(&store, src, !no_translate, translator_gguf.as_deref())?;
+            let mut pipeline = setup::build_pipeline(&store, src, !no_translate)?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());
             if !no_translate {
                 let t = Instant::now();
                 pipeline.warm(src, tgt)?;
-                eprintln!("warmed translator prefix in {:.2?}", t.elapsed());
+                eprintln!(
+                    "loaded and warmed the translation model in {:.2?}",
+                    t.elapsed()
+                );
             }
             let t1 = Instant::now();
             let mut last = "";

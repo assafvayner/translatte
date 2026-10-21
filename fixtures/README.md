@@ -10,7 +10,7 @@ Each fixture is an image plus a JSON file with the same stem:
 - `lines`: every text line a reader would expect to be translated, as written.
 - Scoring: for each expected line, the CER (whitespace- and case-insensitive) against the best-matching recognized line, averaged. The metric is recall-oriented: extra recognized lines (noise, unlisted text) are not penalized.
 
-`hello_world.*` is the tiny committed smoke fixture. Real photos are not committed.
+`bonjour.*` is the tiny committed smoke fixture. Fixtures in a language the manifest can't read (e.g. English, now only a target) are skipped. Real photos are not committed.
 
 ## Real-photo set
 

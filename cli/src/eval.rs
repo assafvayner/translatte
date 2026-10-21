@@ -68,12 +68,15 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
             })
             .collect::<Result<Vec<String>>>()?;
         let src = store.manifest().language(lang_code)?;
-        let key = src.script_pack.clone().unwrap_or_default();
-        if !pipelines.contains_key(&key) {
-            pipelines.insert(
-                key.clone(),
-                setup::build_pipeline(&store, src, false, None)?,
+        let Some(key) = src.script_pack.clone() else {
+            println!(
+                "{:<40} {lang_code:<6} skipped: no OCR script pack",
+                image_name
             );
+            continue;
+        };
+        if !pipelines.contains_key(&key) {
+            pipelines.insert(key.clone(), setup::build_pipeline(&store, src, false)?);
         }
         let pipeline = pipelines.get_mut(&key).expect("inserted above");
         let image_path = dir.join(image_name);

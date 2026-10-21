@@ -53,17 +53,9 @@ fun MainNav(
         }
     }
 
-    val direction = directionLabel(vm.sourceLanguages, vm.targetLanguages, vm.sourceCode, vm.targetCode)
+    val direction = directionLabel(vm.sourceLanguages, vm.sourceCode, vm.target)
     val languageBar = @Composable {
-        LanguageBar(
-            vm.sourceLanguages,
-            vm.targetLanguages,
-            vm.sourceCode,
-            vm.targetCode,
-            vm::setSource,
-            vm::setTarget,
-            vm::swap,
-        )
+        LanguageBar(vm.sourceLanguages, vm.target, vm.sourceCode, vm::setSource)
     }
 
     when (screen) {
@@ -114,7 +106,6 @@ fun MainNav(
                         hintSeen = true
                         prefs.resultHintSeen = true
                     },
-                    onRetry = vm::retry,
                     onBack = back,
                 )
             }

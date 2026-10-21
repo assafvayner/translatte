@@ -5,7 +5,8 @@ edition = "2021"
 
 [features]
 default = []
-llama = ["dep:llama-cpp-2", "dep:encoding_rs", "dep:self_cell"]
+# The pair-model translator (bergamot-translator, built from source through CMake).
+pair = ["dep:bergamot"]
 download = ["dep:hf-hub", "dep:tokio", "dep:serde_yaml_ng", "dep:futures", "dep:bytes"]
 # TLS backend for `download`; enable exactly one. rustls is the production backend (on Android
 # it verifies through rustls-platform-verifier, which the app initializes via JNI).
@@ -22,10 +23,7 @@ ort = "=2.0.0-rc.10"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-# Pinned to the release that the fork in the workspace `[patch.crates-io]` is based on.
-llama-cpp-2 = { version = "=0.1.160", optional = true }
-encoding_rs = { version = "0.8", optional = true }
-self_cell = { version = "1", optional = true }
+bergamot = { path = "../bergamot", optional = true }
 hf-hub = { git = "https://github.com/huggingface/hf-hub", branch = "main", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 serde_yaml_ng = { version = "0.10", optional = true }

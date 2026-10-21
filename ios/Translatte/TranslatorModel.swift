@@ -14,7 +14,8 @@ final class TranslatorModel: ObservableObject {
 
     @Published private(set) var models: [ModelInfo] = []
     @Published private(set) var sourceLanguages: [LanguageInfo] = []
-    @Published private(set) var targetLanguages: [LanguageInfo] = []
+    @Published private(set) var packs: [LanguagePack] = []
+    @Published private(set) var target: LanguageInfo?
     @Published private(set) var modelsReady = false
     @Published private(set) var setupError: String?
     /// Space left on the volume the models download to, as of the last `reload`.
@@ -25,17 +26,11 @@ final class TranslatorModel: ObservableObject {
             if !settingLanguages { prepare() }
         }
     }
-    @Published var targetCode = UserDefaults.standard.string(forKey: "target") ?? "en" {
-        didSet {
-            UserDefaults.standard.set(targetCode, forKey: "target")
-            if !settingLanguages { prepare() }
-        }
-    }
     @Published private(set) var image: UIImage?
     @Published private(set) var result: TranslationResult?
     @Published private(set) var phase: Phase = .idle
     @Published private var runs = TranslationRuns()
-    /// Shown on Home when there isn't enough free memory to load the translator, or enough to run it quickly.
+    /// Shown on Home when there isn't enough free memory to load the models.
     @Published private(set) var notice: String?
 
     let modelsDirectory: URL
@@ -44,17 +39,13 @@ final class TranslatorModel: ObservableObject {
     private var engine: Engine?
     private let worker = DispatchQueue(label: "translatte.engine", qos: .userInitiated)
     private var settingLanguages = false
-    /// The photo the last translation ran on, so a failed run can be retried.
-    private var lastPhoto: UIImage?
     /// Only touched on `worker`.
     private nonisolated(unsafe) var modelsLoaded = false
 
-    /// Memory the loaded models need besides the memory-mapped weights, matching the Android app:
-    /// ~840MB peak footprint translating a photo, plus margin. Below this, loading risks iOS killing
-    /// the app mid-translation, so it refuses.
-    private nonisolated static let minFreeMemory = 1_200_000_000
-    /// Below this, as on Android, translation still works but slowly, so Home warns.
-    private nonisolated static let comfortableFreeMemory = 2_800_000_000
+    /// Memory the loaded models need, with margin, matching the Android app: OCR plus a pair model
+    /// peaked near 335MB (CJK) in the native benchmark. Below this, loading risks iOS killing the
+    /// app mid-translation, so it refuses.
+    private nonisolated static let minFreeMemory = 800_000_000
 
     /// Simulator runs can point at the host's models via `TRANSLATTE_MODELS_DIR`
     /// (`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR` with `simctl launch`); otherwise models live in Documents.
@@ -95,14 +86,12 @@ final class TranslatorModel: ObservableObject {
                 downloads.engine = engine
             }
             models = try engine.models()
+            packs = try engine.languagePacks()
             sourceLanguages = try engine.sourceLanguages()
-            targetLanguages = engine.targetLanguages()
+            target = try engine.targetLanguage()
             modelsReady = try engine.coreInstalled() && !sourceLanguages.isEmpty
             setupError = nil
-            let (source, target) = LanguageDirection.fallback(
-                source: sourceCode, target: targetCode, sources: sourceLanguages, targets: targetLanguages
-            )
-            setLanguages(source: source, target: target)
+            setSource(LanguageDirection.fallback(source: sourceCode, sources: sourceLanguages))
         } catch {
             setupError = errorMessage(error)
             modelsReady = false
@@ -116,14 +105,14 @@ final class TranslatorModel: ObservableObject {
         models.filter { ids.contains($0.id) }.reduce(0) { $0 + $1.remainingBytes }
     }
 
-    func deleteModel(_ id: String) {
+    func deleteLanguage(_ code: String) {
         guard let engine else { return }
         Task {
             var failure: Error?
             do {
                 try await onWorker { [self] in
-                    // Deleting the pack in use frees every loaded model, the translator included.
-                    if try engine.deleteModel(id: id) { modelsLoaded = false }
+                    // Deleting the script in use frees every loaded model.
+                    if try engine.deleteLanguage(code: code) { modelsLoaded = false }
                 }
             } catch {
                 failure = error
@@ -139,7 +128,6 @@ final class TranslatorModel: ObservableObject {
     /// Translates an encoded photo (a capture or a Photos pick), superseding any running translation.
     func translate(_ data: Data) async {
         let run = runs.start()
-        lastPhoto = nil
         image = nil
         result = nil
         phase = .working("Loading photo…")
@@ -151,11 +139,10 @@ final class TranslatorModel: ObservableObject {
 
     private func translate(_ photo: UIImage, run: Int) async {
         guard let engine else { return }
-        lastPhoto = photo
         image = photo
         result = nil
         phase = .working("Starting…")
-        let (source, target, attempt) = (sourceCode, targetCode, runs.attempt)
+        let source = sourceCode
         let listener = StageListener { [weak self] text in
             Task { @MainActor in
                 guard let self, self.runs.isCurrent(run), self.phase.isWorking else { return }
@@ -163,22 +150,22 @@ final class TranslatorModel: ObservableObject {
             }
         }
         do {
-            let (output, warning) = try await onWorker { [self] in
+            let output = try await onWorker { [self] in
                 guard let jpeg = photo.jpegData(compressionQuality: 0.92) else {
                     throw AppError(errorDescription: "Could not encode the photo")
                 }
-                let warning = try checkMemory()
+                try checkMemory()
                 #if DEBUG
                 // For UI tests: `-mock-translation-error <message>` makes every translation fail.
                 if let message = UserDefaults.standard.string(forKey: "mock-translation-error") {
                     throw AppError(errorDescription: message)
                 }
                 #endif
-                let output = try engine.translateImage(image: jpeg, source: source, target: target, translate: true, attempt: attempt, listener: listener)
+                let output = try engine.translateImage(image: jpeg, source: source, translate: true, listener: listener)
                 modelsLoaded = true
-                return (output, warning)
+                return output
             }
-            notice = warning
+            notice = nil
             guard let phase = runs.finish(run, image: photo, output: output) else { return }
             result = output
             self.phase = phase
@@ -190,7 +177,6 @@ final class TranslatorModel: ObservableObject {
 
     func photoFailedToLoad() {
         _ = runs.start()
-        lastPhoto = nil
         image = nil
         result = nil
         phase = .failed("Could not open the photo")
@@ -200,39 +186,26 @@ final class TranslatorModel: ObservableObject {
     func showLastSuccess() {
         guard let last = runs.lastSuccess, image !== last.image else { return }
         _ = runs.start()
-        lastPhoto = last.image
         image = last.image
         result = last.result
         phase = .done
-    }
-
-    var canRetry: Bool { lastPhoto != nil }
-
-    /// Re-runs the last translation on the same photo.
-    func retry() async {
-        guard let lastPhoto else { return }
-        await translate(lastPhoto, run: runs.start(retry: true))
-    }
-
-    func swapLanguages() {
-        setLanguages(source: targetCode, target: sourceCode)
     }
 
     var hasAutotestImage: Bool {
         UserDefaults.standard.string(forKey: "autotest-image") != nil
     }
 
-    /// Loads the models and prefills the translator's prompt prefix for the picked languages on the
-    /// worker queue, so a photo taken next skips that work.
+    /// Loads the models for the picked source language on the worker queue and runs the translation
+    /// model once, so a photo taken next skips that work.
     func prepare() {
         guard let engine, modelsReady, !sourceCode.isEmpty else { return }
-        let (source, target) = (sourceCode, targetCode)
+        let source = sourceCode
         worker.async { [self] in
             do {
-                let warning = try checkMemory()
-                try engine.prepare(source: source, target: target)
+                try checkMemory()
+                try engine.prepare(source: source)
                 modelsLoaded = true
-                Task { @MainActor in self.notice = warning }
+                Task { @MainActor in self.notice = nil }
             } catch let error as AppError {
                 Task { @MainActor in self.notice = error.localizedDescription }
             } catch {
@@ -251,20 +224,14 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
-    /// Refuses to load the models when iOS would likely kill the app for using them, and returns a
-    /// warning while memory is low enough to slow translation down. Runs on `worker`.
-    private nonisolated func checkMemory() throws -> String? {
+    /// Refuses to load the models when iOS would likely kill the app for using them. Runs on `worker`.
+    private nonisolated func checkMemory() throws {
         let available = os_proc_available_memory()
         // 0 means no limit applies, as in the simulator.
-        guard available > 0 else { return nil }
-        let free = formatSize(UInt64(available))
-        if available < Self.minFreeMemory, !modelsLoaded {
-            throw AppError(
-                errorDescription: "Not enough free memory to load the translator (\(free) free, needs \(formatSize(UInt64(Self.minFreeMemory)))). Close other apps and try again."
-            )
-        }
-        guard available < Self.comfortableFreeMemory else { return nil }
-        return "Low memory (\(free) free): translation will be slow. Close other apps to speed it up."
+        guard available > 0, available < Self.minFreeMemory, !modelsLoaded else { return }
+        throw AppError(
+            errorDescription: "Not enough free memory to load the models (\(formatSize(UInt64(available))) free, needs \(formatSize(UInt64(Self.minFreeMemory)))). Close other apps and try again."
+        )
     }
 
     private func onWorker<T>(_ work: @escaping () throws -> T) async throws -> T {
@@ -273,24 +240,23 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
-    private func setLanguages(source: String?, target: String?) {
+    private func setSource(_ source: String?) {
         settingLanguages = true
         if let source { sourceCode = source }
-        if let target { targetCode = target }
         settingLanguages = false
         prepare()
     }
 
-    /// For scripted simulator tests: `-autotest-download det,rec-latin` starts a download, and
-    /// `-autotest-image <path> -autotest-from <code> -autotest-to <code>` runs one translation at
-    /// launch and writes the result to Documents/autotest.json.
+    /// For scripted simulator tests: `-autotest-download det,rec-latin,pair-fr-en` starts a download, and
+    /// `-autotest-image <path> -autotest-from <code>` runs one translation at launch
+    /// and writes the result to Documents/autotest.json.
     func runAutotestIfRequested() async {
         let defaults = UserDefaults.standard
         if let ids = defaults.string(forKey: "autotest-download") {
             downloads.start(ids.split(separator: ",").map(String.init), allowMetered: true)
         }
         guard let path = defaults.string(forKey: "autotest-image") else { return }
-        setLanguages(source: defaults.string(forKey: "autotest-from"), target: defaults.string(forKey: "autotest-to"))
+        setSource(defaults.string(forKey: "autotest-from"))
         let out = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("autotest.json")
         let start = Date()
