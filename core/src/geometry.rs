@@ -43,6 +43,20 @@ impl BBox {
     }
 }
 
+/// Which way a text line reads in the image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Direction {
+    #[default]
+    Horizontal,
+    /// Reads downward: CJK columns, or Latin rotated 90° clockwise.
+    TopToBottom,
+    /// Reads upward: Latin rotated 90° counter-clockwise.
+    BottomToTop,
+}
+
+/// Crops at least this much taller than wide are read as vertical text, as in PaddleOCR.
+pub const TALL_RATIO: f32 = 1.5;
+
 /// Corners in order: top-left, top-right, bottom-right, bottom-left.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Quad(pub [Pt; 4]);
@@ -85,6 +99,20 @@ impl Quad {
     pub fn angle(&self) -> f32 {
         let [tl, tr, _, _] = self.0;
         (tr.y - tl.y).atan2(tr.x - tl.x)
+    }
+
+    pub fn is_tall(&self) -> bool {
+        self.height() >= TALL_RATIO * self.width()
+    }
+
+    /// Reorders the corners so TL→TR runs along `direction`'s reading direction.
+    pub fn turned(&self, direction: Direction) -> Quad {
+        let [tl, tr, br, bl] = self.0;
+        match direction {
+            Direction::Horizontal => *self,
+            Direction::TopToBottom => Quad([tr, br, bl, tl]),
+            Direction::BottomToTop => Quad([bl, tl, tr, br]),
+        }
     }
 
     pub fn bbox(&self) -> BBox {
@@ -255,5 +283,36 @@ mod tests {
                 y1: 5.0
             }
         );
+    }
+
+    #[test]
+    fn turning_a_tall_quad_puts_the_reading_edge_on_top() {
+        let tall = rect(10.0, 10.0, 30.0, 110.0);
+        let down = tall.turned(Direction::TopToBottom);
+        assert_eq!(
+            down.0,
+            [
+                Pt::new(30.0, 10.0),
+                Pt::new(30.0, 110.0),
+                Pt::new(10.0, 110.0),
+                Pt::new(10.0, 10.0)
+            ]
+        );
+        assert!((down.angle() - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!((down.width(), down.height()), (100.0, 20.0));
+
+        let up = tall.turned(Direction::BottomToTop);
+        assert_eq!(up.0[0], Pt::new(10.0, 110.0));
+        assert!((up.angle() + std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(up.bbox(), tall.bbox());
+
+        assert_eq!(tall.turned(Direction::Horizontal), tall);
+    }
+
+    #[test]
+    fn only_clearly_tall_quads_are_vertical_candidates() {
+        assert!(rect(0.0, 0.0, 20.0, 30.0).is_tall());
+        assert!(!rect(0.0, 0.0, 20.0, 29.0).is_tall());
+        assert!(!rect(0.0, 0.0, 100.0, 20.0).is_tall());
     }
 }
