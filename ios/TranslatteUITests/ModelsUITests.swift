@@ -20,11 +20,14 @@ final class ModelsUITests: XCTestCase {
 
         let french = app.buttons["pack-fr"]
         XCTAssertFalse(french.isSelected)
+        scrollAboveBar(app, french, bar: download)
         french.tap()
         XCTAssertTrue(french.isSelected)
         XCTAssertTrue(download.isEnabled)
         XCTAssertEqual(download.label, "Download 50.1 MB")
-        app.buttons["pack-de"].tap()
+        let german = app.buttons["pack-de"]
+        scrollAboveBar(app, german, bar: download)
+        german.tap()
         XCTAssertEqual(download.label, "Download 87.4 MB", "German shares French's Latin script pack")
     }
 
@@ -56,6 +59,16 @@ final class ModelsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["download-zh"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["delete-zh"].exists)
         XCTAssertTrue(element(app, "pack-ja").label.contains("Installed"), "Japanese keeps the shared script pack")
+    }
+
+    /// The bottom download bar overlays the scroll view, so a row can be "hittable" while sitting under it.
+    private func scrollAboveBar(_ app: XCUIApplication, _ row: XCUIElement, bar: XCUIElement) {
+        let scroll = app.scrollViews.firstMatch
+        var swipes = 0
+        while row.frame.maxY > bar.frame.minY - 8 && swipes < 15 {
+            scroll.swipeUp()
+            swipes += 1
+        }
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
