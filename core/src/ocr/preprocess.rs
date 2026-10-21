@@ -1,14 +1,16 @@
 use image::imageops::{self, FilterType};
 use image::{Rgb, RgbImage};
 use imageproc::geometric_transformations::{warp_into, Interpolation, Projection};
-use ndarray::Array4;
+use ndarray::{Array4, ArrayViewMut3, Axis};
 
 use crate::geometry::Quad;
 
 const DET_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
 const DET_STD: [f32; 3] = [0.229, 0.224, 0.225];
 pub const REC_HEIGHT: u32 = 48;
-const REC_MIN_WIDTH: u32 = 320;
+/// PaddleOCR pads lines to at least 320 wide; 160 recognizes as well on the fixtures with less
+/// compute for short lines.
+const REC_MIN_WIDTH: u32 = 160;
 const REC_MAX_WIDTH: u32 = 3200;
 
 pub struct DetInput {
@@ -22,13 +24,21 @@ fn round_to_32(v: f32) -> u32 {
     ((v / 32.0).round() as u32).max(1) * 32
 }
 
-/// Paddle models were trained on BGR input; channel 0 of every tensor is blue.
-fn bgr(p: &Rgb<u8>) -> [f32; 3] {
-    [
-        p[2] as f32 / 255.0,
-        p[1] as f32 / 255.0,
-        p[0] as f32 / 255.0,
-    ]
+/// Writes `img` into the top-left of `out` ([channel, y, x]) as `(v / 255 - mean) / std` per
+/// channel. Paddle models were trained on BGR input, so channel 0 is blue.
+fn write_normalized(img: &RgbImage, mut out: ArrayViewMut3<f32>, mean: [f32; 3], std: [f32; 3]) {
+    let row_len = img.width() as usize * 3;
+    if row_len == 0 {
+        return;
+    }
+    for (c, mut plane) in out.axis_iter_mut(Axis(0)).enumerate() {
+        let lut: [f32; 256] = std::array::from_fn(|v| (v as f32 / 255.0 - mean[c]) / std[c]);
+        for (mut dst, src) in plane.rows_mut().into_iter().zip(img.chunks_exact(row_len)) {
+            for (d, px) in dst.iter_mut().zip(src.chunks_exact(3)) {
+                *d = lut[px[2 - c] as usize];
+            }
+        }
+    }
 }
 
 pub fn det_preprocess(img: &RgbImage, resize_long: u32) -> DetInput {
@@ -37,12 +47,12 @@ pub fn det_preprocess(img: &RgbImage, resize_long: u32) -> DetInput {
     let (rw, rh) = (round_to_32(w as f32 * ratio), round_to_32(h as f32 * ratio));
     let resized = imageops::resize(img, rw, rh, FilterType::Triangle);
     let mut tensor = Array4::<f32>::zeros((1, 3, rh as usize, rw as usize));
-    for (x, y, p) in resized.enumerate_pixels() {
-        let v = bgr(p);
-        for c in 0..3 {
-            tensor[[0, c, y as usize, x as usize]] = (v[c] - DET_MEAN[c]) / DET_STD[c];
-        }
-    }
+    write_normalized(
+        &resized,
+        tensor.index_axis_mut(Axis(0), 0),
+        DET_MEAN,
+        DET_STD,
+    );
     DetInput {
         tensor,
         scale_x: w as f32 / rw as f32,
@@ -84,18 +94,39 @@ pub fn crop_quad(img: &RgbImage, quad: &Quad) -> RgbImage {
     }
 }
 
-pub fn rec_preprocess(crop: &RgbImage) -> Array4<f32> {
+/// Width of `crop` scaled to the recognizer's input height.
+fn rec_width(crop: &RgbImage) -> u32 {
     let (w, h) = crop.dimensions();
-    let rw = ((REC_HEIGHT as f32 * w as f32 / h as f32).ceil() as u32).clamp(1, REC_MAX_WIDTH);
-    let resized = imageops::resize(crop, rw, REC_HEIGHT, FilterType::Triangle);
-    // Zero padding on the normalized tensor, as PaddleOCR does when batching.
-    let mut tensor =
-        Array4::<f32>::zeros((1, 3, REC_HEIGHT as usize, rw.max(REC_MIN_WIDTH) as usize));
-    for (x, y, p) in resized.enumerate_pixels() {
-        let v = bgr(p);
-        for c in 0..3 {
-            tensor[[0, c, y as usize, x as usize]] = (v[c] - 0.5) / 0.5;
-        }
+    ((REC_HEIGHT as f32 * w as f32 / h as f32).ceil() as u32).clamp(1, REC_MAX_WIDTH)
+}
+
+/// Width of the recognizer input for `crop` alone, padding included.
+pub fn rec_input_width(crop: &RgbImage) -> u32 {
+    rec_width(crop).max(REC_MIN_WIDTH)
+}
+
+pub fn rec_preprocess(crop: &RgbImage) -> Array4<f32> {
+    rec_preprocess_batch(&[crop])
+}
+
+/// Scales each crop to the recognizer's input height and stacks them into one batch as wide as the
+/// widest (at least `REC_MIN_WIDTH`), zero-padding the normalized tensor on the right, as
+/// PaddleOCR does when batching.
+pub fn rec_preprocess_batch(crops: &[&RgbImage]) -> Array4<f32> {
+    let width = crops
+        .iter()
+        .map(|c| rec_input_width(c))
+        .max()
+        .unwrap_or(REC_MIN_WIDTH);
+    let mut tensor = Array4::<f32>::zeros((crops.len(), 3, REC_HEIGHT as usize, width as usize));
+    for (i, crop) in crops.iter().enumerate() {
+        let resized = imageops::resize(*crop, rec_width(crop), REC_HEIGHT, FilterType::Triangle);
+        write_normalized(
+            &resized,
+            tensor.index_axis_mut(Axis(0), i),
+            [0.5; 3],
+            [0.5; 3],
+        );
     }
     tensor
 }
@@ -115,6 +146,16 @@ mod tests {
         assert!((input.scale_y - 500.0 / 480.0).abs() < 1e-6);
         // White pixel, channel 0 is B: (1 - 0.485) / 0.229
         assert!((input.tensor[[0, 0, 0, 0]] - (1.0 - 0.485) / 0.229).abs() < 1e-4);
+    }
+
+    #[test]
+    fn det_preprocess_puts_blue_in_channel_0() {
+        let img = RgbImage::from_pixel(64, 32, Rgb([200, 100, 50]));
+        let t = det_preprocess(&img, 64).tensor;
+        for (c, v) in [50.0, 100.0, 200.0].into_iter().enumerate() {
+            let want = (v / 255.0 - DET_MEAN[c]) / DET_STD[c];
+            assert!((t[[0, c, 31, 63]] - want).abs() < 1e-6, "channel {c}");
+        }
     }
 
     #[test]
@@ -149,12 +190,23 @@ mod tests {
     }
 
     #[test]
-    fn rec_preprocess_scales_to_height_48_and_pads_to_320() {
+    fn rec_preprocess_scales_to_height_48_and_pads_to_min_width() {
         let img = RgbImage::from_pixel(96, 48, Rgb([255, 255, 255]));
         let t = rec_preprocess(&img);
-        assert_eq!(t.dim(), (1, 3, 48, 320));
+        assert_eq!(t.dim(), (1, 3, 48, 160));
         assert!((t[[0, 0, 0, 0]] - 1.0).abs() < 1e-6);
-        assert_eq!(t[[0, 0, 0, 200]], 0.0);
+        assert_eq!(t[[0, 0, 0, 120]], 0.0);
+    }
+
+    #[test]
+    fn rec_preprocess_batch_pads_to_the_widest_crop() {
+        let narrow = RgbImage::from_pixel(96, 48, Rgb([255, 255, 255]));
+        let wide = RgbImage::from_pixel(400, 40, Rgb([0, 0, 0]));
+        let t = rec_preprocess_batch(&[&narrow, &wide]);
+        assert_eq!(t.dim(), (2, 3, 48, 480));
+        assert!((t[[0, 0, 0, 95]] - 1.0).abs() < 1e-6);
+        assert_eq!(t[[0, 0, 0, 96]], 0.0);
+        assert!((t[[1, 1, 47, 479]] + 1.0).abs() < 1e-6);
     }
 
     #[test]

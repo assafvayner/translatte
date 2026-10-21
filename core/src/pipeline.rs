@@ -115,17 +115,11 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         let start = Instant::now();
         let quads = self.detector.detect(img)?;
         let detected = Instant::now();
-        let mut lines = Vec::new();
-        for (i, q) in quads.iter().enumerate() {
-            on_stage(Stage::Recognizing {
-                done: i,
-                total: quads.len(),
-            });
-            let line = self.recognizer.recognize(img, q)?;
-            if line.confidence >= MIN_LINE_CONFIDENCE && !line.text.trim().is_empty() {
-                lines.push(line);
-            }
-        }
+        let total = quads.len();
+        let mut lines = self.recognizer.recognize_all(img, &quads, &mut |done| {
+            on_stage(Stage::Recognizing { done, total })
+        })?;
+        lines.retain(|l| l.confidence >= MIN_LINE_CONFIDENCE && !l.text.trim().is_empty());
         let timings = StageTimings {
             detect_ms: millis(detected - start),
             recognize_ms: millis(detected.elapsed()),
