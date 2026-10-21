@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["ncnn"]
+# NCNN as an alternative OCR runtime (built from source through CMake).
+ncnn = ["dep:ncnn"]
 # The pair-model translator (bergamot-translator, built from source through CMake).
 pair = ["dep:bergamot"]
 download = ["dep:hf-hub", "dep:tokio", "dep:serde_yaml_ng", "dep:futures", "dep:bytes"]
@@ -24,6 +26,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 bergamot = { path = "../bergamot", optional = true }
+ncnn = { path = "../ncnn", optional = true }
 hf-hub = { git = "https://github.com/huggingface/hf-hub", branch = "main", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 serde_yaml_ng = { version = "0.10", optional = true }

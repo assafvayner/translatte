@@ -4154,6 +4154,7 @@ dependencies = [
  "image",
  "imageproc",
  "libc",
+ "ncnn",
  "ndarray",
  "openssl",
  "ort",

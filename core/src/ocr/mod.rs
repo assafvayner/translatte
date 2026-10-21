@@ -1,4 +1,5 @@
 pub mod affinity;
+pub mod backend;
 pub mod charset;
 pub mod ctc;
 pub mod det_post;
@@ -8,6 +9,8 @@ pub mod recognizer;
 
 use image::RgbImage;
 use serde::Serialize;
+
+pub use backend::OcrEngine;
 
 use crate::geometry::Quad;
 use crate::Result;

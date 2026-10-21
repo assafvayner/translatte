@@ -2,9 +2,8 @@ use std::path::Path;
 
 use image::RgbImage;
 use ndarray::{Axis, Ix2};
-use ort::session::Session;
-use ort::value::Tensor;
 
+use super::backend::{load_model, Infer, OcrEngine};
 use super::det_post::{db_postprocess, DbParams};
 use super::preprocess::det_preprocess;
 use super::TextDetector;
@@ -17,16 +16,16 @@ const RESIZE_LONG: u32 = 960;
 const MIN_SIDE: f32 = 3.0;
 
 pub struct Detector {
-    session: Session,
+    model: Box<dyn Infer>,
     params: DbParams,
 }
 
 impl Detector {
-    pub fn load(path: &Path) -> Result<Self> {
+    /// Loads the detector whose ONNX file is `onnx` (the NCNN files sit next to it).
+    pub fn load(onnx: &Path, engine: OcrEngine) -> Result<Self> {
         let _pin = super::affinity::pin();
-        let session = super::session_builder(false)?.commit_from_file(path)?;
         Ok(Self {
-            session,
+            model: load_model(onnx, engine, false, 4)?,
             params: DbParams::default(),
         })
     }
@@ -43,10 +42,7 @@ impl TextDetector for Detector {
         }
         let input = det_preprocess(img, long_side.min(RESIZE_LONG));
         let _pin = super::affinity::pin();
-        let outputs = self
-            .session
-            .run(ort::inputs![Tensor::from_array(input.tensor)?])?;
-        let out = outputs[0].try_extract_array::<f32>()?;
+        let out = self.model.run(input.tensor.view())?;
         let prob = out
             .index_axis(Axis(0), 0)
             .index_axis_move(Axis(0), 0)

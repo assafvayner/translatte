@@ -3,7 +3,7 @@ mod common;
 use common::store;
 use translatte_core::ocr::detector::Detector;
 use translatte_core::ocr::recognizer::Recognizer;
-use translatte_core::ocr::{TextDetector, TextRecognizer};
+use translatte_core::ocr::{OcrEngine, TextDetector, TextRecognizer};
 
 #[test]
 fn detects_and_reads_hello_world() {
@@ -17,10 +17,15 @@ fn detects_and_reads_hello_world() {
     ))
     .unwrap()
     .to_rgb8();
-    let mut det = Detector::load(&store.model_file("det", "inference.onnx").unwrap()).unwrap();
+    let mut det = Detector::load(
+        &store.model_file("det", "inference.onnx").unwrap(),
+        OcrEngine::Ort,
+    )
+    .unwrap();
     let mut rec = Recognizer::load(
         &store.model_file("rec-latin", "inference.onnx").unwrap(),
         &store.model_file("rec-latin", "dict.txt").unwrap(),
+        OcrEngine::Ort,
     )
     .unwrap();
 
@@ -41,7 +46,11 @@ fn empty_image_yields_no_quads() {
         eprintln!("TRANSLATTE_MODELS not set; skipping");
         return;
     };
-    let mut det = Detector::load(&store.model_file("det", "inference.onnx").unwrap()).unwrap();
+    let mut det = Detector::load(
+        &store.model_file("det", "inference.onnx").unwrap(),
+        OcrEngine::Ort,
+    )
+    .unwrap();
     assert!(det.detect(&image::RgbImage::new(0, 10)).unwrap().is_empty());
     assert!(det.detect(&image::RgbImage::new(10, 0)).unwrap().is_empty());
 }

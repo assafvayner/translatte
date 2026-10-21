@@ -2,9 +2,8 @@ use std::path::Path;
 
 use image::RgbImage;
 use ndarray::{Axis, Ix3};
-use ort::session::Session;
-use ort::value::Tensor;
 
+use super::backend::{load_model, Infer, OcrEngine};
 use super::charset::Charset;
 use super::ctc::ctc_decode;
 use super::preprocess::{crop_quad, rec_input_width, rec_preprocess_batch};
@@ -20,26 +19,25 @@ const BATCH: usize = 6;
 const BATCH_SLACK: f32 = 1.25;
 
 pub struct Recognizer {
-    session: Session,
+    model: Box<dyn Infer>,
     charset: Charset,
 }
 
 impl Recognizer {
-    pub fn load(onnx: &Path, dict: &Path) -> Result<Self> {
+    /// Loads the recognizer whose ONNX file is `onnx` (the NCNN files sit next to it).
+    pub fn load(onnx: &Path, dict: &Path, engine: OcrEngine) -> Result<Self> {
         let _pin = super::affinity::pin();
-        let session = super::session_builder(true)?.commit_from_file(onnx)?;
+        let model = load_model(onnx, engine, true, 3)?;
         let charset = Charset::from_dict_str(&std::fs::read_to_string(dict)?);
-        Ok(Self { session, charset })
+        Ok(Self { model, charset })
     }
 
     fn run_batch(&mut self, crops: &[&RgbImage]) -> Result<Vec<(String, f32)>> {
         let tensor = rec_preprocess_batch(crops);
         let _pin = super::affinity::pin();
-        let outputs = self
-            .session
-            .run(ort::inputs![Tensor::from_array(tensor)?])?;
-        let out = outputs[0]
-            .try_extract_array::<f32>()?
+        let out = self
+            .model
+            .run(tensor.view())?
             .into_dimensionality::<Ix3>()
             .map_err(|e| {
                 TranslatteError::Inference(format!("unexpected recognizer output shape: {e}"))
@@ -74,7 +72,11 @@ impl TextRecognizer for Recognizer {
         let mut order: Vec<usize> = (0..crops.len()).collect();
         order.sort_by_key(|&i| rec_input_width(&crops[i]));
         let mut lines: Vec<Option<Line>> = vec![None; quads.len()];
-        let max_batch = super::env_or("TRANSLATTE_OCR_REC_BATCH", BATCH);
+        let max_batch = if self.model.batches() {
+            super::env_or("TRANSLATTE_OCR_REC_BATCH", BATCH)
+        } else {
+            1
+        };
         let mut batches: Vec<Vec<usize>> = Vec::new();
         for &i in &order {
             let w = rec_input_width(&crops[i]) as f32;

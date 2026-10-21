@@ -2,6 +2,7 @@ use crate::manifest::{Language, DETECTOR_ID};
 use crate::model_store::ModelStore;
 use crate::ocr::detector::Detector;
 use crate::ocr::recognizer::Recognizer;
+use crate::ocr::OcrEngine;
 use crate::pipeline::Pipeline;
 use crate::translate::cache::CachingTranslator;
 use crate::translate::pair::{PairTranslator, StoreLoader};
@@ -31,10 +32,12 @@ pub fn load_pipeline(
             .ok_or_else(|| TranslatteError::NoPairModel(src.code.clone()))?;
         store.require_installed(pair)?;
     }
-    let detector = Detector::load(&store.model_file(DETECTOR_ID, "inference.onnx")?)?;
+    let engine = OcrEngine::default();
+    let detector = Detector::load(&store.model_file(DETECTOR_ID, "inference.onnx")?, engine)?;
     let recognizer = Recognizer::load(
         &store.model_file(pack, "inference.onnx")?,
         &store.model_file(pack, "dict.txt")?,
+        engine,
     )?;
     let translator = translate
         .then(|| CachingTranslator::new(PairTranslator::new(StoreLoader::new(store.clone()))));
