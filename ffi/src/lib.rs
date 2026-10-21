@@ -499,7 +499,7 @@ impl Engine {
         });
         if !reusable {
             *cached = None;
-            let pipeline = load_pipeline(&self.store, src, translate)?;
+            let pipeline = load_pipeline(&self.store, src, translate, Default::default())?;
             *cached = Some(Cached {
                 script_pack: src.script_pack.clone().unwrap_or_default(),
                 translate,
@@ -606,6 +606,7 @@ mod tests {
                 detect_ms: 1,
                 recognize_ms: 2,
                 translate_ms: 3,
+                ..Default::default()
             },
         };
         let r = TranslationResult::from_output(out, 10, 20);

@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use translatte_core::loader::LoadedPipeline;
+use translatte_core::ocr::OcrEngine;
 
 use crate::setup;
 
@@ -37,7 +38,13 @@ pub fn fixture_cer(expected: &[String], got: &[String]) -> f64 {
     total / expected.len() as f64
 }
 
-pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>) -> Result<bool> {
+pub fn run_eval(
+    dir: &Path,
+    manifest: &Path,
+    models: &Path,
+    max_cer: Option<f64>,
+    engine: OcrEngine,
+) -> Result<bool> {
     let store = setup::load_store(manifest, models)?;
     let mut fixtures: Vec<_> = std::fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
@@ -76,7 +83,10 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
             continue;
         };
         if !pipelines.contains_key(&key) {
-            pipelines.insert(key.clone(), setup::build_pipeline(&store, src, false)?);
+            pipelines.insert(
+                key.clone(),
+                setup::build_pipeline(&store, src, false, engine)?,
+            );
         }
         let pipeline = pipelines.get_mut(&key).expect("inserted above");
         let image_path = dir.join(image_name);
@@ -107,7 +117,7 @@ pub fn run_eval(dir: &Path, manifest: &Path, models: &Path, max_cer: Option<f64>
             println!("  {lang:<6} {:>3} fixtures, mean CER {m:.3}", s.len());
         }
     }
-    println!("{} fixtures, mean CER {:.3}", scores.len(), mean);
+    println!("{} fixtures, mean CER {:.3} ({engine})", scores.len(), mean);
     Ok(max_cer.is_none_or(|m| mean <= m))
 }
 

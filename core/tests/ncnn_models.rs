@@ -93,3 +93,34 @@ fn ncnn_fp32_matches_ort() {
         );
     }
 }
+
+#[cfg(feature = "pair")]
+#[test]
+fn switching_the_pipeline_engine_keeps_reading_the_same_text() {
+    use translatte_core::loader::load_pipeline;
+    let Some(store) = store() else {
+        eprintln!("TRANSLATTE_MODELS not set; skipping");
+        return;
+    };
+    let det_onnx = store.model_file("det", "inference.onnx").unwrap();
+    if !ncnn_files(&det_onnx).0.exists() {
+        eprintln!("no NCNN models (run scripts/convert_ocr_ncnn.py); skipping");
+        return;
+    }
+    let fr = store.manifest().language("fr").unwrap();
+    let img = image("bonjour.png");
+    let mut p = load_pipeline(&store, fr, false, OcrEngine::Ort).unwrap();
+    let text = |p: &mut translatte_core::loader::LoadedPipeline| -> Vec<String> {
+        p.ocr(&img, fr, &mut |_| {})
+            .unwrap()
+            .into_iter()
+            .map(|l| l.text)
+            .collect()
+    };
+    let ort = text(&mut p);
+    p.set_ocr_engine(&store, OcrEngine::NcnnFp32).unwrap();
+    assert_eq!(p.ocr_engine(), OcrEngine::NcnnFp32);
+    assert_eq!(text(&mut p), ort);
+    p.set_ocr_engine(&store, OcrEngine::Ort).unwrap();
+    assert_eq!(text(&mut p), ort);
+}

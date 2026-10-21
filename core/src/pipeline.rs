@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::geometry::Quad;
 use crate::layout::group_lines;
 use crate::manifest::Language;
-use crate::ocr::{env_or, Line, TextDetector, TextRecognizer};
+use crate::ocr::{env_or, Line, OcrEngine, TextDetector, TextRecognizer};
 use crate::render::style_hints;
 use crate::translate::Translator;
 use crate::{Result, TranslatteError};
@@ -43,12 +43,14 @@ impl Stage {
     }
 }
 
-/// Wall time of each pipeline stage in one run, for the live camera's debug readout.
+/// Wall time of each pipeline stage in one run, and the OCR engine that ran, for the live
+/// camera's debug readout.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StageTimings {
     pub detect_ms: u32,
     pub recognize_ms: u32,
     pub translate_ms: u32,
+    pub ocr_engine: OcrEngine,
 }
 
 fn millis(d: Duration) -> u32 {
@@ -68,6 +70,7 @@ pub struct Pipeline<D, R, T> {
     recognizer: R,
     translator: Option<T>,
     script_pack: Option<String>,
+    ocr_engine: OcrEngine,
 }
 
 impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
@@ -77,6 +80,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             recognizer,
             translator,
             script_pack: None,
+            ocr_engine: OcrEngine::default(),
         }
     }
 
@@ -84,6 +88,27 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
     pub fn with_script_pack(mut self, id: impl Into<String>) -> Self {
         self.script_pack = Some(id.into());
         self
+    }
+
+    /// Records the engine the detector and recognizer run on, for [`StageTimings`].
+    pub fn with_ocr_engine(mut self, engine: OcrEngine) -> Self {
+        self.ocr_engine = engine;
+        self
+    }
+
+    pub fn script_pack(&self) -> Option<&str> {
+        self.script_pack.as_deref()
+    }
+
+    pub fn ocr_engine(&self) -> OcrEngine {
+        self.ocr_engine
+    }
+
+    /// Swaps in a detector and recognizer running on `engine`, keeping the translator.
+    pub fn replace_ocr(&mut self, detector: D, recognizer: R, engine: OcrEngine) {
+        self.detector = detector;
+        self.recognizer = recognizer;
+        self.ocr_engine = engine;
     }
 
     fn check_source(&self, src: &Language) -> Result<()> {
@@ -142,6 +167,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             detect_ms: millis(detected - start),
             recognize_ms: millis(detected.elapsed()),
             translate_ms: 0,
+            ocr_engine: self.ocr_engine,
         };
         Ok((lines, timings))
     }
@@ -280,6 +306,26 @@ mod tests {
             x1: 100.0,
             y1: y + 20.0,
         })
+    }
+
+    #[test]
+    fn timings_name_the_ocr_engine_after_a_swap() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let mut p = Pipeline::new(
+            FakeDet(vec![quad(10.0)]),
+            FakeRec(vec![("sortie", 0.9)], 0),
+            Some(Upper),
+        );
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(out.timings.ocr_engine, OcrEngine::Ort);
+        p.replace_ocr(
+            FakeDet(vec![quad(10.0)]),
+            FakeRec(vec![("entrée", 0.9)], 0),
+            OcrEngine::NcnnFp16,
+        );
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(out.timings.ocr_engine, OcrEngine::NcnnFp16);
+        assert_eq!(out.regions[0].translated_text.as_deref(), Some("ENTRÉE"));
     }
 
     #[test]

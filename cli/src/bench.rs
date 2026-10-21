@@ -6,6 +6,7 @@ use image::imageops::FilterType;
 use serde_json::{json, Value};
 
 use translatte_core::loader::LoadedPipeline;
+use translatte_core::ocr::OcrEngine;
 use translatte_core::pipeline::StageTimings;
 
 use crate::{eval, setup};
@@ -19,6 +20,7 @@ pub struct BenchArgs {
     pub text: Option<PathBuf>,
     /// Treat the fixtures, in name order, as consecutive camera frames: one `ocr_frame` each.
     pub live: bool,
+    pub engine: OcrEngine,
 }
 
 fn stats(name: &str, mut v: Vec<u32>) {
@@ -79,7 +81,7 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
         if !pipelines.contains_key(&key) {
             pipelines.insert(
                 key.clone(),
-                setup::build_pipeline(&store, src, args.translate)?,
+                setup::build_pipeline(&store, src, args.translate, args.engine)?,
             );
         }
         let pipeline = pipelines.get_mut(&key).expect("inserted above");
@@ -103,6 +105,7 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
             detect_ms: u32::MAX,
             recognize_ms: u32::MAX,
             translate_ms: u32::MAX,
+            ocr_engine: args.engine,
         };
         let lines = if args.live {
             if samples.is_empty() {
@@ -150,9 +153,10 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
         return Ok(());
     }
     println!(
-        "{} fixtures x {} iters, {:.1} lines/image, mean CER {:.4}",
+        "{} fixtures x {} iters ({}), {:.1} lines/image, mean CER {:.4}",
         cers.len(),
         args.iters,
+        args.engine,
         line_counts.iter().sum::<usize>() as f64 / line_counts.len() as f64,
         cers.iter().sum::<f64>() / cers.len() as f64
     );
