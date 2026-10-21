@@ -115,6 +115,23 @@ impl Quad {
         }
     }
 
+    /// Maps into a frame where `direction`'s reading direction is +x and following lines are +y.
+    pub fn to_reading_frame(&self, direction: Direction) -> Quad {
+        Quad(self.0.map(|p| match direction {
+            Direction::Horizontal => p,
+            Direction::TopToBottom => Pt::new(p.y, -p.x),
+            Direction::BottomToTop => Pt::new(-p.y, p.x),
+        }))
+    }
+
+    pub fn from_reading_frame(&self, direction: Direction) -> Quad {
+        Quad(self.0.map(|p| match direction {
+            Direction::Horizontal => p,
+            Direction::TopToBottom => Pt::new(-p.y, p.x),
+            Direction::BottomToTop => Pt::new(p.y, -p.x),
+        }))
+    }
+
     pub fn bbox(&self) -> BBox {
         let xs = self.0.map(|p| p.x);
         let ys = self.0.map(|p| p.y);
@@ -314,5 +331,18 @@ mod tests {
         assert!(rect(0.0, 0.0, 20.0, 30.0).is_tall());
         assert!(!rect(0.0, 0.0, 20.0, 29.0).is_tall());
         assert!(!rect(0.0, 0.0, 100.0, 20.0).is_tall());
+    }
+
+    #[test]
+    fn reading_frame_round_trips_and_levels_turned_quads() {
+        let tall = rect(10.0, 10.0, 30.0, 110.0);
+        for d in [
+            Direction::Horizontal,
+            Direction::TopToBottom,
+            Direction::BottomToTop,
+        ] {
+            assert_eq!(tall.to_reading_frame(d).from_reading_frame(d), tall);
+            assert!(tall.turned(d).to_reading_frame(d).angle().abs() < 1e-6);
+        }
     }
 }
