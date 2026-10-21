@@ -16,6 +16,10 @@ enum LiveRules {
     static let maxFrameSide = 1280
     /// Minimum time between frame starts while the device is hot.
     static let hotIntervalMs: Int64 = 1000
+    /// Wait after the first failed frame; doubles with each further failure in a row.
+    static let backoffBaseMs: Int64 = 1000
+    /// The longest wait after failed frames.
+    static let backoffMaxMs: Int64 = 8000
     /// How long a tracked box takes to slide to its new place.
     static let moveMs = 150
 
@@ -23,9 +27,18 @@ enum LiveRules {
         enabled && sourceInstalled
     }
 
-    /// Start a frame when none is in flight; on a hot device, also wait a second after the last start.
-    static func shouldTake(busy: Bool, hot: Bool, nowMs: Int64, lastStartMs: Int64?) -> Bool {
+    /// The wait after `failures` frames failed in a row: none for 0, then `backoffBaseMs` doubling up to `backoffMaxMs`.
+    static func backoffMs(_ failures: Int) -> Int64 {
+        failures <= 0 ? 0 : min(backoffMaxMs, backoffBaseMs << Int64(min(failures - 1, 16)))
+    }
+
+    /// Start a frame when none is in flight and the backoff for `failures` has passed since `lastFailMs`;
+    /// on a hot device, also wait a second after the last start.
+    static func shouldTake(
+        busy: Bool, hot: Bool, nowMs: Int64, lastStartMs: Int64?, failures: Int = 0, lastFailMs: Int64? = nil
+    ) -> Bool {
         guard !busy else { return false }
+        if let lastFailMs, nowMs - lastFailMs < backoffMs(failures) { return false }
         guard hot, let lastStartMs else { return true }
         return nowMs - lastStartMs >= hotIntervalMs
     }

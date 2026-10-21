@@ -4,7 +4,7 @@ import SwiftUI
 /// The full-screen camera the app opens to once it's set up.
 struct CameraScreen: View {
     @ObservedObject var camera: CameraController
-    @ObservedObject var live: LiveTranslator
+    let live: LiveTranslator
     @AppStorage(LiveRules.storageKey) private var liveSetting = true
     @EnvironmentObject private var model: TranslatorModel
     @EnvironmentObject private var navigator: AppNavigator
@@ -21,7 +21,7 @@ struct CameraScreen: View {
             Color.black.ignoresSafeArea()
             viewfinder
             if liveActive {
-                LiveOverlay(tracked: live.overlay, imageSize: live.imageSize, rtl: model.targetIsRTL)
+                LiveOverlay(live: live, rtl: model.targetIsRTL)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }
@@ -36,19 +36,10 @@ struct CameraScreen: View {
                 topBar
                     .padding(.horizontal, Metrics.gutter)
                     .padding(.top, 8)
-                #if DEBUG
-                if let readout = live.readout {
-                    Text(readout)
-                        .font(Typography.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(CameraStyle.control, in: RoundedRectangle(cornerRadius: 8))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, Metrics.gutter)
-                        .padding(.top, 8)
-                        .accessibilityIdentifier("live-readout")
-                }
-                #endif
+                LiveReadout(live: live)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.top, 8)
                 Spacer()
                 bottomBar
             }
@@ -169,14 +160,16 @@ struct CameraScreen: View {
     }
 
     private func shoot() {
-        if let frozen = live.snapshot() {
-            model.showLive(image: frozen.image, result: frozen.result)
-            navigator.showResult(from: .camera)
-            return
-        }
         guard !capturing else { return }
         capturing = true
         Task {
+            if let frozen = await live.snapshot() {
+                capturing = false
+                guard navigator.screen == .camera else { return }
+                model.showLive(image: frozen.image, result: frozen.result)
+                navigator.showResult(from: .camera)
+                return
+            }
             let photo = await camera.capture()
             capturing = false
             guard let photo, navigator.screen == .camera else { return }

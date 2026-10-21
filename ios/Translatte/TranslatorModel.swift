@@ -203,14 +203,19 @@ final class TranslatorModel: ObservableObject {
     func translateFrame(_ frame: LiveFrame) async throws -> TranslationResult {
         guard let engine else { throw AppError(errorDescription: "The engine isn't ready") }
         let source = sourceCode
-        return try await onWorker { [self] in
-            try checkMemory()
-            let output = try engine.translateFrame(
-                rgba: frame.rgba, width: UInt32(frame.width), height: UInt32(frame.height),
-                rotationDegrees: UInt32(frame.rotation), source: source
-            )
-            modelsLoaded = true
-            return output
+        do {
+            return try await onWorker { [self] in
+                try checkMemory()
+                let output = try engine.translateFrame(
+                    rgba: frame.rgba, width: UInt32(frame.width), height: UInt32(frame.height),
+                    rotationDegrees: UInt32(frame.rotation), source: source
+                )
+                modelsLoaded = true
+                return output
+            }
+        } catch let error as AppError {
+            if notice != error.localizedDescription { notice = error.localizedDescription }
+            throw error
         }
     }
 

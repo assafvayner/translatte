@@ -30,6 +30,14 @@ final class LiveRulesTests: XCTestCase {
         XCTAssertTrue(LiveRules.shouldTake(busy: false, hot: true, nowMs: 1000, lastStartMs: 0))
     }
 
+    func testBacksOffAfterFailuresUpTo8Seconds() {
+        XCTAssertEqual([0, 1, 2, 3, 4, 5, 40].map(LiveRules.backoffMs), [0, 1000, 2000, 4000, 8000, 8000, 8000])
+        XCTAssertFalse(LiveRules.shouldTake(busy: false, hot: false, nowMs: 1500, lastStartMs: 0, failures: 1, lastFailMs: 1000))
+        XCTAssertTrue(LiveRules.shouldTake(busy: false, hot: false, nowMs: 2000, lastStartMs: 0, failures: 1, lastFailMs: 1000))
+        XCTAssertFalse(LiveRules.shouldTake(busy: false, hot: false, nowMs: 4999, lastStartMs: 0, failures: 3, lastFailMs: 1000))
+        XCTAssertTrue(LiveRules.shouldTake(busy: false, hot: false, nowMs: 5000, lastStartMs: 0, failures: 0, lastFailMs: 4999))
+    }
+
     func testDownscalesTheLongSideTo1280OrLess() {
         XCTAssertEqual(LiveRules.downscaleFactor(width: 960, height: 720), 1)
         XCTAssertEqual(LiveRules.downscaleFactor(width: 1280, height: 960), 1)

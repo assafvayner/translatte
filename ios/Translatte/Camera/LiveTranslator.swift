@@ -98,6 +98,7 @@ final class LiveTranslator: ObservableObject {
     /// Clears the overlay and drops results still in flight (source change, live turned off, leaving the camera).
     func reset() {
         generation += 1
+        gate.clearFailures()
         tracker.reset()
         overlay = []
         latest = nil
@@ -106,16 +107,17 @@ final class LiveTranslator: ObservableObject {
     }
 
     /// The latest live frame, upright, and its result when snap should show them rather than take a photo.
-    func snapshot() -> (image: UIImage, result: TranslationResult)? {
-        guard let latest, LiveRules.snapUsesLive(latest.result), let image = latest.frame.image() else { return nil }
-        return (image, latest.result)
+    func snapshot() async -> (image: UIImage, result: TranslationResult)? {
+        guard let (frame, result) = latest, LiveRules.snapUsesLive(result) else { return nil }
+        guard let image = await Task.detached(priority: .userInitiated, operation: { frame.image() }).value else { return nil }
+        return (image, result)
     }
 
     /// Runs on the camera's frame queue for every frame; converts and translates only those `LiveRules` lets through.
     /// The UI is portrait-only, so back-camera buffers need a clockwise quarter turn.
     nonisolated func offer(_ pixelBuffer: CVPixelBuffer) {
-        guard gate.tryTake(nowMs: Self.nowMs(), hot: Self.hot()) else { return }
-        guard let frame = LiveFrame(pixelBuffer: pixelBuffer, rotation: 90) else { return gate.finish() }
+        guard gate.tryTake(nowMs: Self.nowMs(), hot: ThermalMonitor.shared.hot) else { return }
+        guard let frame = LiveFrame(pixelBuffer: pixelBuffer, rotation: 90) else { return gate.finish(failed: true, nowMs: Self.nowMs()) }
         Task { @MainActor in await self.run(frame) }
     }
 
@@ -123,19 +125,20 @@ final class LiveTranslator: ObservableObject {
     func runMock(_ image: UIImage) async {
         guard let frame = LiveFrame(image: image) else { return }
         while !Task.isCancelled {
-            if gate.tryTake(nowMs: Self.nowMs(), hot: Self.hot()) { await run(frame) }
+            if gate.tryTake(nowMs: Self.nowMs(), hot: ThermalMonitor.shared.hot) { await run(frame) }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
     private func run(_ frame: LiveFrame) async {
-        defer { gate.finish() }
         let run = generation
         do {
             let result = try await translate(frame)
+            gate.finish(failed: false, nowMs: Self.nowMs())
             guard run == generation else { return }
             publish(frame, result)
         } catch {
+            gate.finish(failed: true, nowMs: Self.nowMs())
             NSLog("translatte: live frame failed: %@", "\(error)")
         }
     }
@@ -156,10 +159,6 @@ final class LiveTranslator: ObservableObject {
     private nonisolated static func nowMs() -> Int64 {
         Int64(ProcessInfo.processInfo.systemUptime * 1000)
     }
-
-    private nonisolated static func hot() -> Bool {
-        ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
-    }
 }
 
 /// Pacing state shared by the camera's frame queue and the main actor.
@@ -168,6 +167,8 @@ private final class LiveGate: @unchecked Sendable {
     private var isEnabled = false
     private var busy = false
     private var lastStartMs: Int64?
+    private var failures = 0
+    private var lastFailMs: Int64?
 
     var enabled: Bool {
         get { lock.withLock { isEnabled } }
@@ -176,7 +177,9 @@ private final class LiveGate: @unchecked Sendable {
 
     func tryTake(nowMs: Int64, hot: Bool) -> Bool {
         lock.withLock {
-            guard isEnabled, LiveRules.shouldTake(busy: busy, hot: hot, nowMs: nowMs, lastStartMs: lastStartMs) else {
+            guard isEnabled, LiveRules.shouldTake(
+                busy: busy, hot: hot, nowMs: nowMs, lastStartMs: lastStartMs, failures: failures, lastFailMs: lastFailMs
+            ) else {
                 return false
             }
             busy = true
@@ -185,7 +188,45 @@ private final class LiveGate: @unchecked Sendable {
         }
     }
 
-    func finish() {
-        lock.withLock { busy = false }
+    func finish(failed: Bool, nowMs: Int64) {
+        lock.withLock {
+            busy = false
+            if failed {
+                failures += 1
+                lastFailMs = nowMs
+            } else {
+                failures = 0
+            }
+        }
+    }
+
+    func clearFailures() {
+        lock.withLock {
+            failures = 0
+            lastFailMs = nil
+        }
+    }
+}
+
+/// The thermal state, kept current by notification so frames needn't query it.
+private final class ThermalMonitor: @unchecked Sendable {
+    static let shared = ThermalMonitor()
+    private let lock = NSLock()
+    private var isHot = ThermalMonitor.read()
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            let hot = Self.read()
+            lock.withLock { self.isHot = hot }
+        }
+    }
+
+    var hot: Bool { lock.withLock { isHot } }
+
+    private static func read() -> Bool {
+        ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
     }
 }
