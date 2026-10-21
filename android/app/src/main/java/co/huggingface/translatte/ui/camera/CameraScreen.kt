@@ -77,6 +77,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Observer
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import co.huggingface.translatte.ui.theme.AppType
@@ -142,6 +144,7 @@ fun CameraScreen(
     var maxZoom by remember { mutableFloatStateOf(1f) }
     var error by remember { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf(false) }
+    var capturing by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val power = remember { context.getSystemService(PowerManager::class.java) }
@@ -176,8 +179,17 @@ fun CameraScreen(
             analysisExecutor.shutdown()
         }
     }
-    LaunchedEffect(live) {
-        liveTranslator.enabled = live
+    var resumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumed = true
+            if (event == Lifecycle.Event.ON_PAUSE) resumed = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(live, resumed) {
+        liveTranslator.enabled = live && resumed
         if (!live) liveTranslator.reset()
     }
     LaunchedEffect(sourceCode) { liveTranslator.reset() }
@@ -250,9 +262,13 @@ fun CameraScreen(
             ImageCapture.OutputFileOptions.Builder(file).build(),
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) = onCaptured(file)
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    capturing = false
+                    onCaptured(file)
+                }
 
                 override fun onError(e: ImageCaptureException) {
+                    capturing = false
                     file.delete()
                     error = "Couldn't take the photo: ${e.message}"
                 }
@@ -261,9 +277,16 @@ fun CameraScreen(
     }
 
     fun snap() {
+        if (capturing) return
+        capturing = true
         scope.launch {
             val frozen = liveTranslator.snapshot()
-            if (frozen != null) onLiveSnap(frozen.first, frozen.second) else shoot()
+            if (frozen != null) {
+                capturing = false
+                onLiveSnap(frozen.first, frozen.second)
+            } else {
+                shoot()
+            }
         }
     }
 
