@@ -1,3 +1,4 @@
+mod bench;
 mod draw;
 mod eval;
 mod fetch;
@@ -36,6 +37,27 @@ enum Command {
         /// Exit non-zero if mean CER exceeds this.
         #[arg(long)]
         max_cer: Option<f64>,
+        #[command(flatten)]
+        models: ModelArgs,
+    },
+    /// Time the pipeline stages over a fixtures dir and report OCR CER.
+    Bench {
+        #[arg(default_value = "fixtures")]
+        dir: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        iters: usize,
+        /// Downscale images so the long side is at most this, e.g. 960 for live camera frames.
+        #[arg(long)]
+        max_side: Option<u32>,
+        /// Also translate (loads the pair models).
+        #[arg(long)]
+        translate: bool,
+        /// Only fixtures in these source languages, e.g. fr,ja.
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+        /// Write the recognized lines (text, confidence) per fixture to this JSON file.
+        #[arg(long)]
+        text: Option<PathBuf>,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -102,6 +124,25 @@ fn real_main() -> Result<i32> {
             if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer)? {
                 return Ok(1);
             }
+        }
+        Command::Bench {
+            dir,
+            iters,
+            max_side,
+            translate,
+            only,
+            text,
+            models,
+        } => {
+            let args = bench::BenchArgs {
+                dir,
+                iters,
+                max_side,
+                translate,
+                only,
+                text,
+            };
+            bench::run_bench(&args, &models.manifest, &models.models)?;
         }
         Command::Fetch { langs, all, models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
