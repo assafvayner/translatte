@@ -14,14 +14,19 @@ import co.huggingface.translatte.Images
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.translatte_ffi.TranslationResult
 
 private const val TAG = "translatte"
 
-/** One camera frame as the engine takes it: tightly packed RGBA rows, before rotating upright. */
-class LiveFrame(val rgba: ByteArray, val width: Int, val height: Int, val rotation: Int)
+/**
+ * One camera frame as the engine takes it: tightly packed RGBA rows, before rotating upright.
+ * [ptsMs] is a replayed video frame's position.
+ */
+class LiveFrame(val rgba: ByteArray, val width: Int, val height: Int, val rotation: Int, val ptsMs: Long? = null)
 
 /**
  * Live translation of camera frames, mirroring iOS's `LiveTranslator`: at most one frame in
@@ -57,11 +62,16 @@ class LiveTranslator(
     private val buffers = arrayOfNulls<ByteArray>(2)
     private var lastDoneMs: Long? = null
     private var generation = 0
+    private var pruner: Job? = null
+    private val events = if (BuildConfig.DEBUG) LiveEventLog { Log.i(TAG, "liveev $it") } else null
 
     /** Clears the overlay and drops results still in flight (source change, live turned off). Main thread. */
     fun reset() {
         generation++
+        pruner?.cancel()
+        pruner = null
         synchronized(lock) { failures = 0 }
+        events?.reset(SystemClock.elapsedRealtime(), overlay)
         tracker.reset()
         overlay = emptyList()
         latest = null
@@ -93,6 +103,18 @@ class LiveTranslator(
             val frame = LiveFrame(rgba, crop.width() / factor, crop.height() / factor, it.imageInfo.rotationDegrees)
             scope.launch { run(frame) }
         }
+    }
+
+    /** A replayed video frame: [grab] makes the frame only when one is let through. Main thread. */
+    fun offer(grab: () -> LiveFrame?) {
+        if (!enabled || !take()) return
+        val frame = grab() ?: return synchronized(lock) { busy = false }
+        scope.launch { run(frame) }
+    }
+
+    /** Debug builds: event times count from the start of a replayed video, now at [positionMs]. */
+    fun markStart(positionMs: Long) {
+        events?.start(SystemClock.elapsedRealtime() - positionMs)
     }
 
     private fun take(): Boolean = synchronized(lock) {
@@ -127,14 +149,30 @@ class LiveTranslator(
 
     private fun publish(frame: LiveFrame, result: TranslationResult) {
         val now = SystemClock.elapsedRealtime()
-        overlay = tracker.update(result.regions)
+        val prev = overlay
+        overlay = tracker.update(result.regions, now)
+        if (overlay.isNotEmpty() && pruner == null) pruner = scope.launch { prune() }
         imageSize = IntSize(result.imageWidth.toInt(), result.imageHeight.toInt())
         latest = frame to result
         if (BuildConfig.DEBUG) {
             val line = LiveRules.readout(lastDoneMs?.let { now - it }, result.timings)
             readout = line
             Log.i(TAG, "live $line regions ${result.regions.size}")
+            events?.update(now, prev, overlay, result, lastDoneMs?.let { now - it }, frame.ptsMs)
         }
         lastDoneMs = now
+    }
+
+    private suspend fun prune() {
+        while (overlay.isNotEmpty()) {
+            delay(LiveRules.PRUNE_INTERVAL_MS)
+            val now = SystemClock.elapsedRealtime()
+            val kept = tracker.prune(now)
+            if (kept.size != overlay.size) {
+                events?.prune(now, overlay, kept)
+                overlay = kept
+            }
+        }
+        pruner = null
     }
 }
