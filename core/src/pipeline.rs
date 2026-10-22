@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -72,6 +73,40 @@ struct Ocr<D, R> {
     precision: Precision,
 }
 
+impl<D: TextDetector, R: TextRecognizer> Ocr<D, R> {
+    fn read(
+        &mut self,
+        img: &RgbImage,
+        on_stage: &mut dyn FnMut(Stage),
+    ) -> Result<(Vec<Line>, StageTimings)> {
+        on_stage(Stage::Detecting);
+        let start = Instant::now();
+        let quads = self.detector.detect(img)?;
+        let detected = Instant::now();
+        let total = quads.len();
+        let mut lines = self.recognizer.recognize_all(img, &quads, &mut |done| {
+            on_stage(Stage::Recognizing { done, total })
+        })?;
+        lines.retain(|l| l.confidence >= MIN_LINE_CONFIDENCE && !l.text.trim().is_empty());
+        let timings = StageTimings {
+            detect_ms: millis(detected - start),
+            recognize_ms: millis(detected.elapsed()),
+            precision: self.precision,
+            ..StageTimings::default()
+        };
+        Ok((lines, timings))
+    }
+}
+
+type LoadOcr<D, R> = Box<dyn Fn() -> Result<(D, R)> + Send + Sync>;
+
+/// The live frames' OCR models, loaded by the first live frame.
+struct LiveOcr<D, R> {
+    load: LoadOcr<D, R>,
+    precision: Precision,
+    ocr: Mutex<Option<Ocr<D, R>>>,
+}
+
 struct Translation<T> {
     translator: T,
     reuse: FrameReuse,
@@ -82,9 +117,10 @@ struct Translation<T> {
 /// their own (see [`Self::with_live_ocr`]).
 pub struct Pipeline<D, R, T> {
     ocr: Mutex<Ocr<D, R>>,
-    live_ocr: Option<Mutex<Ocr<D, R>>>,
+    live_ocr: Option<LiveOcr<D, R>>,
     translation: Option<Mutex<Translation<T>>>,
     script_pack: Option<String>,
+    retired: AtomicBool,
 }
 
 /// A stage's lock. A panic mid-run leaves no state that the next run depends on.
@@ -108,6 +144,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
                 })
             }),
             script_pack: None,
+            retired: AtomicBool::new(false),
         }
     }
 
@@ -123,14 +160,32 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         self
     }
 
-    /// Reads live frames with these models instead of the photo ones.
-    pub fn with_live_ocr(mut self, detector: D, recognizer: R, precision: Precision) -> Self {
-        self.live_ocr = Some(Mutex::new(Ocr {
-            detector,
-            recognizer,
+    /// Reads live frames with the models `load` returns, which run at `precision`, instead of the
+    /// photo ones. They're loaded by the first live frame, so a pipeline only used for photos never
+    /// loads them.
+    pub fn with_live_ocr(
+        mut self,
+        precision: Precision,
+        load: impl Fn() -> Result<(D, R)> + Send + Sync + 'static,
+    ) -> Self {
+        self.live_ocr = Some(LiveOcr {
+            load: Box::new(load),
             precision,
-        }));
+            ocr: Mutex::new(None),
+        });
         self
+    }
+
+    /// Stops live frames from loading models, for a pipeline its owner is done with but that calls
+    /// still in flight may use: from now on a live frame whose OCR models aren't loaded yet fails
+    /// with [`TranslatteError::Unloaded`], and live frames are no longer translated (which could load
+    /// a translation model). Photos are unaffected.
+    pub fn retire(&self) {
+        self.retired.store(true, Ordering::Relaxed);
+    }
+
+    fn retired(&self) -> bool {
+        self.retired.load(Ordering::Relaxed)
     }
 
     fn check_source(&self, src: &Language) -> Result<()> {
@@ -154,26 +209,22 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<(Vec<Line>, StageTimings)> {
         self.check_source(src)?;
-        let mut ocr = match (&self.live_ocr, live) {
-            (Some(live_ocr), true) => lock(live_ocr),
-            _ => lock(&self.ocr),
+        let Some(live_ocr) = self.live_ocr.as_ref().filter(|_| live) else {
+            return lock(&self.ocr).read(img, on_stage);
         };
-        on_stage(Stage::Detecting);
-        let start = Instant::now();
-        let quads = ocr.detector.detect(img)?;
-        let detected = Instant::now();
-        let total = quads.len();
-        let mut lines = ocr.recognizer.recognize_all(img, &quads, &mut |done| {
-            on_stage(Stage::Recognizing { done, total })
-        })?;
-        lines.retain(|l| l.confidence >= MIN_LINE_CONFIDENCE && !l.text.trim().is_empty());
-        let timings = StageTimings {
-            detect_ms: millis(detected - start),
-            recognize_ms: millis(detected.elapsed()),
-            precision: ocr.precision,
-            ..StageTimings::default()
-        };
-        Ok((lines, timings))
+        let mut ocr = lock(&live_ocr.ocr);
+        if ocr.is_none() {
+            if self.retired() {
+                return Err(TranslatteError::Unloaded);
+            }
+            let (detector, recognizer) = (live_ocr.load)()?;
+            *ocr = Some(Ocr {
+                detector,
+                recognizer,
+                precision: live_ocr.precision,
+            });
+        }
+        ocr.as_mut().expect("loaded above").read(img, on_stage)
     }
 
     /// Prepares the translator for `src` to `tgt` (e.g. when the user picks the languages), so the
@@ -254,6 +305,9 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         let Some(translation) = &self.translation else {
             return out;
         };
+        if live && self.retired() {
+            return out;
+        }
         let mut guard = lock(translation);
         let Translation { translator, reuse } = &mut *guard;
         let regions = &mut out.regions;
@@ -316,6 +370,7 @@ mod tests {
     use super::*;
     use crate::geometry::{BBox, Direction};
     use image::Rgb;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc, Barrier};
 
     struct FakeDet(Vec<Quad>);
@@ -390,17 +445,52 @@ mod tests {
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
         assert_eq!(out.timings.precision, Precision::Fp32);
         assert_eq!(frame(&p, &img).timings.precision, Precision::Fp32);
-        let p = p.with_live_ocr(
-            FakeDet(vec![quad(10.0)]),
-            FakeRec(vec![("entrée", 0.9)], 0),
-            Precision::Fp16,
+        let loads = Arc::new(AtomicUsize::new(0));
+        let p = p.with_live_ocr(Precision::Fp16, {
+            let loads = loads.clone();
+            move || {
+                loads.fetch_add(1, Ordering::Relaxed);
+                Ok((
+                    FakeDet(vec![quad(10.0)]),
+                    FakeRec(vec![("entrée", 0.9); 2], 0),
+                ))
+            }
+        });
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(out.timings.precision, Precision::Fp32);
+        assert_eq!(
+            loads.load(Ordering::Relaxed),
+            0,
+            "photos don't load the live models"
         );
         let out = frame(&p, &img);
         assert_eq!(out.timings.precision, Precision::Fp16);
         assert_eq!(out.regions[0].translated_text.as_deref(), Some("ENTRÉE"));
-        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
-        assert_eq!(out.timings.precision, Precision::Fp32);
-        assert_eq!(out.regions[0].source_text, "sortie");
+        frame(&p, &img);
+        assert_eq!(loads.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_retired_pipeline_loads_nothing_for_live_frames() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let p = Pipeline::new(
+            FakeDet(vec![quad(10.0)]),
+            FakeRec(vec![("sortie", 0.9); 2], 0),
+            Some(Recording::default()),
+        )
+        .with_live_ocr(Precision::Fp16, || panic!("loaded the live models"));
+        p.retire();
+        assert!(matches!(
+            p.read_frame(&img, &lang()),
+            Err(TranslatteError::Unloaded)
+        ));
+        let read = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(read.regions[0].translated_text.as_deref(), Some("SORTIE"));
+        let mut read = read;
+        read.regions[0].translated_text = None;
+        let out = p.translate_frame(read, &lang(), &lang());
+        assert_eq!(out.regions[0].translated_text, None);
+        assert_eq!(p.translator().translator.0.len(), 1, "only the photo");
     }
 
     #[test]

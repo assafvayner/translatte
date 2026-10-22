@@ -12,7 +12,7 @@ pub type LoadedPipeline =
     Pipeline<Detector, Recognizer, CachingTranslator<PairTranslator<StoreLoader>>>;
 
 /// Loads the detector and the recognizer for `src`'s script pack, fp32 for photos and fp16 for
-/// live frames (or `precision` for both), and, when `translate` is set, a translator that loads
+/// live frames, loaded by the first live frame (or `precision` for both, loaded now), and, when `translate` is set, a translator that loads
 /// `src`'s pair model on first use (or `warm`) and swaps it when another language with the same
 /// script pack is translated, behind a cache of recent translations (see [`CachingTranslator`]).
 pub fn load_pipeline(
@@ -46,11 +46,13 @@ pub fn load_pipeline(
     if precision.is_some() {
         return Ok(pipeline);
     }
-    Ok(pipeline.with_live_ocr(
-        load_detector(store, Precision::Fp16)?,
-        load_recognizer(store, pack, Precision::Fp16)?,
-        Precision::Fp16,
-    ))
+    let (store, pack) = (store.clone(), pack.clone());
+    Ok(pipeline.with_live_ocr(Precision::Fp16, move || {
+        Ok((
+            load_detector(&store, Precision::Fp16)?,
+            load_recognizer(&store, &pack, Precision::Fp16)?,
+        ))
+    }))
 }
 
 #[cfg(test)]

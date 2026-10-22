@@ -34,6 +34,8 @@ pub enum TranslatteError {
     Download(String),
     #[error("download cancelled")]
     Cancelled,
+    #[error("the models were unloaded")]
+    Unloaded,
 }
 
 pub type Result<T> = std::result::Result<T, TranslatteError>;
