@@ -117,7 +117,8 @@ fn main() {
     };
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    // Bionic aborts in ONNX Runtime's C++ static destructors at exit; skip them on Android.
+    // Bionic aborted in ONNX Runtime's C++ static destructors at exit. ORT is gone, but exiting
+    // through the remaining C++ libraries' static destructors is untested on Android; skip them.
     #[cfg(target_os = "android")]
     unsafe {
         libc::_exit(code)

@@ -3,9 +3,8 @@ project(bergamot_shim CXX C)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# sentencepiece compiles its own protobuf-lite, which clashes with ONNX Runtime's protobuf in the
-# same binary (the linker keeps one copy of each symbol, and ORT then parses models with the wrong
-# one). Renaming the namespace gives sentencepiece a private copy.
+# sentencepiece compiles its own protobuf-lite. Renaming the namespace keeps that copy private, so it
+# can't clash with another protobuf linked into the same binary (ONNX Runtime's did when OCR ran on it).
 add_compile_definitions(google=bergamot_google)
 add_subdirectory(${BERGAMOT_SRC} bergamot)
 

@@ -1,7 +1,8 @@
 //! Keeps OCR inference on the fast cores of big.LITTLE Android phones. The scheduler often runs
-//! the calling thread (which takes part in every inference) on a little core; on a Pixel 8 from
-//! `adb shell`, pinning it and ONNX Runtime's pool (whose threads inherit the creating thread's
-//! mask) to the big cores cut detect + recognize time by ~30%.
+//! the calling thread (which takes part in every inference) on a little core. Pinning it to the big
+//! cores also pins NCNN's OpenMP threads, which inherit the mask of the thread that starts them. On
+//! a Pixel 8 from `adb shell`, pinning cut detect + recognize time by ~20% with the earlier ONNX
+//! Runtime backend.
 
 /// A thread pinned to the big cores until dropped (see [`pin`]). A no-op off Android, when the cores
 /// all run at the same speed, or with `TRANSLATTE_OCR_PIN=0`.

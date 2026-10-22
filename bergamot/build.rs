@@ -44,7 +44,8 @@ fn main() {
             )
             .define("ANDROID_ABI", "arm64-v8a")
             .define("ANDROID_PLATFORM", format!("android-{api}"))
-            // ONNX Runtime's AAR already needs libc++_shared.so, which the app and CLI ship.
+            // One STL for all the C++ in the binary: NCNN uses libc++_shared.so too, which the app and
+            // CLI ship.
             .define("ANDROID_STL", "c++_shared")
             .define("BUILD_ARCH", arch.as_deref().unwrap_or("armv8.2-a+dotprod"));
         }
