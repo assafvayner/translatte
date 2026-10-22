@@ -78,13 +78,13 @@ pub struct NcnnModel {
 impl NcnnModel {
     /// Loads the model whose parameter file is `param`. `rank` is the rank of the original ONNX
     /// model's output without its batch dimension, which outputs are reshaped to. One NCNN thread
-    /// per big core when OCR is pinned to them (see [`super::affinity`]), else 4;
-    /// `TRANSLATTE_OCR_THREADS` overrides it.
+    /// per big core, as [`super::affinity`] finds them when OCR is pinned to them, else as NCNN
+    /// finds them; `TRANSLATTE_OCR_THREADS` overrides it.
     pub fn load(param: &Path, precision: Precision, rank: usize) -> Result<Self> {
         let opts = ncnn::Options {
             threads: super::env_or(
                 "TRANSLATTE_OCR_THREADS",
-                super::affinity::big_core_count().unwrap_or(4),
+                super::affinity::big_core_count().unwrap_or_else(ncnn::big_cpu_count),
             ),
             fp16: precision == Precision::Fp16,
         };

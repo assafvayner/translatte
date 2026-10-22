@@ -68,3 +68,13 @@ fn reports_bad_inputs_and_files() {
         Err(Error::Load(_))
     ));
 }
+
+#[test]
+fn counts_the_big_cores() {
+    let all = std::thread::available_parallelism().unwrap().get();
+    assert!(
+        (1..=all).contains(&ncnn::big_cpu_count()),
+        "{}",
+        ncnn::big_cpu_count()
+    );
+}

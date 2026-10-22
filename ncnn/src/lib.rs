@@ -30,6 +30,12 @@ pub struct Output {
     pub shape: Vec<usize>,
 }
 
+/// How many big cores NCNN finds: the fastest cluster's on big.LITTLE and Apple CPUs, else all.
+pub fn big_cpu_count() -> usize {
+    let n = unsafe { sys::get_big_cpu_count() };
+    usize::try_from(n).unwrap_or(0).max(1)
+}
+
 pub struct Net {
     raw: sys::Net,
 }

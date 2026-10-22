@@ -1,4 +1,5 @@
-//! The subset of NCNN's C API (`src/c_api.h`) the safe wrapper uses.
+//! The subset of NCNN's C API (`src/c_api.h`) the safe wrapper uses, and one C++ function the C API
+//! doesn't wrap.
 
 use std::ffi::{c_char, c_int, c_void};
 
@@ -61,4 +62,8 @@ extern "C" {
     pub fn ncnn_mat_get_elemsize(mat: Mat) -> usize;
     pub fn ncnn_mat_get_elempack(mat: Mat) -> c_int;
     pub fn ncnn_mat_get_channel_data(mat: Mat, c: c_int) -> *mut c_void;
+
+    /// `int ncnn::get_big_cpu_count()` from `src/cpu.h`, by its Itanium C++ ABI name.
+    #[link_name = "_ZN4ncnn17get_big_cpu_countEv"]
+    pub fn get_big_cpu_count() -> c_int;
 }
