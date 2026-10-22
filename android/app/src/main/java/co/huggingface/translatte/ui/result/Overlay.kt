@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
+import android.text.TextUtils
 import android.text.TextPaint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -133,8 +134,11 @@ private class Fit(bitmap: Bitmap, container: Size) {
     val top = rect.top
 }
 
-/** A region as a rotated rectangle in image pixels; drawn by the result viewer and the live camera overlay. */
-internal class RegionBox(val region: Region, previous: RegionBox? = null) {
+/**
+ * A region as a rotated rectangle in image pixels; drawn by the result viewer and the live camera
+ * overlay, with its translation no smaller than [minTextPx] on screen.
+ */
+internal class RegionBox(val region: Region, previous: RegionBox? = null, private val minTextPx: Float = MIN_TEXT_PX) {
     private val c = region.corners
     val width = max(dist(0, 1), dist(3, 2))
     val height = max(dist(0, 3), dist(1, 2))
@@ -164,9 +168,12 @@ internal class RegionBox(val region: Region, previous: RegionBox? = null) {
         return abs(x) <= width / 2 && abs(y) <= height / 2
     }
 
-    private fun layoutFor(w: Float, h: Float): StaticLayout {
+    /** The text size that matches the source lines, in image pixels. */
+    private val lineTextSize = TEXT_PER_LINE * (region.lineHeight.takeIf { it > 0f } ?: height)
+
+    private fun layoutFor(w: Float, h: Float, maxSize: Float): StaticLayout {
         layout?.let { (size, l) -> if (abs(size.first - w) < LAYOUT_TOLERANCE && abs(size.second - h) < LAYOUT_TOLERANCE) return l }
-        return fitText(region.translatedText.orEmpty(), region.foreground.argb(), w, h).also { layout = (w to h) to it }
+        return fitText(region.translatedText.orEmpty(), region.foreground.argb(), w, h, maxSize, minTextPx).also { layout = (w to h) to it }
     }
 
     /** Draws at image-to-view [scale] and offset ([left], [top]), shifted by ([dx], [dy]) image pixels, at [alpha]. */
@@ -179,7 +186,8 @@ internal class RegionBox(val region: Region, previous: RegionBox? = null) {
         canvas.rotate(Math.toDegrees(region.angle.toDouble()).toFloat())
         if (alpha < 1f) canvas.saveLayerAlpha(-w / 2, -h / 2, w / 2, h / 2, (alpha * 255).roundToInt())
         canvas.drawRect(-w / 2, -h / 2, w / 2, h / 2, background)
-        val layout = layoutFor(w - 2 * pad, h - 2 * pad)
+        canvas.clipRect(-w / 2, -h / 2, w / 2, h / 2)
+        val layout = layoutFor(w - 2 * pad, h - 2 * pad, lineTextSize * scale)
         canvas.translate(-w / 2 + pad, -layout.height / 2f)
         layout.draw(canvas)
         canvas.restoreToCount(saved)
@@ -188,6 +196,12 @@ internal class RegionBox(val region: Region, previous: RegionBox? = null) {
 
 private const val LAYOUT_TOLERANCE = 4f
 
+/** Translated text starts at this share of the source line height (iOS matches). */
+private const val TEXT_PER_LINE = 0.8f
+
+/** The smallest text size in the result viewer, which can zoom in on it. */
+private const val MIN_TEXT_PX = 4f
+
 private fun Rgb.argb() =
     android.graphics.Color.rgb(r.toInt(), g.toInt(), b.toInt())
 
@@ -195,29 +209,37 @@ private fun Rgb.argb() =
 private val PhotoTypeface = Typeface.create(Typeface.DEFAULT, 500, false)
 
 /**
- * Lays [text] out at the largest size that fits [width] x [height], without breaking words when
- * the text has spaces to wrap at.
+ * Lays [text] out at the largest size from [minSize] to [maxSize] that fits [width] x [height],
+ * without breaking words when the text has spaces to wrap at. Text that doesn't fit even at
+ * [minSize] is cut to the lines that do, ending in an ellipsis.
  */
-private fun fitText(text: String, color: Int, width: Float, height: Float): StaticLayout {
+private fun fitText(text: String, color: Int, width: Float, height: Float, maxSize: Float, minSize: Float): StaticLayout {
     val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         this.color = color
         typeface = PhotoTypeface
     }
     val w = max(width, 1f).toInt()
     val words = if (text.contains(' ')) text.split(' ') else emptyList()
-    fun layout(size: Float): StaticLayout {
+    fun layout(size: Float, maxLines: Int = Int.MAX_VALUE): StaticLayout {
         paint.textSize = size
         return StaticLayout.Builder.obtain(text, 0, text.length, paint, w)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setIncludePad(false)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .setMaxLines(maxLines)
             .build()
     }
     fun fits(size: Float): Boolean {
         val l = layout(size)
         return l.height <= height && words.all { paint.measureText(it) <= w }
     }
-    var lo = 4f
-    var hi = max(height, lo)
+    var lo = minSize
+    var hi = max(maxSize, lo)
+    if (fits(hi)) return layout(hi)
+    if (!fits(lo)) {
+        paint.textSize = lo
+        return layout(lo, max(1, (height / paint.fontSpacing).toInt()))
+    }
     repeat(10) {
         val mid = (lo + hi) / 2
         if (fits(mid)) lo = mid else hi = mid

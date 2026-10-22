@@ -71,6 +71,8 @@ enum LiveRules {
     static let moveMs = 150
     /// How often stale boxes are pruned while updates stall.
     static let pruneIntervalMs: Int64 = 100
+    /// Live translations shrink to fit their box down to this text size, then cut off.
+    static let minTextSize: CGFloat = 9
     /// Motion thumbnails are this many pixels on each side, whatever the frame's aspect.
     static let thumbSide = 128
 

@@ -13,8 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.InnerShape
 import co.huggingface.translatte.ui.result.RegionBox
@@ -31,10 +33,15 @@ fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
     val tracked = translator.overlay
     val imageSize = translator.imageSize
     val cache = remember { HashMap<Long, RegionBox>() }
-    val boxes = remember(tracked) {
+    val minText = with(LocalDensity.current) { LiveRules.MIN_TEXT_SP.sp.toPx() }
+    val boxes = remember(tracked, minText) {
         val next = tracked.map { t ->
             val old = cache[t.id]
-            Triple(RegionBox(t.region, old), center(t.from), t.fadeFrom?.let { RegionBox(t.region.copy(translatedText = it), old) })
+            Triple(
+                RegionBox(t.region, old, minText),
+                center(t.from),
+                t.fadeFrom?.let { RegionBox(t.region.copy(translatedText = it), old, minText) },
+            )
         }
         cache.clear()
         tracked.forEachIndexed { i, t -> cache[t.id] = next[i].first }

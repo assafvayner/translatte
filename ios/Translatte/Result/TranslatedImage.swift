@@ -92,26 +92,36 @@ private struct OriginalText: View {
     }
 }
 
-/// A rotated box in the region's colors with its translation (or original, when peeked) shrunk to fit.
+/// A rotated box in the region's colors with its translation (or original, when peeked) at the
+/// source lines' size, shrunk to fit down to `minFontSize`, then cut off with an ellipsis.
 struct RegionLabel: View {
+    /// Text starts at this share of the source line height (Android matches).
+    static let textPerLine: CGFloat = 0.8
+
     let region: Region
     let scale: CGFloat
     let rtl: Bool
     let showOriginal: Bool
+    /// The result viewer can zoom in on small text; the live overlay can't.
+    var minFontSize: CGFloat = 1
 
     var body: some View {
         let box = RegionBox(region, scale: scale)
         let rightToLeft = rtl && !showOriginal
+        let line = region.lineHeight > 0 ? CGFloat(region.lineHeight) * scale : box.height
+        let size = max(line * Self.textPerLine, minFontSize)
         Text(showOriginal ? region.sourceText : region.translatedText ?? "")
-            .font(.system(size: max(box.height * 0.8, 6), weight: .medium))
-            .minimumScaleFactor(0.1)
+            .font(.system(size: size, weight: .medium))
+            .minimumScaleFactor(minFontSize / size)
             .lineLimit(nil)
+            .truncationMode(.tail)
             .multilineTextAlignment(rightToLeft ? .trailing : .leading)
             .environment(\.layoutDirection, rightToLeft ? .rightToLeft : .leftToRight)
             .foregroundStyle(Color(region.foreground))
             .padding(1)
             .frame(width: box.width, height: box.height, alignment: rightToLeft ? .trailing : .leading)
             .background(Color(region.background))
+            .clipped()
             .rotationEffect(.radians(Double(region.angle)))
             .position(box.center)
             .accessibilityLabel(region.translatedText ?? "")

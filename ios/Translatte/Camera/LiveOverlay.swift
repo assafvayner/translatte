@@ -41,7 +41,7 @@ private struct LiveRegion: View, Equatable {
     let rtl: Bool
 
     var body: some View {
-        RegionLabel(region: region, scale: scale, rtl: rtl, showOriginal: false)
+        RegionLabel(region: region, scale: scale, rtl: rtl, showOriginal: false, minFontSize: LiveRules.minTextSize)
     }
 }
 

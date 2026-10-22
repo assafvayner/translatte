@@ -84,6 +84,9 @@ object LiveRules {
     /** How often stale boxes are pruned while updates stall. */
     const val PRUNE_INTERVAL_MS = 100L
 
+    /** Live translations shrink to fit their box down to this text size, then cut off. */
+    const val MIN_TEXT_SP = 9
+
     /** Motion thumbnails are this many pixels on each side, whatever the frame's aspect. */
     const val THUMB_SIDE = 128
 
