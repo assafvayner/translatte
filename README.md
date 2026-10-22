@@ -118,12 +118,14 @@ tag `translatte`).
 With "Live translation (experimental)" on in Settings (the default), the camera translates preview frames
 continuously and paints English over the preview; the shutter freezes the latest live result into the result
 viewer (or takes a photo when nothing has been translated yet). Each frame (raw RGBA plus a clockwise rotation, about
-960x720) is read with `Engine::ocr_frame`, then translated with `Engine::translate_regions` while the next frame is
-read: OCR and translation sit behind separate locks, each stage holds at most one frame, and a frame read while the
+960x720) is read with `Engine::ocr_frame`, then translated from the source it was read as with
+`Engine::translate_regions` while the next frame is read (only by the loaded pipeline, so after `unload` or a
+source change the frame stays untranslated rather than loading models): OCR and translation sit behind separate locks, each stage holds at most one frame, and a frame read while the
 translator is busy waits for it (`LiveStages`), with at most one frame start per second when the phone runs hot. Live
-frames run OCR at fp16, photos at fp32. A cache of recent translations, shared with photos, means only new text
+frames run OCR at fp16 (loaded by the first live frame), photos at fp32. A cache of recent translations, shared with photos, means only new text
 reaches the translation model, and a block close to one of the last three frames' blocks in place (IoU ≥ 0.3) and
-text (≤ 20% of characters changed) reuses that block's translation, so OCR jitter doesn't cost a translation.
+text (≤ 20% of characters changed, numbers unchanged) reuses that block's translation, so OCR jitter doesn't cost a
+translation; a reused block is compared with the text that was actually translated, so matches don't drift.
 Both apps keep the same rules in `LiveRules` and `LiveOverlayTracker`: a box matched to the same text stays and slides, an unmatched box disappears 500 ms after its last match (checked every 100 ms, so stalled updates don't leave it behind) or at once when a new box overlaps it, and a frame with no text clears the overlay. Debug builds show updates/s and per-stage
 milliseconds on the camera and log each update; on Android, `scripts/android/live-stats.sh [seconds]` summarizes
 them from logcat. The iOS simulator has no camera, so with `-mock-camera <image>` the still is fed as frames.
