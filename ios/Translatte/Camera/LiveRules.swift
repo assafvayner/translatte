@@ -102,9 +102,9 @@ enum LiveRules {
     }
 
     /// Whether the engine skipped `result`'s frame as too blurred to read: no update rather than an
-    /// empty one. Always false until the engine reports skipped frames.
+    /// empty one.
     static func skipped(_ result: TranslationResult) -> Bool {
-        false
+        result.skipped
     }
 
     /// Snap freezes the live result only when it translated something; otherwise the photo pipeline runs.

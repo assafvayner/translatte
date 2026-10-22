@@ -55,6 +55,14 @@ final class LiveRulesTests: XCTestCase {
         XCTAssertTrue(LiveRules.snapUsesLive(result("t")))
     }
 
+    func testSkippedFollowsTheEngine() {
+        XCTAssertFalse(LiveRules.skipped(result("t")))
+        var skipped = result(nil)
+        skipped.regions = []
+        skipped.skipped = true
+        XCTAssertTrue(LiveRules.skipped(skipped))
+    }
+
     func testReadoutShowsTheRateAndStageTimes() {
         XCTAssertEqual(
             LiveRules.readout(intervalMs: 400, timings: StageTimings(detectMs: 120, recognizeMs: 85, translateMs: 40, precision: "fp16")),

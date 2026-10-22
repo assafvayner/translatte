@@ -114,6 +114,12 @@ class LiveRulesTest {
     }
 
     @Test
+    fun skippedFollowsTheEngine() {
+        assertFalse(LiveRules.skipped(result("t")))
+        assertTrue(LiveRules.skipped(result(null).copy(regions = emptyList(), skipped = true)))
+    }
+
+    @Test
     fun readoutShowsTheRateAndStageTimes() {
         assertEquals("fp16 · 2.5/s · det 120 · rec 85 · tr 40 ms", LiveRules.readout(400, StageTimings(120u, 85u, 40u, "fp16")))
         assertEquals("fp32 · –/s · det 0 · rec 0 · tr 0 ms", LiveRules.readout(null, noTimings))
