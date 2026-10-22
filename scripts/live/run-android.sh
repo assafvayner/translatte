@@ -7,7 +7,7 @@
 #
 # Usage: scripts/live/run-android.sh <clip.mp4> [out-dir]   (default out-dir: out/live/android-<clip>)
 # Env: LIVE_SOURCE (default fr), LIVE_LOOP=1 to loop (records LIVE_SECS, default 30),
-# LIVE_STARTUP_SECS (default 3).
+# LIVE_STARTUP_SECS (default 3), LIVE_RECORD=0 to skip the screen recording.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -38,19 +38,28 @@ SECS=$((SECS > 180 ? 180 : SECS))
 
 adb shell am force-stop "$PKG"
 adb logcat -c
-adb shell rm -f "$REC"
-adb shell screenrecord --time-limit "$SECS" "$REC" &
+RECORD="${LIVE_RECORD:-1}"
+if [[ "$RECORD" == 1 ]]; then
+  adb shell rm -f "$REC"
+  adb shell screenrecord --time-limit "$SECS" "$REC" &
+else
+  sleep "$SECS" &
+fi
 RECORDER=$!
 sleep 1
 adb shell am start -n "$PKG/.MainActivity" --es mock_video "$DEST" --es mock_video_source "$SOURCE" ${LOOP_ARGS[@]+"${LOOP_ARGS[@]}"} >/dev/null
 wait "$RECORDER" || true
 sleep 1
 
-adb pull "$REC" "$OUT/screen.mp4" >/dev/null
+[[ "$RECORD" == 1 ]] && adb pull "$REC" "$OUT/screen.mp4" >/dev/null
 adb logcat -d -s translatte:I >"$OUT/logcat.txt"
 grep -o 'liveev .*' "$OUT/logcat.txt" | cut -c8- >"$OUT/liveev.jsonl" || true
 grep -q "live replay done" "$OUT/logcat.txt" || [[ "${LIVE_LOOP:-0}" == 1 ]] || echo "no 'live replay done' in logcat" >&2
 adb shell am force-stop "$PKG"
-python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT" --video "$OUT/screen.mp4"
-echo "recording: $OUT/screen.mp4"
+if [[ "$RECORD" == 1 ]]; then
+  python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT" --video "$OUT/screen.mp4"
+  echo "recording: $OUT/screen.mp4"
+else
+  python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT"
+fi
 echo "logcat: $OUT/logcat.txt"

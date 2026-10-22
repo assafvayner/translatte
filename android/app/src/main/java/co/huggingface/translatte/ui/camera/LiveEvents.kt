@@ -70,16 +70,26 @@ class LiveEventLog(private val emit: (String) -> Unit) {
             return out
         }
 
-        /** [seen] are the ids this update matched or added; [shown] counts the boxes on screen after it. */
+        /**
+         * [seen] are the ids this update matched or added; [shown] counts the boxes on screen after
+         * it. `blocks` lists every region of the update, matched or not.
+         */
         fun updateJson(tMs: Long, result: TranslationResult, seen: List<Long>, shown: Int, intervalMs: Long?, ptsMs: Long?): String {
             val t = result.timings
             return buildString {
                 append("{\"t_ms\":$tMs,\"ev\":\"update\",\"regions\":${result.regions.size},\"shown\":$shown,\"seen\":[${seen.joinToString(",")}]")
-                append(",\"det_ms\":${t.detectMs},\"rec_ms\":${t.recognizeMs},\"tr_ms\":${t.translateMs}")
+                append(",\"det_ms\":${t.detectMs},\"rec_ms\":${t.recognizeMs},\"tr_ms\":${t.translateMs},\"engine\":\"${t.ocrEngine}\"")
                 append(",\"w\":${result.imageWidth},\"h\":${result.imageHeight}")
                 intervalMs?.let { append(",\"interval_ms\":$it") }
                 ptsMs?.let { append(",\"pts_ms\":$it") }
-                append("}")
+                append(",\"blocks\":[")
+                result.regions.forEachIndexed { i, r ->
+                    if (i > 0) append(",")
+                    append("{\"src\":")
+                    appendString(r.sourceText)
+                    append(",\"box\":[${box(r.corners).joinToString(",")}]}")
+                }
+                append("]}")
             }
         }
 

@@ -82,14 +82,18 @@ final class LiveEventLog {
     }
 
     /// `seen` are the ids this update matched or added; `shown` counts the boxes on screen after it.
+    /// `blocks` lists every region of the update, matched or not.
     static func updateJson(tMs: Int64, result: TranslationResult, seen: [Int], shown: Int, intervalMs: Int64?, ptsMs: Int64?) -> String {
         let t = result.timings
         var s = "{\"t_ms\":\(tMs),\"ev\":\"update\",\"regions\":\(result.regions.count),\"shown\":\(shown),\"seen\":[\(seen.map(String.init).joined(separator: ","))]"
-        s += ",\"det_ms\":\(t.detectMs),\"rec_ms\":\(t.recognizeMs),\"tr_ms\":\(t.translateMs)"
+        s += ",\"det_ms\":\(t.detectMs),\"rec_ms\":\(t.recognizeMs),\"tr_ms\":\(t.translateMs),\"engine\":\"\(t.ocrEngine)\""
         s += ",\"w\":\(result.imageWidth),\"h\":\(result.imageHeight)"
         if let intervalMs { s += ",\"interval_ms\":\(intervalMs)" }
         if let ptsMs { s += ",\"pts_ms\":\(ptsMs)" }
-        return s + "}"
+        let blocks = result.regions.map { r in
+            "{\"src\":\(quoted(r.sourceText)),\"box\":[\(box(r.corners).map(String.init).joined(separator: ","))]}"
+        }
+        return s + ",\"blocks\":[\(blocks.joined(separator: ","))]}"
     }
 
     static func json(tMs: Int64, _ e: LiveEvent) -> String {
