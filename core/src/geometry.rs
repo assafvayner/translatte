@@ -84,6 +84,18 @@ fn rotation(angle: f32) -> (f32, f32) {
     (snap(angle.cos()), snap(angle.sin()))
 }
 
+/// Shoelace area, positive when the corners run clockwise on screen (y down).
+fn signed_area(pts: &[Pt]) -> f32 {
+    let n = pts.len();
+    (0..n)
+        .map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            a.x * b.y - b.x * a.y
+        })
+        .sum::<f32>()
+        / 2.0
+}
+
 /// Absolute difference of two angles, wrapped to [0, π].
 pub fn angle_between(a: f32, b: f32) -> f32 {
     let d = (a - b).rem_euclid(std::f32::consts::TAU);
@@ -204,6 +216,37 @@ impl Quad {
             self.0
                 .map(|p| Pt::new(p.x.clamp(0.0, max_x), p.y.clamp(0.0, max_y))),
         )
+    }
+
+    pub fn area(&self) -> f32 {
+        signed_area(&self.0).abs()
+    }
+
+    /// Area shared with `other`; both convex with corners in order.
+    pub fn intersection_area(&self, other: &Quad) -> f32 {
+        let orientation = signed_area(&other.0).signum();
+        let mut poly: Vec<Pt> = self.0.to_vec();
+        for i in 0..4 {
+            let (a, b) = (other.0[i], other.0[(i + 1) % 4]);
+            let side =
+                |p: Pt| orientation * ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x));
+            let input = std::mem::take(&mut poly);
+            for (j, &p) in input.iter().enumerate() {
+                let q = input[(j + 1) % input.len()];
+                let (sp, sq) = (side(p), side(q));
+                if sp >= 0.0 {
+                    poly.push(p);
+                }
+                if (sp >= 0.0) != (sq >= 0.0) {
+                    let t = sp / (sp - sq);
+                    poly.push(Pt::new(p.x + t * (q.x - p.x), p.y + t * (q.y - p.y)));
+                }
+            }
+            if poly.is_empty() {
+                return 0.0;
+            }
+        }
+        signed_area(&poly).abs()
     }
 
     /// Assumes a convex quad with corners in order.
@@ -448,6 +491,32 @@ mod tests {
         assert!((angle_between(deg(175.0), deg(-175.0)) - deg(10.0)).abs() < 1e-5);
         assert!((angle_between(deg(-8.0), deg(8.0)) - deg(16.0)).abs() < 1e-5);
         assert_eq!(angle_between(1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn intersection_area_of_rotated_quads() {
+        let a = rect(0.0, 0.0, 10.0, 10.0);
+        assert_eq!(a.area(), 100.0);
+        assert_eq!(a.intersection_area(&a), 100.0);
+        assert_eq!(a.intersection_area(&rect(5.0, 0.0, 15.0, 10.0)), 50.0);
+        assert_eq!(a.intersection_area(&rect(20.0, 0.0, 30.0, 10.0)), 0.0);
+        let reversed = Quad([a.0[0], a.0[3], a.0[2], a.0[1]]);
+        assert_eq!(
+            reversed.intersection_area(&rect(5.0, 0.0, 15.0, 10.0)),
+            50.0
+        );
+        assert_eq!(a.intersection_area(&reversed), 100.0);
+
+        let line = rect(0.0, 0.0, 300.0, 20.0);
+        let upper = rotated(line, 45.0);
+        let lower = rotated(rect(0.0, 24.0, 300.0, 44.0), 45.0);
+        assert!((upper.area() - 6000.0).abs() < 0.5);
+        assert!(upper.bbox().iou(&lower.bbox()) > 0.7);
+        assert!(upper.intersection_area(&lower) < 1e-3);
+        let diamond = rotated(rect(-10.0, -10.0, 10.0, 10.0), 45.0);
+        let square = rect(-10.0, -10.0, 10.0, 10.0);
+        let want = 800.0 * (std::f32::consts::SQRT_2 - 1.0);
+        assert!((diamond.intersection_area(&square) - want).abs() < 0.1);
     }
 
     #[test]
