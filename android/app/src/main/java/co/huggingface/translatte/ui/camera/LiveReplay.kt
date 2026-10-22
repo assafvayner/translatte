@@ -22,6 +22,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -77,6 +79,8 @@ fun ReplayView(source: ReplaySource, translator: LiveTranslator, modifier: Modif
         val mp = player ?: return@LaunchedEffect
         val factor = LiveRules.downscaleFactor(size.first, size.second)
         val bitmap = Bitmap.createBitmap(size.first / factor, size.second / factor, Bitmap.Config.ARGB_8888)
+        val small = Bitmap.createBitmap(2 * LiveRules.THUMB_SIDE, 2 * LiveRules.THUMB_SIDE, Bitmap.Config.ARGB_8888)
+        val smallPixels = ByteBuffer.allocate(small.byteCount)
         var started = false
         while (true) {
             withFrameMillis {}
@@ -85,11 +89,16 @@ fun ReplayView(source: ReplaySource, translator: LiveTranslator, modifier: Modif
                 started = true
                 translator.markStart(mp.currentPosition.toLong())
             }
+            textureView.getBitmap(small)
+            smallPixels.rewind()
+            small.copyPixelsToBuffer(smallPixels)
+            val thumb = LiveRules.thumbnail(smallPixels, small.width, small.height, small.width * 4, 0)
+            if (translator.enabled) withContext(Dispatchers.Default) { translator.track(thumb) }
             translator.offer {
                 textureView.getBitmap(bitmap)
                 val rgba = ByteArray(bitmap.byteCount)
                 bitmap.copyPixelsToBuffer(ByteBuffer.wrap(rgba))
-                LiveFrame(rgba, bitmap.width, bitmap.height, 0, mp.currentPosition.toLong())
+                LiveFrame(rgba, bitmap.width, bitmap.height, 0, mp.currentPosition.toLong(), thumb)
             }
         }
     }

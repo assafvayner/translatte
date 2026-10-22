@@ -137,4 +137,25 @@ final class LiveRulesTests: XCTestCase {
         stages.readFailed()
         XCTAssertFalse(stages.readBusy)
     }
+
+    private func corners(of frame: [UInt8], width: Int, rotation: Int) -> [UInt8] {
+        let thumb = frame.withUnsafeBytes {
+            LiveRules.thumbnail($0, width: width, height: frame.count / 4 / width, rowStride: width * 4, rotation: rotation)
+        }
+        let s = LiveRules.thumbSide
+        XCTAssertEqual(thumb.count, s * s)
+        return [thumb[0], thumb[s - 1], thumb[s * (s - 1)], thumb[s * s - 1]]
+    }
+
+    func testThumbnailsAreUprightGrayscaleSquares() {
+        let frame: [UInt8] = [10, 10, 10, 0, 20, 20, 20, 0, 30, 30, 30, 0, 40, 40, 40, 0]
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 0), [10, 20, 30, 40])
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 90), [30, 10, 40, 20])
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 180), [40, 30, 20, 10])
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 270), [20, 40, 10, 30])
+    }
+
+    func testThumbnailsWeighGreenTwice() {
+        XCTAssertEqual(corners(of: [40, 80, 120, 0], width: 1, rotation: 0), [80, 80, 80, 80])
+    }
 }

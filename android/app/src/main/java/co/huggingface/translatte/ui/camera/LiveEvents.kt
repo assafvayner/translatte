@@ -1,8 +1,10 @@
 package co.huggingface.translatte.ui.camera
 
+import androidx.compose.ui.geometry.Offset
 import uniffi.translatte_ffi.Point
 import uniffi.translatte_ffi.Region
 import uniffi.translatte_ffi.TranslationResult
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /** One change to the live overlay: "add", "move", "retext" or "remove" (with a [reason]) of [tracked]. */
@@ -29,6 +31,11 @@ class LiveEventLog(private val emit: (String) -> Unit) {
     fun prune(nowMs: Long, prev: List<TrackedRegion>, next: List<TrackedRegion>) {
         val t = elapsed(nowMs)
         diff(prev, next, null).forEach { emit(json(t, it)) }
+    }
+
+    /** The overlay now moves by [shift] frame pixels to follow the camera. */
+    fun shift(nowMs: Long, shift: Offset) {
+        emit(String.format(Locale.US, "{\"t_ms\":%d,\"ev\":\"shift\",\"dx\":%.1f,\"dy\":%.1f}", elapsed(nowMs), shift.x, shift.y))
     }
 
     fun reset(nowMs: Long, prev: List<TrackedRegion>) {

@@ -84,6 +84,9 @@ object LiveRules {
     /** How often stale boxes are pruned while updates stall. */
     const val PRUNE_INTERVAL_MS = 100L
 
+    /** Motion thumbnails are this many pixels on each side, whatever the frame's aspect. */
+    const val THUMB_SIDE = 128
+
     fun isActive(enabled: Boolean, sourceInstalled: Boolean): Boolean = enabled && sourceInstalled
 
     /** The wait after [failures] frames failed in a row: none for 0, then [BACKOFF_BASE_MS] doubling up to [BACKOFF_MAX_MS]. */
@@ -162,6 +165,54 @@ object LiveRules {
                 out[o + 2] = src.get(i + b)
                 out[o + 3] = src.get(i + 3)
                 o += 4
+            }
+        }
+        return out
+    }
+
+    /**
+     * A [THUMB_SIDE]-square grayscale thumbnail of the upright frame, to follow camera motion: the
+     * [width] x [height] block at ([left], [top]) of a 4-byte-per-pixel frame (RGBA or BGRA) whose
+     * rows are [rowStride] bytes apart, turned clockwise by [rotation] degrees. Each pixel averages
+     * four samples of its cell.
+     */
+    fun thumbnail(
+        src: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        rotation: Int,
+        left: Int = 0,
+        top: Int = 0,
+    ): ByteArray {
+        val side = THUMB_SIDE
+        val out = ByteArray(side * side)
+        val turned = rotation % 180 != 0
+        val uprightWidth = if (turned) height else width
+        val uprightHeight = if (turned) width else height
+        var o = 0
+        for (v in 0 until side) {
+            for (u in 0 until side) {
+                var sum = 0
+                for (k in 0 until 4) {
+                    val ux = (u * 4 + 1 + 2 * (k and 1)) * uprightWidth / (side * 4)
+                    val uy = (v * 4 + 1 + 2 * (k shr 1)) * uprightHeight / (side * 4)
+                    val x = when (rotation) {
+                        90 -> uy
+                        180 -> width - 1 - ux
+                        270 -> width - 1 - uy
+                        else -> ux
+                    }
+                    val y = when (rotation) {
+                        90 -> height - 1 - ux
+                        180 -> height - 1 - uy
+                        270 -> ux
+                        else -> uy
+                    }
+                    val i = (top + y) * rowStride + (left + x) * 4
+                    sum += (src.get(i).toInt() and 0xff) + 2 * (src.get(i + 1).toInt() and 0xff) + (src.get(i + 2).toInt() and 0xff)
+                }
+                out[o++] = (sum / 16).toByte()
             }
         }
         return out

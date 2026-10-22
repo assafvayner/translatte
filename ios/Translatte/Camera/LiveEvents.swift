@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// One change to the live overlay: "add", "move", "retext" or "remove" (with a `reason`) of `tracked`.
@@ -32,6 +33,11 @@ final class LiveEventLog {
     func prune(nowMs: Int64, prev: [TrackedRegion], next: [TrackedRegion]) {
         let t = elapsed(nowMs)
         Self.diff(prev: prev, next: next, incoming: nil).forEach { emit(Self.json(tMs: t, $0)) }
+    }
+
+    /// The overlay now moves by `shift` frame pixels to follow the camera.
+    func shift(nowMs: Int64, shift: CGPoint) {
+        emit(String(format: "{\"t_ms\":%lld,\"ev\":\"shift\",\"dx\":%.1f,\"dy\":%.1f}", elapsed(nowMs), shift.x, shift.y))
     }
 
     func reset(nowMs: Int64, prev: [TrackedRegion]) {

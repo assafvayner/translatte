@@ -195,4 +195,31 @@ class LiveRulesTest {
         assertEquals(33.toByte(), reuse[15])
         assertFalse(reuse === LiveRules.packRgba(padded(), 2, 2, rowStride = 12, factor = 1, swapRedBlue = false, reuse = ByteArray(8)))
     }
+
+    /** A 2x2 RGBA frame of grays: top-left 10, top-right 20, bottom-left 30, bottom-right 40. */
+    private fun quadrants(): ByteBuffer = ByteBuffer.wrap(
+        byteArrayOf(10, 10, 10, 0, 20, 20, 20, 0, 30, 30, 30, 0, 40, 40, 40, 0),
+    )
+
+    private fun corners(thumb: ByteArray): List<Int> {
+        val s = LiveRules.THUMB_SIDE
+        return listOf(thumb[0], thumb[s - 1], thumb[s * (s - 1)], thumb[s * s - 1]).map { it.toInt() and 0xff }
+    }
+
+    @Test
+    fun thumbnailsAreUprightGrayscaleSquares() {
+        val f = quadrants()
+        assertEquals(LiveRules.THUMB_SIDE * LiveRules.THUMB_SIDE, LiveRules.thumbnail(f, 2, 2, 8, 0).size)
+        assertEquals(listOf(10, 20, 30, 40), corners(LiveRules.thumbnail(f, 2, 2, 8, 0)))
+        assertEquals(listOf(30, 10, 40, 20), corners(LiveRules.thumbnail(f, 2, 2, 8, 90)))
+        assertEquals(listOf(40, 30, 20, 10), corners(LiveRules.thumbnail(f, 2, 2, 8, 180)))
+        assertEquals(listOf(20, 40, 10, 30), corners(LiveRules.thumbnail(f, 2, 2, 8, 270)))
+    }
+
+    @Test
+    fun thumbnailsWeighGreenTwiceAndReadTheCropOnly() {
+        val f = ByteBuffer.wrap(ByteArray(3 * 4 * 2) { 0 }.also { it[4] = 40; it[5] = 80; it[6] = 120 })
+        val thumb = LiveRules.thumbnail(f, 1, 1, 12, 0, left = 1)
+        assertEquals(setOf(80), thumb.map { it.toInt() and 0xff }.toSet())
+    }
 }

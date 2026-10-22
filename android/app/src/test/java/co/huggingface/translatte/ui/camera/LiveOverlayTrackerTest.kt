@@ -155,6 +155,16 @@ class LiveOverlayTrackerTest {
     }
 
     @Test
+    fun previousRegionsFollowTheCameraBeforeMatching() {
+        val t = LiveOverlayTracker()
+        val first = t.update(listOf(region("a", 0f), region("b", 200f)), 0)
+        val out = t.update(listOf(region("a", 30f)), 100, shift = Point(30f, 0f))
+        assertEquals(first[0].id, out[0].id)
+        assertEquals(first[0].region.corners.map { Point(it.x + 30f, it.y) }, out[0].from)
+        assertEquals(230f, out.first { it.region.sourceText == "b" }.region.corners[0].x)
+    }
+
+    @Test
     fun eachPreviousRegionMatchesOnce() {
         val t = LiveOverlayTracker()
         val first = t.update(listOf(region("a", 0f)), 0)[0]

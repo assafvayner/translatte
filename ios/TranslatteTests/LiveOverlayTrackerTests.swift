@@ -35,6 +35,15 @@ final class LiveOverlayTrackerTests: XCTestCase {
         XCTAssertNil(out[0].missedSinceMs)
     }
 
+    func testPreviousRegionsFollowTheCameraBeforeMatching() {
+        var t = LiveOverlayTracker()
+        let first = t.update([region("a", x: 0), region("b", x: 200)], nowMs: 0)
+        let out = t.update([region("a", x: 30)], nowMs: 100, shift: Point(x: 30, y: 0))
+        XCTAssertEqual(out[0].id, first[0].id)
+        XCTAssertEqual(out[0].from, first[0].region.corners.map { Point(x: $0.x + 30, y: $0.y) })
+        XCTAssertEqual(out.first { $0.region.sourceText == "b" }?.region.corners[0].x, 230)
+    }
+
     func testChangedTextReplacesTheRegion() {
         var t = LiveOverlayTracker()
         let first = t.update([region("a", x: 0)], nowMs: 0)[0]

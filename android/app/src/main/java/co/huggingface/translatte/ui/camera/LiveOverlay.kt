@@ -22,8 +22,8 @@ import uniffi.translatte_ffi.Point
 
 /**
  * Paints live regions over the camera preview in the result viewer's style, placed with
- * [LiveRules.fill] from the upright frame size [imageSize]. Each update slides kept boxes from
- * their previous position over [LiveRules.MOVE_MS].
+ * [LiveRules.fill] from the upright frame size [imageSize] and moved with the camera by the
+ * translator's shift. Each update slides kept boxes from their previous position over [LiveRules.MOVE_MS].
  */
 @Composable
 fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
@@ -45,9 +45,10 @@ fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
         if (imageSize == IntSize.Zero) return@Canvas
         val fill = LiveRules.fill(imageSize.width.toFloat(), imageSize.height.toFloat(), size.width, size.height)
         val rest = 1f - progress.value
+        val shift = translator.shift
         drawIntoCanvas { c ->
             boxes.forEach { (box, from) ->
-                box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, (from.x - box.cx) * rest, (from.y - box.cy) * rest)
+                box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, (from.x - box.cx) * rest + shift.x, (from.y - box.cy) * rest + shift.y)
             }
         }
     }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Paints live regions over the camera preview in the result viewer's style, placed with
-/// `LiveRules.fill` from the upright frame size (the preview aspect-fills the same way). Kept boxes
-/// slide to their new place. Reads the translator here so the rest of the camera screen doesn't
+/// `LiveRules.fill` from the upright frame size (the preview aspect-fills the same way) and moved
+/// with the camera by the translator's shift. Kept boxes slide to their new place. Reads the translator here so the rest of the camera screen doesn't
 /// re-render with each update.
 struct LiveOverlay: View {
     @ObservedObject var live: LiveTranslator
@@ -18,7 +18,7 @@ struct LiveOverlay: View {
                 ForEach(live.overlay, id: \.id) { t in
                     LiveRegion(region: t.region, scale: fill.scale, rtl: rtl)
                         .equatable()
-                        .offset(x: fill.left, y: fill.top)
+                        .offset(x: fill.left + live.shift.x * fill.scale, y: fill.top + live.shift.y * fill.scale)
                         .animation(.easeOut(duration: Double(LiveRules.moveMs) / 1000), value: t.region.corners)
                         .accessibilityIdentifier("live-region-\(t.id)")
                 }

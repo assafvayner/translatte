@@ -15,18 +15,20 @@ data class TrackedRegion(val id: Long, val region: Region, val from: List<Point>
  * box, even when its own translation is missing; with different text, a translated one replaces it
  * and an untranslated one is skipped. Previous regions nothing took stay, however long updates
  * take, until [MAX_UNSEEN_MS] after the first update that missed them, unless a new region overlaps them. An update with no regions
- * clears everything.
+ * clears everything. Previous regions first move by the camera's motion since the last update.
  */
 class LiveOverlayTracker {
     var regions: List<TrackedRegion> = emptyList()
         private set
     private var nextId = 0L
 
-    fun update(incoming: List<Region>, nowMs: Long): List<TrackedRegion> {
+    /** [shift] is how far the image moved from the last update's frame to this one's, if known. */
+    fun update(incoming: List<Region>, nowMs: Long, shift: Point? = null): List<TrackedRegion> {
         if (incoming.isEmpty()) {
             regions = emptyList()
             return regions
         }
+        if (shift != null) regions = regions.map { it.copy(region = it.region.copy(corners = moved(it.region.corners, shift))) }
         val taken = BooleanArray(regions.size)
         val out = mutableListOf<TrackedRegion>()
         for (r in incoming) {
@@ -73,6 +75,8 @@ class LiveOverlayTracker {
     companion object {
         const val MIN_IOU = 0.3f
         const val MAX_UNSEEN_MS = 500L
+
+        fun moved(corners: List<Point>, by: Point): List<Point> = corners.map { Point(it.x + by.x, it.y + by.y) }
 
         /** Whether the two quads' axis-aligned bounds overlap by a positive area. */
         fun intersects(a: List<Point>, b: List<Point>): Boolean =

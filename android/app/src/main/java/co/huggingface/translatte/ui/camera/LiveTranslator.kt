@@ -8,6 +8,7 @@ import androidx.camera.core.ImageProxy
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 import co.huggingface.translatte.BuildConfig
 import co.huggingface.translatte.Images
@@ -24,9 +25,16 @@ private const val TAG = "translatte"
 
 /**
  * One camera frame as the engine takes it: tightly packed RGBA rows, before rotating upright.
- * [ptsMs] is a replayed video frame's position.
+ * [ptsMs] is a replayed video frame's position; [thumb] its [LiveRules.thumbnail].
  */
-class LiveFrame(val rgba: ByteArray, val width: Int, val height: Int, val rotation: Int, val ptsMs: Long? = null)
+class LiveFrame(
+    val rgba: ByteArray,
+    val width: Int,
+    val height: Int,
+    val rotation: Int,
+    val ptsMs: Long? = null,
+    val thumb: ByteArray? = null,
+)
 
 /** A frame [LiveTranslator] read, waiting to be translated; [generation] drops it after a reset. */
 private class ReadFrame(val frame: LiveFrame, val result: TranslationResult, val generation: Int)
@@ -48,6 +56,10 @@ class LiveTranslator(
     var imageSize by mutableStateOf(IntSize.Zero)
         private set
 
+    /** How far the image moved, in frame pixels, from the frame [overlay] was read from to the latest frame. */
+    var shift by mutableStateOf(Offset.Zero)
+        private set
+
     /** Debug builds: updates/s and stage times of the latest update. */
     var readout by mutableStateOf<String?>(null)
         private set
@@ -59,6 +71,7 @@ class LiveTranslator(
     private val stages = LiveStages<ReadFrame>()
     private var lastStartMs: Long? = null
     private val tracker = LiveOverlayTracker()
+    private val motion = LiveMotion()
     @Volatile
     private var latest: Pair<LiveFrame, TranslationResult>? = null
     private var failures = 0
@@ -83,7 +96,9 @@ class LiveTranslator(
         }
         events?.reset(SystemClock.elapsedRealtime(), overlay)
         tracker.reset()
+        motion.reset()
         overlay = emptyList()
+        shift = Offset.Zero
         latest = null
         lastDoneMs = null
         readout = null
@@ -100,9 +115,13 @@ class LiveTranslator(
     /** Runs on the analysis executor for every frame; converts and translates only those [LiveRules] lets through. */
     override fun analyze(image: ImageProxy) {
         image.use {
-            if (!enabled || !take()) return
+            if (!enabled) return
             val plane = it.planes[0]
             val crop = it.cropRect
+            val rotation = it.imageInfo.rotationDegrees
+            val thumb = LiveRules.thumbnail(plane.buffer, crop.width(), crop.height(), plane.rowStride, rotation, crop.left, crop.top)
+            track(thumb)
+            if (!take()) return
             val factor = LiveRules.downscaleFactor(crop.width(), crop.height())
             val held = synchronized(lock) { listOf(latest?.first?.rgba, translating?.rgba) }
             val free = buffers.indices.first { i -> held.none { it != null && it === buffers[i] } }
@@ -111,8 +130,18 @@ class LiveTranslator(
                 left = crop.left, top = crop.top, reuse = buffers[free],
             )
             buffers[free] = rgba
-            val frame = LiveFrame(rgba, crop.width() / factor, crop.height() / factor, it.imageInfo.rotationDegrees)
+            val frame = LiveFrame(rgba, crop.width() / factor, crop.height() / factor, rotation, thumb = thumb)
             scope.launch { run(frame) }
+        }
+    }
+
+    /** Measures camera motion on a new preview frame's [LiveRules.thumbnail]. Any thread. */
+    fun track(thumb: ByteArray) {
+        if (motion.frame(thumb)) {
+            scope.launch {
+                shift = motion.shift.let { Offset(it.x, it.y) }
+                events?.shift(SystemClock.elapsedRealtime(), shift)
+            }
         }
     }
 
@@ -192,7 +221,9 @@ class LiveTranslator(
     private fun publish(frame: LiveFrame, result: TranslationResult) {
         val now = SystemClock.elapsedRealtime()
         val prev = overlay
-        overlay = tracker.update(result.regions, now)
+        val moved = motion.rebase(frame.thumb?.let { Thumb(it, result.imageWidth.toInt(), result.imageHeight.toInt()) })
+        overlay = tracker.update(result.regions, now, moved)
+        shift = motion.shift.let { Offset(it.x, it.y) }
         if (overlay.isNotEmpty() && pruner == null) pruner = scope.launch { prune() }
         imageSize = IntSize(result.imageWidth.toInt(), result.imageHeight.toInt())
         synchronized(lock) { latest = frame to result }
@@ -201,6 +232,7 @@ class LiveTranslator(
             readout = line
             Log.i(TAG, "live $line regions ${result.regions.size}")
             events?.update(now, prev, overlay, result, lastDoneMs?.let { now - it }, frame.ptsMs)
+            events?.shift(now, shift)
         }
         lastDoneMs = now
     }

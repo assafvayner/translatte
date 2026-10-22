@@ -14,7 +14,7 @@ struct TrackedRegion: Equatable {
 /// box, even when its own translation is missing; with different text, a translated one replaces it
 /// and an untranslated one is skipped. Previous regions nothing took stay, however long updates
 /// take, until `maxUnseenMs` after the first update that missed them, unless a new region overlaps them. An update with no regions
-/// clears everything.
+/// clears everything. Previous regions first move by the camera's motion since the last update.
 struct LiveOverlayTracker {
     static let minIoU: Float = 0.3
     static let maxUnseenMs: Int64 = 500
@@ -22,10 +22,18 @@ struct LiveOverlayTracker {
     private(set) var regions: [TrackedRegion] = []
     private var nextId = 0
 
-    mutating func update(_ incoming: [Region], nowMs: Int64) -> [TrackedRegion] {
+    /// `shift` is how far the image moved from the last update's frame to this one's, if known.
+    mutating func update(_ incoming: [Region], nowMs: Int64, shift: Point? = nil) -> [TrackedRegion] {
         guard !incoming.isEmpty else {
             regions = []
             return regions
+        }
+        if let shift {
+            regions = regions.map { t in
+                var r = t.region
+                r.corners = Self.moved(r.corners, by: shift)
+                return TrackedRegion(id: t.id, region: r, from: t.from, missedSinceMs: t.missedSinceMs)
+            }
         }
         var taken = Array(repeating: false, count: regions.count)
         var out: [TrackedRegion] = []
@@ -71,6 +79,10 @@ struct LiveOverlayTracker {
 
     mutating func reset() {
         regions = []
+    }
+
+    static func moved(_ corners: [Point], by d: Point) -> [Point] {
+        corners.map { Point(x: $0.x + d.x, y: $0.y + d.y) }
     }
 
     /// Whether the two quads' axis-aligned bounds overlap by a positive area.
