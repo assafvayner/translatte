@@ -193,7 +193,7 @@ fn real_main() -> Result<i32> {
             let src = store.manifest().language(&from)?;
             let tgt = store.target_language()?;
             let t0 = Instant::now();
-            let mut pipeline = setup::build_pipeline(&store, src, !no_translate, engine)?;
+            let pipeline = setup::build_pipeline(&store, src, !no_translate, engine)?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());
             if !no_translate {
                 let t = Instant::now();

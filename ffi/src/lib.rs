@@ -8,11 +8,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(feature = "download")]
 use translatte_core::download::Downloader;
 use translatte_core::frame::upright_rgb;
+use translatte_core::geometry::{Pt, Quad};
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest, ModelEntry, ModelKind};
 use translatte_core::model_store::{InstallState, ModelStore};
 use translatte_core::ocr::OcrEngine as CoreOcrEngine;
-use translatte_core::pipeline::{PipelineOutput, Stage};
+use translatte_core::pipeline::{PipelineOutput, Stage, TranslatedRegion};
 use translatte_core::TranslatteError;
 
 uniffi::setup_scaffolding!();
@@ -140,6 +141,26 @@ pub struct Region {
     pub background: Rgb,
     pub foreground: Rgb,
     pub angle: f32,
+}
+
+impl Region {
+    fn to_core(&self) -> Result<TranslatedRegion, FfiError> {
+        let corners: [Point; 4] =
+            self.corners
+                .as_slice()
+                .try_into()
+                .map_err(|_| FfiError::Failed {
+                    reason: format!("a region has {} corners, expected 4", self.corners.len()),
+                })?;
+        Ok(TranslatedRegion {
+            quad: Quad(corners.map(|p| Pt { x: p.x, y: p.y })),
+            source_text: self.source_text.clone(),
+            translated_text: self.translated_text.clone(),
+            bg_rgb: [self.background.r, self.background.g, self.background.b],
+            fg_rgb: [self.foreground.r, self.foreground.g, self.foreground.b],
+            angle: self.angle,
+        })
+    }
 }
 
 /// Which runtime runs the OCR models (a debug setting for comparing them).
@@ -286,7 +307,7 @@ impl DownloadToken {
 struct Cached {
     script_pack: String,
     translate: bool,
-    pipeline: LoadedPipeline,
+    pipeline: Arc<LoadedPipeline>,
 }
 
 /// Entry point for native apps. Pipelines are cached per script pack, so switching between
@@ -320,8 +341,8 @@ impl Engine {
     /// OCR model's `inference.onnx`. On error the previous engine stays. Blocking; call it off the
     /// main thread.
     pub fn set_ocr_engine(&self, engine: OcrEngine) -> Result<(), FfiError> {
-        let mut cached = self.lock_cached();
-        if let Some(c) = cached.as_mut() {
+        let cached = self.lock_cached();
+        if let Some(c) = cached.as_ref() {
             c.pipeline.set_ocr_engine(&self.store, engine.into())?;
         }
         *self.ocr_engine.lock().unwrap_or_else(|e| e.into_inner()) = engine.into();
@@ -435,8 +456,7 @@ impl Engine {
     pub fn prepare(&self, source: String) -> Result<(), FfiError> {
         let src = self.store.manifest().language(&source)?;
         let tgt = self.store.target_language()?;
-        let mut cached = self.lock_cached();
-        Ok(self.pipeline(&mut cached, src, true)?.warm(src, tgt)?)
+        Ok(self.pipeline(src, true)?.warm(src, tgt)?)
     }
 
     /// Decodes a PNG or JPEG, runs OCR for `source` and, when `translate` is set, translates the
@@ -454,8 +474,7 @@ impl Engine {
         let tgt = self.store.target_language()?;
         let img = image::load_from_memory(&image)?.to_rgb8();
 
-        let mut cached = self.lock_cached();
-        let pipeline = self.pipeline(&mut cached, src, translate)?;
+        let pipeline = self.pipeline(src, translate)?;
         let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
         Ok(TranslationResult::from_output(
             out,
@@ -481,14 +500,68 @@ impl Engine {
         let tgt = self.store.target_language()?;
         let img = upright_rgb(rgba, width, height, rotation_degrees)?;
 
-        let mut cached = self.lock_cached();
-        let pipeline = self.pipeline(&mut cached, src, true)?;
-        let out = pipeline.run_frame(&img, src, tgt)?;
+        let out = self.pipeline(src, true)?.run_frame(&img, src, tgt)?;
         Ok(TranslationResult::from_output(
             out,
             img.width(),
             img.height(),
         ))
+    }
+
+    /// The first half of `translate_frame`: reads the frame's text without translating it
+    /// (`translated_text` is `None`, `translate_ms` 0). Pass the result to `translate_regions`;
+    /// that may run on another thread while the next frame is read. Blocking; call it off the main
+    /// thread.
+    pub fn ocr_frame(
+        &self,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        rotation_degrees: u32,
+        source: String,
+    ) -> Result<TranslationResult, FfiError> {
+        let src = self.store.manifest().language(&source)?;
+        let img = upright_rgb(rgba, width, height, rotation_degrees)?;
+        let out = self.pipeline(src, true)?.read_frame(&img, src)?;
+        Ok(TranslationResult::from_output(
+            out,
+            img.width(),
+            img.height(),
+        ))
+    }
+
+    /// The second half of `translate_frame`: translates the regions `ocr_frame` read from
+    /// `source`, reusing the last frames' translations of blocks that barely changed, and fills in
+    /// `translate_ms`. Blocking; call it off the main thread.
+    pub fn translate_regions(
+        &self,
+        frame: TranslationResult,
+        source: String,
+    ) -> Result<TranslationResult, FfiError> {
+        let src = self.store.manifest().language(&source)?;
+        let tgt = self.store.target_language()?;
+        let regions = frame
+            .regions
+            .iter()
+            .map(Region::to_core)
+            .collect::<Result<Vec<_>, _>>()?;
+        let out = self.pipeline(src, true)?.translate_frame(
+            PipelineOutput {
+                regions,
+                translation_error: None,
+                timings: Default::default(),
+            },
+            src,
+            tgt,
+        );
+        let mut result = frame;
+        for (r, o) in result.regions.iter_mut().zip(out.regions) {
+            r.translated_text = o.translated_text;
+        }
+        result.translation_error = out.translation_error;
+        result.timings.translate_ms = out.timings.translate_ms;
+        result.timings.reused = out.timings.reused;
+        Ok(result)
     }
 
     /// Frees loaded models (e.g. when the app is backgrounded).
@@ -531,12 +604,10 @@ impl Engine {
         })
     }
 
-    fn pipeline<'a>(
-        &self,
-        cached: &'a mut Option<Cached>,
-        src: &Language,
-        translate: bool,
-    ) -> Result<&'a mut LoadedPipeline, FfiError> {
+    /// The pipeline for `src`, loading it unless the cached one fits. Runs use it without holding
+    /// the cache lock, so a frame can be translated while the next one is read.
+    fn pipeline(&self, src: &Language, translate: bool) -> Result<Arc<LoadedPipeline>, FfiError> {
+        let mut cached = self.lock_cached();
         let reusable = cached.as_ref().is_some_and(|c| {
             Some(&c.script_pack) == src.script_pack.as_ref() && c.translate == translate
         });
@@ -547,10 +618,14 @@ impl Engine {
             *cached = Some(Cached {
                 script_pack: src.script_pack.clone().unwrap_or_default(),
                 translate,
-                pipeline,
+                pipeline: Arc::new(pipeline),
             });
         }
-        Ok(&mut cached.as_mut().expect("pipeline loaded above").pipeline)
+        Ok(cached
+            .as_ref()
+            .expect("pipeline loaded above")
+            .pipeline
+            .clone())
     }
 }
 
@@ -731,6 +806,62 @@ mod tests {
             .unwrap();
         assert_eq!((turned.image_width, turned.image_height), (w, h));
         assert_eq!(turned.regions, photo.regions);
+    }
+
+    #[test]
+    fn ocr_frame_then_translate_regions_matches_translate_frame_with_real_models() {
+        let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
+            eprintln!("TRANSLATTE_MODELS not set; skipping");
+            return;
+        };
+        let engine = Engine::new(models.to_string_lossy().into(), manifest_json()).unwrap();
+        let png = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../core/tests/data/bonjour.png"
+        ))
+        .unwrap();
+        let rgba = image::load_from_memory(&png).unwrap().to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let whole = engine
+            .translate_frame(rgba.clone().into_raw(), w, h, 0, "fr".into())
+            .unwrap();
+
+        let read = engine
+            .ocr_frame(rgba.into_raw(), w, h, 0, "fr".into())
+            .unwrap();
+        assert!(read.regions.iter().all(|r| r.translated_text.is_none()));
+        assert_eq!(read.timings.translate_ms, 0);
+        let split = engine.translate_regions(read, "fr".into()).unwrap();
+        assert_eq!(split.regions, whole.regions);
+        assert_eq!(split.timings.reused as usize, split.regions.len());
+    }
+
+    #[test]
+    fn translate_regions_rejects_a_region_without_four_corners() {
+        let dir = tempfile_dir().join("corners");
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let frame = TranslationResult {
+            image_width: 1,
+            image_height: 1,
+            regions: vec![Region {
+                corners: vec![Point { x: 0.0, y: 0.0 }],
+                source_text: "a".into(),
+                translated_text: None,
+                background: Rgb { r: 0, g: 0, b: 0 },
+                foreground: Rgb { r: 0, g: 0, b: 0 },
+                angle: 0.0,
+            }],
+            translation_error: None,
+            timings: StageTimings {
+                detect_ms: 0,
+                recognize_ms: 0,
+                translate_ms: 0,
+                ocr_engine: "ort".into(),
+                reused: 0,
+            },
+        };
+        let err = engine.translate_regions(frame, "fr".into()).unwrap_err();
+        assert!(err.to_string().contains("corners"), "{err}");
     }
 
     #[test]

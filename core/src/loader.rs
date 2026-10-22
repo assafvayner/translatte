@@ -54,7 +54,7 @@ fn load_ocr(store: &ModelStore, pack: &str, engine: OcrEngine) -> Result<(Detect
 impl LoadedPipeline {
     /// Reloads the detector and recognizer on `engine`, keeping the translator and its loaded
     /// model. On error the pipeline keeps its current models.
-    pub fn set_ocr_engine(&mut self, store: &ModelStore, engine: OcrEngine) -> Result<()> {
+    pub fn set_ocr_engine(&self, store: &ModelStore, engine: OcrEngine) -> Result<()> {
         if engine == self.ocr_engine() {
             return Ok(());
         }

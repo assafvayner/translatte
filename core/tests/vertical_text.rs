@@ -147,7 +147,7 @@ fn japanese_columns_become_one_block_in_reading_order() {
     .unwrap()
     .to_rgb8();
     for engine in engines() {
-        let mut pipeline: Pipeline<_, _, NoTranslator> = Pipeline::new(
+        let pipeline: Pipeline<_, _, NoTranslator> = Pipeline::new(
             Detector::load(&store.model_file("det", "inference.onnx").unwrap(), engine).unwrap(),
             Recognizer::load(
                 &store.model_file(&pack, "inference.onnx").unwrap(),
