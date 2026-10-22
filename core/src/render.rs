@@ -2,7 +2,7 @@ use std::cmp::Reverse;
 
 use image::RgbImage;
 
-use crate::geometry::Quad;
+use crate::geometry::{Pt, Quad};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StyleHints {
@@ -40,50 +40,81 @@ fn black_or_white(bg: [u8; 3]) -> [u8; 3] {
     }
 }
 
-/// Pushes roughly `budget` evenly strided pixels of the inclusive rect, clipped to the image.
+/// The quad's top-left corner and unit vectors along its top and left edges, with the edges'
+/// lengths. A degenerate edge takes the direction perpendicular to the other.
+fn local_frame(quad: &Quad) -> Option<(Pt, Pt, Pt, f32, f32)> {
+    let [tl, tr, _, bl] = quad.0;
+    let unit = |a: Pt, b: Pt| {
+        let len = a.dist(b);
+        (len > 0.0 && len.is_finite()).then(|| Pt::new((b.x - a.x) / len, (b.y - a.y) / len))
+    };
+    let (u, v) = match (unit(tl, tr), unit(tl, bl)) {
+        (Some(u), Some(v)) => (u, v),
+        (Some(u), None) => (u, Pt::new(-u.y, u.x)),
+        (None, Some(v)) => (Pt::new(v.y, -v.x), v),
+        (None, None) => (Pt::new(1.0, 0.0), Pt::new(0.0, 1.0)),
+    };
+    let (w, h) = (tl.dist(tr), tl.dist(bl));
+    (tl.x.is_finite() && tl.y.is_finite() && w.is_finite() && h.is_finite())
+        .then_some((tl, u, v, w, h))
+}
+
+/// Pushes roughly `budget` evenly strided pixels of the inclusive rect `[s0, s1] x [t0, t1]` in
+/// the frame `(origin, u, v)`, skipping those outside the image.
 fn sample_rect(
     img: &RgbImage,
-    (x0, y0, x1, y1): (i64, i64, i64, i64),
+    (origin, u, v): (Pt, Pt, Pt),
+    (s0, t0, s1, t1): (i64, i64, i64, i64),
     budget: usize,
     out: &mut Vec<[u8; 3]>,
 ) {
-    let (x0, y0) = (x0.max(0), y0.max(0));
-    let (x1, y1) = (
-        x1.min(img.width() as i64 - 1),
-        y1.min(img.height() as i64 - 1),
-    );
-    if x0 > x1 || y0 > y1 {
+    if s0 > s1 || t0 > t1 {
         return;
     }
-    let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
+    let (w, h) = (s1 - s0 + 1, t1 - t0 + 1);
     let budget = budget.max(1) as i64;
-    let sy = ((w * h) as f64 / budget as f64).sqrt().ceil().max(1.0) as i64;
-    let rows = (h + sy - 1) / sy;
-    let sx = sy.max((w * rows + budget - 1) / budget);
-    for (r, y) in (y0..=y1).step_by(sy as usize).enumerate() {
-        // Shifting each row's start keeps 1px vertical strokes from falling between sampled columns.
-        let start = x0 + r as i64 % sx;
-        for x in (start..=x1).step_by(sx as usize) {
-            out.push(img.get_pixel(x as u32, y as u32).0);
+    let st = ((w as f64 * h as f64) / budget as f64)
+        .sqrt()
+        .ceil()
+        .max(1.0) as i64;
+    let rows = (h + st - 1) / st;
+    let ss = st.max((w.saturating_mul(rows) + budget - 1) / budget);
+    let (iw, ih) = (img.width() as f32, img.height() as f32);
+    for (r, t) in (t0..=t1).step_by(st as usize).enumerate() {
+        // Shifting each row's start keeps 1px strokes from falling between sampled columns.
+        let start = s0 + r as i64 % ss;
+        for s in (start..=s1).step_by(ss as usize) {
+            let (s, t) = (s as f32, t as f32);
+            let x = (origin.x + s * u.x + t * v.x).round();
+            let y = (origin.y + s * u.y + t * v.y).round();
+            if x >= 0.0 && y >= 0.0 && x < iw && y < ih {
+                out.push(img.get_pixel(x as u32, y as u32).0);
+            }
         }
     }
 }
 
-/// Returns (ring, interior) samples for the quad's bounding box.
+/// Returns (ring, interior) samples, taken in the quad's own frame so a rotated quad's ring hugs
+/// its edges.
 fn sample_pixels(img: &RgbImage, quad: &Quad) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
-    let b = quad.bbox();
-    let (x0, y0) = (b.x0.floor() as i64, b.y0.floor() as i64);
-    let (x1, y1) = (b.x1.ceil() as i64, b.y1.ceil() as i64);
-    let (ox0, oy0) = (x0.saturating_sub(RING), y0.saturating_sub(RING));
-    let (ox1, oy1) = (x1.saturating_add(RING), y1.saturating_add(RING));
+    let (mut ring, mut interior) = (Vec::new(), Vec::new());
+    let Some((origin, u, v, w, h)) = local_frame(quad) else {
+        return (ring, interior);
+    };
+    let frame = (origin, u, v);
+    let (w, h) = (w.round() as i64, h.round() as i64);
     let strip = MAX_SAMPLES / 4;
-    let mut ring = Vec::new();
-    sample_rect(img, (ox0, oy0, ox1, y0.saturating_sub(1)), strip, &mut ring);
-    sample_rect(img, (ox0, y1.saturating_add(1), ox1, oy1), strip, &mut ring);
-    sample_rect(img, (ox0, y0, x0.saturating_sub(1), y1), strip, &mut ring);
-    sample_rect(img, (x1.saturating_add(1), y0, ox1, y1), strip, &mut ring);
-    let mut interior = Vec::new();
-    sample_rect(img, (x0, y0, x1, y1), MAX_SAMPLES, &mut interior);
+    sample_rect(img, frame, (-RING, -RING, w + RING, -1), strip, &mut ring);
+    sample_rect(
+        img,
+        frame,
+        (-RING, h + 1, w + RING, h + RING),
+        strip,
+        &mut ring,
+    );
+    sample_rect(img, frame, (-RING, 0, -1, h), strip, &mut ring);
+    sample_rect(img, frame, (w + 1, 0, w + RING, h), strip, &mut ring);
+    sample_rect(img, frame, (0, 0, w, h), MAX_SAMPLES, &mut interior);
     (ring, interior)
 }
 
@@ -276,5 +307,39 @@ mod tests {
             "{}",
             interior.len()
         );
+    }
+
+    /// A tilted card (`card` color) on a table, with ink stripes inside `quad` on the card.
+    fn tilted_label(degrees: f32) -> (RgbImage, Quad) {
+        let angle = degrees.to_radians();
+        let at = |x0: f32, y0: f32, x1: f32, y1: f32| {
+            let q = Quad::from_bbox(BBox { x0, y0, x1, y1 }).from_reading_frame(angle);
+            Quad(q.0.map(|p| Pt::new(p.x + 100.0, p.y + 200.0)))
+        };
+        let quad = at(0.0, 0.0, 200.0, 30.0);
+        let card = at(-6.0, -6.0, 206.0, 36.0);
+        let ink = at(4.0, 6.0, 196.0, 24.0);
+        let img = RgbImage::from_fn(400, 400, |x, y| {
+            let p = Pt::new(x as f32 + 0.5, y as f32 + 0.5);
+            if ink.contains(p) && (x / 4 + y / 4) % 2 == 0 {
+                Rgb([200, 20, 20])
+            } else if card.contains(p) {
+                Rgb([240, 240, 230])
+            } else {
+                Rgb([40, 60, 40])
+            }
+        });
+        (img, quad)
+    }
+
+    #[test]
+    fn tilted_quad_samples_its_own_ring_not_its_bounding_box() {
+        for degrees in [30.0, -30.0, 45.0, 60.0] {
+            let (img, q) = tilted_label(degrees);
+            let h = style_hints(&img, &q);
+            assert!(close(h.bg, [240, 240, 230]), "{degrees}: bg {:?}", h.bg);
+            assert!(close(h.fg, [200, 20, 20]), "{degrees}: fg {:?}", h.fg);
+            assert!((h.angle - degrees.to_radians()).abs() < 1e-4);
+        }
     }
 }
