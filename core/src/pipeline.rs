@@ -8,6 +8,7 @@ use crate::layout::group_lines;
 use crate::manifest::Language;
 use crate::ocr::{env_or, Line, OcrEngine, TextDetector, TextRecognizer};
 use crate::render::style_hints;
+use crate::translate::reuse::FrameReuse;
 use crate::translate::Translator;
 use crate::{Result, TranslatteError};
 
@@ -51,6 +52,8 @@ pub struct StageTimings {
     pub recognize_ms: u32,
     pub translate_ms: u32,
     pub ocr_engine: OcrEngine,
+    /// Blocks of a live frame that took an earlier frame's translation (see [`FrameReuse`]).
+    pub reused: u32,
 }
 
 fn millis(d: Duration) -> u32 {
@@ -71,6 +74,7 @@ pub struct Pipeline<D, R, T> {
     translator: Option<T>,
     script_pack: Option<String>,
     ocr_engine: OcrEngine,
+    reuse: FrameReuse,
 }
 
 impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
@@ -81,6 +85,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             translator,
             script_pack: None,
             ocr_engine: OcrEngine::default(),
+            reuse: FrameReuse::default(),
         }
     }
 
@@ -168,6 +173,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             recognize_ms: millis(detected.elapsed()),
             translate_ms: 0,
             ocr_engine: self.ocr_engine,
+            reused: 0,
         };
         Ok((lines, timings))
     }
@@ -191,7 +197,8 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         self.run_inner(img, src, tgt, false, on_stage)
     }
 
-    /// `run` for a live camera frame, detected at `LIVE_DET_SIDE`.
+    /// `run` for a live camera frame, detected at `LIVE_DET_SIDE`. A block close to one of the last
+    /// frames' in place and text takes that block's translation (see [`FrameReuse`]).
     pub fn run_frame(
         &mut self,
         img: &RgbImage,
@@ -212,21 +219,42 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         let (lines, mut timings) = self.timed_ocr(img, src, live, on_stage)?;
         let mut blocks = group_lines(lines, src);
         blocks.retain(|b| !b.text.trim().is_empty());
-        let texts: Vec<String> = blocks.iter().map(|b| b.text.clone()).collect();
         let mut translation_error = None;
-        let mut translations = Vec::with_capacity(texts.len());
+        let mut translations: Vec<Option<String>> = vec![None; blocks.len()];
         if let Some(t) = &mut self.translator {
-            if !texts.is_empty() {
+            if live {
+                self.reuse.set_source(&src.code);
+                for (b, slot) in blocks.iter().zip(translations.iter_mut()) {
+                    *slot = self.reuse.lookup(&b.quad, &b.text).map(str::to_string);
+                }
+                timings.reused = translations.iter().flatten().count() as u32;
+            }
+            let todo: Vec<usize> = (0..blocks.len())
+                .filter(|&i| translations[i].is_none())
+                .collect();
+            if !todo.is_empty() {
+                let texts: Vec<String> = todo.iter().map(|&i| blocks[i].text.clone()).collect();
                 on_stage(Stage::Translating { done: 0, total: 1 });
                 let start = Instant::now();
                 match t.translate(&texts, src, tgt) {
-                    Ok(out) => translations = out,
+                    Ok(out) => {
+                        for (&i, translated) in todo.iter().zip(out) {
+                            translations[i] = translated;
+                        }
+                    }
                     Err(e) => translation_error = Some(e.to_string()),
                 }
                 timings.translate_ms = millis(start.elapsed());
             }
+            if live {
+                self.reuse.push(
+                    blocks
+                        .iter()
+                        .zip(&translations)
+                        .filter_map(|(b, t)| Some((&b.quad, b.text.as_str(), t.as_deref()?))),
+                );
+            }
         }
-        translations.resize(texts.len(), None);
         let regions = blocks
             .into_iter()
             .zip(translations)
@@ -463,6 +491,73 @@ mod tests {
             3
         );
         assert_eq!(p.translator.as_ref().unwrap().0, 1);
+    }
+
+    #[derive(Default)]
+    struct Recording(Vec<Vec<String>>);
+    impl Translator for Recording {
+        fn translate(
+            &mut self,
+            blocks: &[String],
+            _s: &Language,
+            _t: &Language,
+        ) -> Result<Vec<Option<String>>> {
+            self.0.push(blocks.to_vec());
+            Ok(blocks.iter().map(|b| Some(b.to_uppercase())).collect())
+        }
+    }
+
+    fn jittered_pipeline() -> Pipeline<FakeDet, FakeRec, Recording> {
+        Pipeline::new(
+            FakeDet(vec![quad(10.0), quad(200.0)]),
+            FakeRec(
+                vec![
+                    ("bonne journée", 0.9),
+                    ("sortie", 0.9),
+                    ("bonne jouruée", 0.9),
+                    ("entrée", 0.9),
+                ],
+                0,
+            ),
+            Some(Recording::default()),
+        )
+    }
+
+    #[test]
+    fn live_frames_reuse_the_translation_of_a_jittered_block() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let mut p = jittered_pipeline();
+        p.run_frame(&img, &lang(), &lang()).unwrap();
+        let out = p.run_frame(&img, &lang(), &lang()).unwrap();
+        assert_eq!(
+            p.translator.as_ref().unwrap().0,
+            vec![
+                vec!["bonne journée".to_string(), "sortie".to_string()],
+                vec!["entrée".to_string()]
+            ]
+        );
+        assert_eq!(out.regions[0].source_text, "bonne jouruée");
+        assert_eq!(
+            out.regions[0].translated_text.as_deref(),
+            Some("BONNE JOURNÉE")
+        );
+        assert_eq!(out.regions[1].translated_text.as_deref(), Some("ENTRÉE"));
+        assert_eq!(out.timings.reused, 1);
+    }
+
+    #[test]
+    fn photos_always_translate() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let mut p = jittered_pipeline();
+        p.run_frame(&img, &lang(), &lang()).unwrap();
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(p.translator.as_ref().unwrap().0.len(), 2);
+        assert_eq!(p.translator.as_ref().unwrap().0[1].len(), 2);
+        assert_eq!(
+            out.regions[0].translated_text.as_deref(),
+            Some("BONNE JOURUÉE")
+        );
+        assert_eq!(out.timings.reused, 0);
     }
 
     struct SlowDet(Vec<Quad>);

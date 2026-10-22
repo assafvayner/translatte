@@ -41,6 +41,19 @@ impl BBox {
             y1: self.y1.max(o.y1),
         }
     }
+
+    /// Intersection over union; 0 when either box is empty.
+    pub fn iou(&self, o: &BBox) -> f32 {
+        let iw = (self.x1.min(o.x1) - self.x0.max(o.x0)).max(0.0);
+        let ih = (self.y1.min(o.y1) - self.y0.max(o.y0)).max(0.0);
+        let inter = iw * ih;
+        let union = self.width() * self.height() + o.width() * o.height() - inter;
+        if union > 0.0 {
+            inter / union
+        } else {
+            0.0
+        }
+    }
 }
 
 /// Which way a text line reads in the image.
@@ -179,6 +192,27 @@ mod tests {
 
     fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Quad {
         Quad::from_bbox(BBox { x0, y0, x1, y1 })
+    }
+
+    #[test]
+    fn iou_of_boxes() {
+        let a = BBox {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 10.0,
+            y1: 10.0,
+        };
+        let half = BBox { x0: 5.0, ..a };
+        let apart = BBox {
+            x0: 20.0,
+            x1: 30.0,
+            ..a
+        };
+        let empty = BBox { x1: 0.0, ..a };
+        assert_eq!(a.iou(&a), 1.0);
+        assert_eq!(a.iou(&half), 0.5);
+        assert_eq!(a.iou(&apart), 0.0);
+        assert_eq!(empty.iou(&empty), 0.0);
     }
 
     #[test]

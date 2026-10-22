@@ -106,6 +106,7 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
             recognize_ms: u32::MAX,
             translate_ms: u32::MAX,
             ocr_engine: args.engine,
+            reused: 0,
         };
         let lines = if args.live {
             if samples.is_empty() {

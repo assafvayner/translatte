@@ -78,7 +78,7 @@ class LiveEventLog(private val emit: (String) -> Unit) {
             val t = result.timings
             return buildString {
                 append("{\"t_ms\":$tMs,\"ev\":\"update\",\"regions\":${result.regions.size},\"shown\":$shown,\"seen\":[${seen.joinToString(",")}]")
-                append(",\"det_ms\":${t.detectMs},\"rec_ms\":${t.recognizeMs},\"tr_ms\":${t.translateMs},\"engine\":\"${t.ocrEngine}\"")
+                append(",\"det_ms\":${t.detectMs},\"rec_ms\":${t.recognizeMs},\"tr_ms\":${t.translateMs},\"engine\":\"${t.ocrEngine}\",\"reused\":${t.reused}")
                 append(",\"w\":${result.imageWidth},\"h\":${result.imageHeight}")
                 intervalMs?.let { append(",\"interval_ms\":$it") }
                 ptsMs?.let { append(",\"pts_ms\":$it") }

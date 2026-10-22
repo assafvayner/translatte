@@ -169,6 +169,9 @@ pub struct StageTimings {
     pub translate_ms: u32,
     #[uniffi(default = "ort")]
     pub ocr_engine: String,
+    /// Blocks of a live frame that took an earlier frame's translation.
+    #[uniffi(default = 0)]
+    pub reused: u32,
 }
 
 impl From<translatte_core::pipeline::StageTimings> for StageTimings {
@@ -178,6 +181,7 @@ impl From<translatte_core::pipeline::StageTimings> for StageTimings {
             recognize_ms: t.recognize_ms,
             translate_ms: t.translate_ms,
             ocr_engine: t.ocr_engine.name().into(),
+            reused: t.reused,
         }
     }
 }
@@ -646,6 +650,7 @@ mod tests {
                 detect_ms: 1,
                 recognize_ms: 2,
                 translate_ms: 3,
+                reused: 4,
                 ..Default::default()
             },
         };
@@ -671,6 +676,7 @@ mod tests {
                 recognize_ms: 2,
                 translate_ms: 3,
                 ocr_engine: "ort".into(),
+                reused: 4,
             }
         );
     }
