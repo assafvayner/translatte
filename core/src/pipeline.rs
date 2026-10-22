@@ -293,10 +293,14 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         let mut guard = lock(translation);
         let Translation { translator, reuse } = &mut *guard;
         let regions = &mut out.regions;
+        let mut reused_from: Vec<Option<String>> = vec![None; regions.len()];
         if live {
             reuse.set_source(&src.code);
-            for r in regions.iter_mut() {
-                r.translated_text = reuse.lookup(&r.quad, &r.source_text).map(str::to_string);
+            for (r, from) in regions.iter_mut().zip(&mut reused_from) {
+                if let Some(hit) = reuse.lookup(&r.quad, &r.source_text) {
+                    r.translated_text = Some(hit.translation.to_string());
+                    *from = Some(hit.source.to_string());
+                }
             }
             out.timings.reused = regions
                 .iter()
@@ -324,10 +328,10 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             out.timings.translate_ms = millis(start.elapsed());
         }
         if live {
-            reuse.push(regions.iter().filter_map(|r| {
+            reuse.push(regions.iter().zip(&reused_from).filter_map(|(r, from)| {
                 Some((
                     &r.quad,
-                    r.source_text.as_str(),
+                    from.as_deref().unwrap_or(&r.source_text),
                     r.translated_text.as_deref()?,
                 ))
             }));
@@ -619,6 +623,27 @@ mod tests {
         );
         assert_eq!(out.regions[1].translated_text.as_deref(), Some("ENTRÉE"));
         assert_eq!(out.timings.reused, 1);
+    }
+
+    #[test]
+    fn reused_blocks_stay_matched_to_the_text_that_was_translated() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let drifting = ["aaaaaaaaaa", "aaaaaaaaab", "aaaaaaaabb", "aaaaaaabbb"];
+        let p = Pipeline::new(
+            FakeDet(vec![quad(10.0)]),
+            FakeRec(drifting.iter().map(|&t| (t, 0.9)).collect(), 0),
+            Some(Recording::default()),
+        );
+        for _ in drifting {
+            p.run_frame(&img, &lang(), &lang()).unwrap();
+        }
+        assert_eq!(
+            p.translator().translator.0,
+            vec![
+                vec!["aaaaaaaaaa".to_string()],
+                vec!["aaaaaaabbb".to_string()]
+            ]
+        );
     }
 
     #[test]
