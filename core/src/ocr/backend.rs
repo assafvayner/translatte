@@ -154,7 +154,10 @@ mod ncnn_backend {
     impl NcnnModel {
         pub fn load(param: &Path, bin: &Path, fp16: bool, out_rank: usize) -> Result<Self> {
             let opts = ncnn::Options {
-                threads: super::super::env_or("TRANSLATTE_OCR_THREADS", 4),
+                threads: super::super::env_or(
+                    "TRANSLATTE_OCR_THREADS",
+                    super::super::affinity::big_core_count().unwrap_or(4),
+                ),
                 fp16,
             };
             Ok(Self {
