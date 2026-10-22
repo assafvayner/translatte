@@ -44,7 +44,11 @@ rm -f "$DATA/Documents/liveev.jsonl" "$OUT/screen.mp4" "$OUT/app.log" "$OUT/live
 
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$CLIP" 2>/dev/null || echo 30)
 LOOP_ARGS=()
-[[ "${LIVE_LOOP:-0}" == 1 ]] && LOOP_ARGS=(-mock-video-loop YES)
+ANALYZE_ARGS=()
+if [[ "${LIVE_LOOP:-0}" == 1 ]]; then
+  LOOP_ARGS=(-mock-video-loop YES)
+  ANALYZE_ARGS=(--loop-ms "$(python3 -c "import sys; print(round(float(sys.argv[1]) * 1000))" "$DURATION")")
+fi
 
 xcrun simctl io "$UDID" recordVideo --codec h264 --force "$OUT/screen.mp4" 2>/dev/null &
 REC=$!
@@ -68,6 +72,6 @@ wait "$REC" || true
 
 cp "$DATA/Documents/liveev.jsonl" "$OUT/liveev.jsonl" 2>/dev/null || grep '^liveev ' "$OUT/app.log" | cut -c8- >"$OUT/liveev.jsonl"
 xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT" --video "$OUT/screen.mp4"
+python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT" ${ANALYZE_ARGS[@]+"${ANALYZE_ARGS[@]}"} --video "$OUT/screen.mp4"
 echo "recording: $OUT/screen.mp4"
 echo "log: $OUT/app.log"

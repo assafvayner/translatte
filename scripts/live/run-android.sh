@@ -26,11 +26,13 @@ adb shell pm path "$PKG" >/dev/null || { echo "$PKG not installed (scripts/andro
 adb shell mkdir -p "$(dirname "$DEST")"
 adb push "$CLIP" "$DEST" >/dev/null
 
+DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$CLIP" 2>/dev/null || echo 30)
+ANALYZE_ARGS=()
 if [[ "${LIVE_LOOP:-0}" == 1 ]]; then
   SECS="${LIVE_SECS:-30}"
   LOOP_ARGS=(--ez mock_video_loop true)
+  ANALYZE_ARGS=(--loop-ms "$(python3 -c "import sys; print(round(float(sys.argv[1]) * 1000))" "$DURATION")")
 else
-  DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$CLIP" 2>/dev/null || echo 30)
   SECS=$(python3 -c "import math, sys; print(math.ceil(float(sys.argv[1])) + 2 + int(sys.argv[2]))" "$DURATION" "${LIVE_STARTUP_SECS:-3}")
   LOOP_ARGS=()
 fi
@@ -57,9 +59,9 @@ grep -o 'liveev .*' "$OUT/logcat.txt" | cut -c8- >"$OUT/liveev.jsonl" || true
 grep -q "live replay done" "$OUT/logcat.txt" || [[ "${LIVE_LOOP:-0}" == 1 ]] || echo "no 'live replay done' in logcat" >&2
 adb shell am force-stop "$PKG"
 if [[ "$RECORD" == 1 ]]; then
-  python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT" --video "$OUT/screen.mp4"
+  python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT" ${ANALYZE_ARGS[@]+"${ANALYZE_ARGS[@]}"} --video "$OUT/screen.mp4"
   echo "recording: $OUT/screen.mp4"
 else
-  python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT"
+  python3 "$ROOT/scripts/live/analyze.py" "$OUT/liveev.jsonl" --out "$OUT" ${ANALYZE_ARGS[@]+"${ANALYZE_ARGS[@]}"}
 fi
 echo "logcat: $OUT/logcat.txt"
