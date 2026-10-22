@@ -26,6 +26,12 @@ const BAND_TOLERANCE: f32 = 0.5;
 const MAX_ANGLE_SPREAD: f32 = 8.0;
 /// Blocks sharing more than this fraction of the smaller one's area read the same text twice.
 const MAX_SHARED_AREA: f32 = 0.5;
+/// Blocks at different angles sharing more than this fraction of the smaller one's area can't
+/// both be shown.
+const MAX_CROSSING_AREA: f32 = 0.25;
+/// Overlapping blocks of one reading frame are trimmed apart unless either would keep less than
+/// this fraction of its height (or width).
+const MIN_KEPT_EXTENT: f32 = 0.5;
 
 fn overlap(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
     a1.min(b1) - a0.max(b0)
@@ -213,7 +219,7 @@ fn cluster_by_angle(mut lines: Vec<Line>) -> Vec<Cluster> {
 /// Groups lines in the reading frame of their angle, so tilted paragraphs and vertical columns
 /// stack like horizontal rows; blocks keep their lines' rotation.
 pub fn group_lines(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
-    drop_overlapping(
+    drop_crossing(drop_overlapping(
         cluster_by_angle(lines)
             .into_iter()
             .flat_map(|c| {
@@ -221,7 +227,7 @@ pub fn group_lines(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
                 group_frame(c.lines, angle, lang)
             })
             .collect(),
-    )
+    ))
 }
 
 impl Block {
@@ -253,6 +259,34 @@ fn drop_overlapping(blocks: Vec<Block>) -> Vec<Block> {
             q.intersection_area(other) > MAX_SHARED_AREA * q.area().min(other.area())
         });
         if !clashes {
+            kept.push(i);
+        }
+    }
+    kept.sort_unstable();
+    blocks
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| kept.binary_search(i).is_ok())
+        .map(|(_, b)| b)
+        .collect()
+}
+
+/// Of blocks at different angles that still cross over more than `MAX_CROSSING_AREA` of the
+/// smaller one (a fragment read at a stray angle, or a tilted sticker over a paragraph), keeps the
+/// one with more text, preserving reading order. Blocks of one reading frame were already
+/// separated.
+fn drop_crossing(blocks: Vec<Block>) -> Vec<Block> {
+    let chars: Vec<usize> = blocks.iter().map(|b| b.text.chars().count()).collect();
+    let mut by_chars: Vec<usize> = (0..blocks.len()).collect();
+    by_chars.sort_by(|&a, &b| chars[b].cmp(&chars[a]));
+    let mut kept: Vec<usize> = Vec::new();
+    for i in by_chars {
+        let q = &blocks[i].quad;
+        let crosses = kept.iter().any(|&k| {
+            let other = &blocks[k].quad;
+            q.intersection_area(other) > MAX_CROSSING_AREA * q.area().min(other.area())
+        });
+        if !crosses {
             kept.push(i);
         }
     }
@@ -310,6 +344,7 @@ fn order_blocks(groups: Vec<Group>, angle: f32, lang: &Language) -> Vec<Block> {
             (framed, h, block)
         })
         .collect();
+    separate(&mut keyed, angle);
     keyed.sort_by(|a, b| a.0.y0.total_cmp(&b.0.y0));
     let x_key = |b: &BBox| if lang.rtl { -b.x1 } else { b.x0 };
     let mut out = Vec::with_capacity(keyed.len());
@@ -324,6 +359,76 @@ fn order_blocks(groups: Vec<Group>, angle: f32, lang: &Language) -> Vec<Block> {
         out.extend(band.into_iter().map(|(_, _, b)| b));
     }
     out
+}
+
+/// Blocks of one reading frame whose boxes cross (detected lines are padded, so tightly set
+/// neighbors' boxes overlap) meet halfway across the shared band, along the axis that cuts less of
+/// them. When that would leave either with less than `MIN_KEPT_EXTENT` of its extent, it mostly
+/// sits inside the other and the less confident of the two goes.
+fn separate(keyed: &mut Vec<(BBox, f32, Block)>, angle: f32) {
+    let mut gone = vec![false; keyed.len()];
+    let mut trimmed = vec![false; keyed.len()];
+    for i in 0..keyed.len() {
+        for j in i + 1..keyed.len() {
+            if gone[i] || gone[j] {
+                continue;
+            }
+            let (a, b) = (keyed[i].0, keyed[j].0);
+            let (ox, oy) = (
+                overlap(a.x0, a.x1, b.x0, b.x1),
+                overlap(a.y0, a.y1, b.y0, b.y1),
+            );
+            if ox <= 0.0 || oy <= 0.0 {
+                continue;
+            }
+            let along_y = oy / a.height().min(b.height()) <= ox / a.width().min(b.width());
+            let (lo, hi) = if along_y {
+                (a.y0 + a.y1, b.y0 + b.y1)
+            } else {
+                (a.x0 + a.x1, b.x0 + b.x1)
+            };
+            let (first, second) = if lo <= hi { (i, j) } else { (j, i) };
+            let (mut f, mut s) = (keyed[first].0, keyed[second].0);
+            if along_y {
+                let mid = (f.y1 + s.y0) / 2.0;
+                (f.y1, s.y0) = (mid, mid);
+            } else {
+                let mid = (f.x1 + s.x0) / 2.0;
+                (f.x1, s.x0) = (mid, mid);
+            }
+            let kept = |new: BBox, old: BBox| {
+                if along_y {
+                    new.height() / old.height()
+                } else {
+                    new.width() / old.width()
+                }
+            };
+            if kept(f, keyed[first].0) < MIN_KEPT_EXTENT
+                || kept(s, keyed[second].0) < MIN_KEPT_EXTENT
+            {
+                let weaker = if keyed[i].2.confidence() < keyed[j].2.confidence() {
+                    i
+                } else {
+                    j
+                };
+                gone[weaker] = true;
+                continue;
+            }
+            keyed[first].0 = f;
+            keyed[second].0 = s;
+            trimmed[first] = true;
+            trimmed[second] = true;
+        }
+    }
+    let mut k = 0;
+    keyed.retain_mut(|(framed, _, block)| {
+        let i = k;
+        k += 1;
+        if trimmed[i] {
+            block.quad = Quad::from_bbox(*framed).from_reading_frame(angle);
+        }
+        !gone[i]
+    });
 }
 
 /// The block and its bounding box in the reading frame. A multi-line block's quad is that box
@@ -892,5 +997,76 @@ mod tests {
             texts(&group_lines(lines, &lang(false, true))),
             vec!["r1", "r2", "r3"]
         );
+    }
+
+    fn assert_apart(a: &Quad, b: &Quad) {
+        assert!(a.intersection_area(b) < 1.0, "{a:?} {b:?}");
+    }
+
+    #[test]
+    fn tightly_set_neighbors_are_trimmed_apart() {
+        for degrees in [0.0, 30.0] {
+            let lines = tilt(
+                vec![
+                    line(10.0, 10.0, 410.0, 70.0, "TITLE"),
+                    line(10.0, 60.0, 300.0, 80.0, "small print"),
+                ],
+                degrees,
+                &[],
+            );
+            let blocks = group_lines(lines, &lang(false, true));
+            assert_eq!(texts(&blocks), vec!["TITLE", "small print"], "{degrees}");
+            assert_apart(&blocks[0].quad, &blocks[1].quad);
+            assert_angle(&blocks[1].quad, degrees);
+            let small = blocks[1].quad.to_reading_frame(degrees.to_radians()).bbox();
+            assert!((small.height() - 15.0).abs() < 0.5, "{degrees}: {small:?}");
+            assert!((small.width() - 290.0).abs() < 0.5, "{degrees}: {small:?}");
+        }
+    }
+
+    #[test]
+    fn side_by_side_neighbors_are_trimmed_across() {
+        let blocks = group_lines(
+            vec![
+                line(10.0, 10.0, 210.0, 70.0, "BIG"),
+                line(200.0, 30.0, 300.0, 50.0, "side"),
+            ],
+            &lang(false, true),
+        );
+        assert_eq!(blocks.len(), 2);
+        assert_apart(&blocks[0].quad, &blocks[1].quad);
+        let big = blocks.iter().find(|b| b.text == "BIG").unwrap().quad.bbox();
+        assert_eq!((big.x1, big.y1), (205.0, 70.0));
+    }
+
+    #[test]
+    fn a_fragment_mostly_inside_a_neighbor_goes_by_confidence() {
+        let lines = |fragment: f32| {
+            vec![
+                with_confidence(line(10.0, 10.0, 410.0, 70.0, "TITLE"), 0.8),
+                with_confidence(line(100.0, 40.0, 160.0, 60.0, "x"), fragment),
+            ]
+        };
+        assert_eq!(
+            texts(&group_lines(lines(0.6), &lang(false, true))),
+            vec!["TITLE"]
+        );
+        assert_eq!(
+            texts(&group_lines(lines(0.9), &lang(false, true))),
+            vec!["x"]
+        );
+    }
+
+    #[test]
+    fn a_block_at_a_stray_angle_crossing_a_longer_one_goes() {
+        let paragraph =
+            with_confidence(line(10.0, 100.0, 410.0, 140.0, "a long line of text"), 0.7);
+        let stray = with_confidence(
+            tilt(vec![line(150.0, 125.0, 230.0, 165.0, "te")], 0.0, &[25.0]).remove(0),
+            0.95,
+        );
+        let far = tilt(vec![line(150.0, 300.0, 230.0, 340.0, "far")], 0.0, &[25.0]).remove(0);
+        let blocks = group_lines(vec![paragraph, stray, far], &lang(false, true));
+        assert_eq!(texts(&blocks), vec!["a long line of text", "far"]);
     }
 }
