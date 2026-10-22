@@ -5,6 +5,7 @@ import co.huggingface.translatte.ui.result.testResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -51,4 +52,27 @@ class LiveTranslatorTest {
         camera.coroutineContext.job.cancel()
     }
 
+    @Test
+    fun aCancelledTranslationLeavesTheStagesReady() = runBlocking {
+        val camera = CoroutineScope(coroutineContext + Job(coroutineContext.job))
+        val live = live(camera)
+        live.offerFrame()
+        settle()
+        reads.calls[0].complete(testResult())
+        settle()
+        live.offerFrame()
+        settle()
+        reads.calls[1].complete(testResult())
+        settle()
+        assertEquals("the second frame waits for the first's translation", 1, translations.calls.size)
+
+        camera.coroutineContext.job.cancelChildren()
+        settle()
+        live.offerFrame()
+        settle()
+        reads.calls[2].complete(testResult())
+        settle()
+        assertEquals(2, translations.calls.size)
+        camera.coroutineContext.job.cancel()
+    }
 }

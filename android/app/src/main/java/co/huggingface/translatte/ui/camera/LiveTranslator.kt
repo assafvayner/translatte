@@ -169,7 +169,7 @@ class LiveTranslator(
                     if (item.generation == generation) publish(item.frame, result)
                 } catch (e: CancellationException) {
                     synchronized(lock) {
-                        stages.translateDone()
+                        stages.translateCancelled()
                         translating = null
                     }
                     throw e

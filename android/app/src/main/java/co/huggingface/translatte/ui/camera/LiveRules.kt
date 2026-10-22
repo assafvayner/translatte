@@ -52,6 +52,12 @@ class LiveStages<T> {
         return next
     }
 
+    /** A translation was cancelled: drops the waiting frame too, which no one is left to translate. */
+    fun translateCancelled() {
+        waiting = null
+        translating = false
+    }
+
     /** Drops the waiting frame; frames in a stage finish and are ignored by their caller. */
     fun reset() {
         waiting = null

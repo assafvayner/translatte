@@ -83,6 +83,20 @@ class LiveRulesTest {
     }
 
     @Test
+    fun aCancelledTranslationDropsTheWaitingFrame() {
+        val stages = LiveStages<String>()
+        stages.startRead()
+        stages.readDone("a")
+        stages.startRead()
+        stages.readDone("b")
+        stages.translateCancelled()
+        assertFalse(stages.translating)
+        assertFalse(stages.readBusy)
+        stages.startRead()
+        assertEquals("c", stages.readDone("c"))
+    }
+
+    @Test
     fun downscalesTheLongSideTo1280OrLess() {
         assertEquals(1, LiveRules.downscaleFactor(960, 720))
         assertEquals(1, LiveRules.downscaleFactor(1280, 960))
