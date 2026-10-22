@@ -203,6 +203,10 @@ pub struct TranslationResult {
     /// The language code the text was read as; `translate_regions` translates from it.
     #[uniffi(default = "")]
     pub source: String,
+    /// `ocr_frame` found the frame too blurry to read and returned no regions: keep showing the
+    /// last frame's rather than clearing them. `translate_regions` passes it through.
+    #[uniffi(default = false)]
+    pub skipped: bool,
 }
 
 impl TranslationResult {
@@ -227,6 +231,7 @@ impl TranslationResult {
             translation_error: out.translation_error,
             timings: out.timings.into(),
             source: source.to_string(),
+            skipped: out.skipped,
         }
     }
 }
@@ -541,6 +546,9 @@ impl Engine {
             .iter()
             .map(Region::to_core)
             .collect::<Result<Vec<_>, _>>()?;
+        if frame.skipped {
+            return Ok(frame);
+        }
         let Some(pipeline) = self.cached_pipeline(src) else {
             return Ok(frame);
         };
@@ -549,6 +557,7 @@ impl Engine {
                 regions,
                 translation_error: None,
                 timings: Default::default(),
+                skipped: false,
             },
             src,
             tgt,
@@ -763,6 +772,7 @@ mod tests {
                 reused: 4,
                 ..Default::default()
             },
+            skipped: false,
         };
         let r = TranslationResult::from_output(out, 10, 20, "fr");
         assert_eq!(r.source, "fr");
@@ -838,6 +848,7 @@ mod tests {
         assert!(read.timings.detect_ms + read.timings.recognize_ms > 0);
         assert_eq!(read.timings.translate_ms, 0);
         assert_eq!(read.source, "fr");
+        assert!(!read.skipped);
         let frame = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(frame.regions, photo.regions);
         assert_eq!(frame.timings.reused, 0);
@@ -851,6 +862,14 @@ mod tests {
         let turned = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(turned.regions, photo.regions);
         assert_eq!(turned.timings.reused as usize, turned.regions.len());
+
+        let blurry = image::imageops::blur(&rgba, 6.0);
+        let skipped = engine
+            .ocr_frame(blurry.into_raw(), w, h, 0, "fr".into())
+            .unwrap();
+        assert!(skipped.skipped);
+        assert!(skipped.regions.is_empty());
+        assert!(engine.translate_regions(skipped).unwrap().skipped);
 
         engine.unload();
         let unloaded = engine.translate_regions(read).unwrap();
@@ -880,6 +899,7 @@ mod tests {
                 reused: 0,
             },
             source: "fr".into(),
+            skipped: false,
         }
     }
 

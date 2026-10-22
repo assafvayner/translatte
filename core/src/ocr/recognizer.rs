@@ -94,13 +94,20 @@ impl TextRecognizer for Recognizer {
         quads: &[Quad],
         on_progress: &mut dyn FnMut(usize),
     ) -> Result<Vec<Line>> {
+        let quads: Vec<(Quad, bool)> = quads
+            .iter()
+            .map(|q| match q.vertical_candidate() {
+                Some(tall) => (tall, true),
+                None => (*q, false),
+            })
+            .collect();
         let mut crops = Vec::with_capacity(quads.len());
-        for q in quads {
-            if q.is_tall() {
+        for &(q, tall) in &quads {
+            if tall {
                 crops.push(crop_quad(img, &q.turned(Direction::TopToBottom)));
                 crops.push(crop_quad(img, &q.turned(Direction::BottomToTop)));
             } else {
-                crops.push(crop_quad(img, q));
+                crops.push(crop_quad(img, &q));
             }
         }
         let total = crops.len().max(1);
@@ -109,9 +116,9 @@ impl TextRecognizer for Recognizer {
             .into_iter();
         let mut lines = Vec::with_capacity(quads.len());
         let mut horizontal = Vec::new();
-        for (i, q) in quads.iter().enumerate() {
+        for (i, &(q, tall)) in quads.iter().enumerate() {
             let first = reads.next().expect("one reading per crop");
-            let (direction, (text, confidence)) = if q.is_tall() {
+            let (direction, (text, confidence)) = if tall {
                 let up = reads.next().expect("two readings per tall crop");
                 match pick_direction(&first, &up) {
                     Direction::Horizontal => {
@@ -134,7 +141,7 @@ impl TextRecognizer for Recognizer {
         if !horizontal.is_empty() {
             let crops: Vec<RgbImage> = horizontal
                 .iter()
-                .map(|&i| crop_quad(img, &quads[i]))
+                .map(|&i| crop_quad(img, &quads[i].0))
                 .collect();
             for (&i, (text, confidence)) in
                 horizontal.iter().zip(self.read_all(&crops, &mut |_| {})?)

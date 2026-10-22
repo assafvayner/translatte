@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use image::RgbImage;
 use serde::Serialize;
 
+use crate::frame::sharpness;
 use crate::geometry::Quad;
 use crate::layout::group_lines;
 use crate::manifest::Language;
@@ -15,6 +16,9 @@ use crate::translate::Translator;
 use crate::{Result, TranslatteError};
 
 const MIN_LINE_CONFIDENCE: f32 = 0.5;
+/// Live frames less sharp than this (see [`sharpness`]) are skipped. Calibrated on handheld clips
+/// of labels: it drops frames too motion-blurred or defocused to read but keeps soft ones.
+const MIN_FRAME_SHARPNESS: f32 = 30.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TranslatedRegion {
@@ -67,6 +71,10 @@ pub struct PipelineOutput {
     pub translation_error: Option<String>,
     #[serde(skip)]
     pub timings: StageTimings,
+    /// A live frame too blurry to read: it holds no regions and should not replace the last
+    /// frame's.
+    #[serde(skip)]
+    pub skipped: bool,
 }
 
 struct Ocr<D, R> {
@@ -79,11 +87,16 @@ impl<D: TextDetector, R: TextRecognizer> Ocr<D, R> {
     fn read(
         &mut self,
         img: &RgbImage,
+        live: bool,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<(Vec<Line>, StageTimings)> {
         on_stage(Stage::Detecting);
         let start = Instant::now();
-        let quads = self.detector.detect(img)?;
+        let quads = if live {
+            self.detector.detect_frame(img)?
+        } else {
+            self.detector.detect(img)?
+        };
         let detected = Instant::now();
         let total = quads.len();
         let mut lines = self.recognizer.recognize_all(img, &quads, &mut |done| {
@@ -233,7 +246,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             .as_ref()
             .filter(|_| live && !self.live_on_photo_ocr.load(Ordering::Relaxed))
         else {
-            return lock(&self.ocr).read(img, on_stage);
+            return lock(&self.ocr).read(img, live, on_stage);
         };
         let mut ocr = lock(&live_ocr.ocr);
         if ocr.is_none() {
@@ -247,7 +260,9 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
                 precision: live_ocr.precision,
             });
         }
-        ocr.as_mut().expect("loaded above").read(img, on_stage)
+        ocr.as_mut()
+            .expect("loaded above")
+            .read(img, live, on_stage)
     }
 
     /// Prepares the translator for `src` to `tgt` (e.g. when the user picks the languages), so the
@@ -270,8 +285,18 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         Ok(self.translate(out, src, tgt, false, on_stage))
     }
 
-    /// The untranslated regions of a live camera frame.
+    /// The untranslated regions of a live camera frame, or a skipped output when it is too blurry
+    /// to read.
     pub fn read_frame(&self, img: &RgbImage, src: &Language) -> Result<PipelineOutput> {
+        self.check_source(src)?;
+        if sharpness(img) < MIN_FRAME_SHARPNESS {
+            return Ok(PipelineOutput {
+                regions: Vec::new(),
+                translation_error: None,
+                timings: StageTimings::default(),
+                skipped: true,
+            });
+        }
         self.read(img, src, true, &mut |_| {})
     }
 
@@ -316,6 +341,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             regions,
             translation_error: None,
             timings,
+            skipped: false,
         })
     }
 
@@ -330,7 +356,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         let Some(translation) = &self.translation else {
             return out;
         };
-        if live && self.retired() {
+        if out.skipped || live && self.retired() {
             return out;
         }
         let mut guard = lock(translation);
@@ -449,6 +475,40 @@ mod tests {
         p.translate_frame(out, &lang(), &lang())
     }
 
+    /// A white page with sharp print in its right margin, away from the test quads.
+    fn page() -> RgbImage {
+        RgbImage::from_fn(200, 400, |x, y| {
+            if x >= 150 && y % 4 == 0 {
+                Rgb([0, 0, 0])
+            } else {
+                Rgb([255, 255, 255])
+            }
+        })
+    }
+
+    #[test]
+    fn blurry_live_frames_are_skipped_untranslated() {
+        let p = Pipeline::new(
+            FakeDet(vec![quad(10.0)]),
+            FakeRec(vec![("sortie", 0.9); 2], 0),
+            Some(Recording::default()),
+        );
+        let blurry = image::imageops::blur(&page(), 4.0);
+        let out = p.read_frame(&blurry, &lang()).unwrap();
+        assert!(out.skipped);
+        assert!(out.regions.is_empty());
+        let out = p.translate_frame(out, &lang(), &lang());
+        assert!(out.skipped);
+        assert!(p.translator().translator.0.is_empty());
+
+        let out = frame(&p, &page());
+        assert!(!out.skipped);
+        assert_eq!(out.regions[0].translated_text.as_deref(), Some("SORTIE"));
+        let photo = p.run(&blurry, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert!(!photo.skipped, "photos are always read");
+        assert_eq!(photo.regions.len(), 1);
+    }
+
     fn lang() -> Language {
         Language {
             code: "fr".into(),
@@ -491,7 +551,7 @@ mod tests {
 
     #[test]
     fn live_frames_use_the_live_ocr_models() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0)]),
             FakeRec(vec![("sortie", 0.9); 3], 0),
@@ -525,9 +585,32 @@ mod tests {
         assert_eq!(loads.load(Ordering::Relaxed), 1);
     }
 
+    /// Finds text at the top of photos and further down in live frames.
+    struct FrameDet;
+    impl TextDetector for FrameDet {
+        fn detect(&mut self, _img: &RgbImage) -> Result<Vec<Quad>> {
+            Ok(vec![quad(10.0)])
+        }
+
+        fn detect_frame(&mut self, _img: &RgbImage) -> Result<Vec<Quad>> {
+            Ok(vec![quad(200.0)])
+        }
+    }
+
+    #[test]
+    fn live_frames_detect_as_frames() {
+        let img = page();
+        let p: Pipeline<_, _, Upper> =
+            Pipeline::new(FrameDet, FakeRec(vec![("sortie", 0.9); 2], 0), None);
+        let photo = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(photo.regions[0].quad, quad(10.0));
+        let live = p.read_frame(&img, &lang()).unwrap();
+        assert_eq!(live.regions[0].quad, quad(200.0));
+    }
+
     #[test]
     fn live_frames_can_use_the_photo_models() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let loads = Arc::new(AtomicUsize::new(0));
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0)]),
@@ -561,7 +644,7 @@ mod tests {
 
     #[test]
     fn a_retired_pipeline_loads_nothing_for_live_frames() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0)]),
             FakeRec(vec![("sortie", 0.9); 2], 0),
@@ -584,7 +667,7 @@ mod tests {
 
     #[test]
     fn runs_all_stages_and_drops_low_confidence_lines() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0), quad(200.0), quad(300.0)]),
             FakeRec(vec![("sortie", 0.9), ("bruit", 0.2), ("entrée", 0.95)], 0),
@@ -675,7 +758,7 @@ mod tests {
 
     #[test]
     fn translation_error_keeps_ocr_results() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0), quad(200.0)]),
             FakeRec(vec![("sortie", 0.9), ("entrée", 0.9)], 0),
@@ -702,7 +785,7 @@ mod tests {
 
     #[test]
     fn all_blocks_are_translated_in_one_call() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0), quad(150.0), quad(300.0)]),
             FakeRec(vec![("a", 0.9), ("b", 0.9), ("c", 0.9)], 0),
@@ -750,7 +833,7 @@ mod tests {
 
     #[test]
     fn live_frames_reuse_the_translation_of_a_jittered_block() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let p = jittered_pipeline();
         frame(&p, &img);
         let out = frame(&p, &img);
@@ -772,7 +855,7 @@ mod tests {
 
     #[test]
     fn reused_blocks_stay_matched_to_the_text_that_was_translated() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let drifting = ["aaaaaaaaaa", "aaaaaaaaab", "aaaaaaaabb", "aaaaaaabbb"];
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0)]),
@@ -793,7 +876,7 @@ mod tests {
 
     #[test]
     fn photos_always_translate() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let p = jittered_pipeline();
         frame(&p, &img);
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
@@ -831,7 +914,7 @@ mod tests {
 
     #[test]
     fn a_frame_is_translated_while_the_next_is_read() {
-        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let img = page();
         let barrier = Arc::new(Barrier::new(2));
         let p = Pipeline::new(
             WaitingDet(barrier.clone()),
@@ -850,6 +933,7 @@ mod tests {
             }],
             translation_error: None,
             timings: StageTimings::default(),
+            skipped: false,
         };
         let (read, translated) = std::thread::scope(|s| {
             let translated = s.spawn(|| p.translate_frame(out, &lang(), &lang()));

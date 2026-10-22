@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::geometry::{BBox, Direction, Quad};
+use crate::geometry::{angle_between, BBox, Quad};
 use crate::manifest::Language;
 use crate::ocr::Line;
 
@@ -22,6 +22,10 @@ const MAX_ALIGN_OFFSET: f32 = 1.0;
 const MAX_BLOCK_ROWS: usize = 4;
 const MAX_BLOCK_CHARS: usize = 200;
 const BAND_TOLERANCE: f32 = 0.5;
+/// Lines whose reading angles differ by up to this many degrees share a reading frame.
+const MAX_ANGLE_SPREAD: f32 = 8.0;
+/// Blocks sharing more than this fraction of the smaller one's area read the same text twice.
+const MAX_SHARED_AREA: f32 = 0.5;
 
 fn overlap(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
     a1.min(b1) - a0.max(b0)
@@ -124,11 +128,11 @@ impl Group {
     }
 }
 
-fn build_rows(lines: Vec<Line>, rtl: bool) -> Vec<Row> {
+fn build_rows(lines: Vec<Line>, angle: f32, rtl: bool) -> Vec<Row> {
     let mut items: Vec<Item> = lines
         .into_iter()
         .map(|line| Item {
-            bbox: line.quad.bbox(),
+            bbox: line.quad.to_reading_frame(angle).bbox(),
             line,
         })
         .collect();
@@ -158,42 +162,131 @@ fn build_rows(lines: Vec<Line>, rtl: bool) -> Vec<Row> {
     rows
 }
 
-/// Groups each direction's lines in its reading frame, so vertical columns stack like rows.
-pub fn group_lines(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
-    let mut by_direction: [Vec<Line>; 3] = Default::default();
-    for mut line in lines {
-        let i = match line.direction {
-            Direction::Horizontal => 0,
-            Direction::TopToBottom => 1,
-            Direction::BottomToTop => 2,
-        };
-        line.quad = line.quad.to_reading_frame(line.direction);
-        by_direction[i].push(line);
-    }
-    let mut blocks = Vec::new();
-    for framed in by_direction.into_iter().filter(|f| !f.is_empty()) {
-        let direction = framed[0].direction;
-        blocks.extend(group_frame(framed, lang).into_iter().map(|mut b| {
-            b.quad = b.quad.from_reading_frame(direction);
-            for l in &mut b.lines {
-                l.quad = l.quad.from_reading_frame(direction);
-            }
-            b
-        }));
-    }
-    blocks
+/// Lines reading at about the same angle.
+#[derive(Default)]
+struct Cluster {
+    cos: f32,
+    sin: f32,
+    lines: Vec<Line>,
 }
 
-fn group_frame(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
-    let mut rows = build_rows(lines, lang.rtl);
+impl Cluster {
+    /// Mean reading angle, weighted by line length since short lines' angles are noisy.
+    fn angle(&self) -> f32 {
+        self.sin.atan2(self.cos)
+    }
+
+    fn push(&mut self, line: Line) {
+        let (a, w) = (line.quad.angle(), line.quad.width());
+        self.cos += w * a.cos();
+        self.sin += w * a.sin();
+        self.lines.push(line);
+    }
+}
+
+/// Clusters lines by reading angle, taking the longest lines first; the longest line's cluster
+/// comes first.
+fn cluster_by_angle(mut lines: Vec<Line>) -> Vec<Cluster> {
+    lines.sort_by(|a, b| b.quad.width().total_cmp(&a.quad.width()));
+    let spread = MAX_ANGLE_SPREAD.to_radians();
+    let mut clusters: Vec<Cluster> = Vec::new();
+    for line in lines {
+        let a = line.quad.angle();
+        let best = clusters
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, angle_between(c.angle(), a)))
+            .filter(|&(_, d)| d <= spread)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        match best {
+            Some((i, _)) => clusters[i].push(line),
+            None => {
+                let mut c = Cluster::default();
+                c.push(line);
+                clusters.push(c);
+            }
+        }
+    }
+    clusters
+}
+
+/// Groups lines in the reading frame of their angle, so tilted paragraphs and vertical columns
+/// stack like horizontal rows; blocks keep their lines' rotation.
+pub fn group_lines(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
+    drop_overlapping(
+        cluster_by_angle(lines)
+            .into_iter()
+            .flat_map(|c| {
+                let angle = c.angle();
+                group_frame(c.lines, angle, lang)
+            })
+            .collect(),
+    )
+}
+
+impl Block {
+    /// Mean line confidence, weighted by characters.
+    fn confidence(&self) -> f32 {
+        let (sum, n) = self.lines.iter().fold((0.0, 0.0), |(sum, n), l| {
+            let c = l.text.chars().count().max(1) as f32;
+            (sum + c * l.confidence, n + c)
+        });
+        if n > 0.0 {
+            sum / n
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Of blocks covering mostly the same area (e.g. one text read at two angles), keeps the more
+/// confident one, preserving reading order.
+fn drop_overlapping(blocks: Vec<Block>) -> Vec<Block> {
+    let mut by_confidence: Vec<usize> = (0..blocks.len()).collect();
+    let confidence: Vec<f32> = blocks.iter().map(Block::confidence).collect();
+    by_confidence.sort_by(|&a, &b| confidence[b].total_cmp(&confidence[a]));
+    let mut kept: Vec<usize> = Vec::new();
+    for i in by_confidence {
+        let q = &blocks[i].quad;
+        let clashes = kept.iter().any(|&k| {
+            let other = &blocks[k].quad;
+            q.intersection_area(other) > MAX_SHARED_AREA * q.area().min(other.area())
+        });
+        if !clashes {
+            kept.push(i);
+        }
+    }
+    kept.sort_unstable();
+    blocks
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| kept.binary_search(i).is_ok())
+        .map(|(_, b)| b)
+        .collect()
+}
+
+fn group_frame(lines: Vec<Line>, angle: f32, lang: &Language) -> Vec<Block> {
+    let mut rows = build_rows(lines, angle, lang.rtl);
     rows.sort_by(|a, b| a.bbox.y0.total_cmp(&b.bbox.y0));
     let mut groups: Vec<Group> = Vec::new();
+    let mut placed: Vec<BBox> = Vec::new();
     for row in rows {
+        // A row can't continue a group across another row lying between them.
+        let skips_a_row = |g: &Group| {
+            let last = &g.rows.last().expect("groups have rows").bbox;
+            placed.iter().any(|m| {
+                m.y0 > last.y0
+                    && overlap(m.x0, m.x1, last.x0, last.x1) > 0.0
+                    && overlap(m.x0, m.x1, row.bbox.x0, row.bbox.x1) > 0.0
+            })
+        };
         let best = groups
             .iter()
             .enumerate()
+            .filter(|(_, g)| !skips_a_row(g))
             .filter_map(|(i, g)| g.fit(&row).map(|gap| (i, gap)))
             .min_by(|a, b| a.1.total_cmp(&b.1));
+        placed.push(row.bbox);
         match best {
             Some((i, _)) => {
                 groups[i].chars += row.chars();
@@ -205,16 +298,16 @@ fn group_frame(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
             }),
         }
     }
-    order_blocks(groups, lang)
+    order_blocks(groups, angle, lang)
 }
 
-fn order_blocks(groups: Vec<Group>, lang: &Language) -> Vec<Block> {
+fn order_blocks(groups: Vec<Group>, angle: f32, lang: &Language) -> Vec<Block> {
     let mut keyed: Vec<(BBox, f32, Block)> = groups
         .into_iter()
         .map(|g| {
             let h = g.line_height();
-            let block = build_block(g, lang);
-            (block.quad.bbox(), h, block)
+            let (block, framed) = build_block(g, angle, lang);
+            (framed, h, block)
         })
         .collect();
     keyed.sort_by(|a, b| a.0.y0.total_cmp(&b.0.y0));
@@ -233,13 +326,17 @@ fn order_blocks(groups: Vec<Group>, lang: &Language) -> Vec<Block> {
     out
 }
 
-fn build_block(group: Group, lang: &Language) -> Block {
+/// The block and its bounding box in the reading frame. A multi-line block's quad is that box
+/// turned back into the image, corners in reading order.
+fn build_block(group: Group, angle: f32, lang: &Language) -> (Block, BBox) {
     let sep = if lang.spaced { " " } else { "" };
-    let lines: Vec<Line> = group
-        .rows
-        .into_iter()
-        .flat_map(|r| r.items.into_iter().map(|i| i.line))
-        .collect();
+    let items: Vec<Item> = group.rows.into_iter().flat_map(|r| r.items).collect();
+    let framed = items
+        .iter()
+        .map(|i| i.bbox)
+        .reduce(BBox::union)
+        .expect("a group has lines");
+    let lines: Vec<Line> = items.into_iter().map(|i| i.line).collect();
     let text = lines
         .iter()
         .map(|l| l.text.trim())
@@ -248,21 +345,15 @@ fn build_block(group: Group, lang: &Language) -> Block {
     let quad = if lines.len() == 1 {
         lines[0].quad
     } else {
-        Quad::from_bbox(
-            lines
-                .iter()
-                .map(|l| l.quad.bbox())
-                .reduce(BBox::union)
-                .unwrap(),
-        )
+        Quad::from_bbox(framed).from_reading_frame(angle)
     };
-    Block { quad, text, lines }
+    (Block { quad, text, lines }, framed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{BBox, Pt};
+    use crate::geometry::{BBox, Direction, Pt};
 
     fn line(x0: f32, y0: f32, x1: f32, y1: f32, text: &str) -> Line {
         Line {
@@ -583,5 +674,223 @@ mod tests {
         let blocks = group_lines(vec![l.clone()], &lang(false, true));
         assert_eq!(blocks[0].quad, l.quad);
         assert_eq!(blocks[0].lines[0].quad, l.quad);
+    }
+
+    /// Rotates `lines` by `degrees` about the origin, each turned by a further `jitter[i]`
+    /// degrees about its own center, as a detector reports a tilted page.
+    fn tilt(lines: Vec<Line>, degrees: f32, jitter: &[f32]) -> Vec<Line> {
+        lines
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut l)| {
+                let b = l.quad.bbox();
+                let (cx, cy) = ((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0);
+                let local = Quad(l.quad.0.map(|p| Pt::new(p.x - cx, p.y - cy)))
+                    .from_reading_frame(jitter.get(i).copied().unwrap_or(0.0).to_radians());
+                l.quad = Quad(local.0.map(|p| Pt::new(p.x + cx, p.y + cy)))
+                    .from_reading_frame(degrees.to_radians());
+                l
+            })
+            .collect()
+    }
+
+    fn paragraph() -> Vec<Line> {
+        [400.0, 300.0, 380.0, 250.0, 400.0]
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let y = 10.0 + i as f32 * 28.0;
+                line(10.0, y, 10.0 + w, y + 20.0, &format!("p{i}"))
+            })
+            .collect()
+    }
+
+    fn assert_angle(q: &Quad, degrees: f32) {
+        let got = q.angle().to_degrees();
+        assert!(
+            crate::geometry::angle_between(got.to_radians(), degrees.to_radians()) < 0.02,
+            "angle {got} want {degrees}"
+        );
+    }
+
+    #[test]
+    fn tilted_paragraphs_keep_line_order_and_their_rotation() {
+        let jitter = [1.5, -1.0, 0.5, -1.5, 1.0];
+        for degrees in [15.0, 30.0, 45.0, 60.0, -15.0, -30.0, -45.0, -60.0] {
+            let mut lines = tilt(paragraph(), degrees, &jitter);
+            lines.reverse();
+            let blocks = group_lines(lines, &lang(false, true));
+            assert_eq!(texts(&blocks), vec!["p0 p1 p2 p3", "p4"], "{degrees}");
+            assert_angle(&blocks[0].quad, degrees);
+            let level = blocks[0].quad.to_reading_frame(degrees.to_radians());
+            let b = level.bbox();
+            assert!((b.width() - 400.0).abs() < 12.0, "{degrees}: {b:?}");
+            assert!((b.height() - 104.0).abs() < 12.0, "{degrees}: {b:?}");
+            for l in &blocks[0].lines {
+                let [a, _, c, _] = l.quad.0;
+                let center = Pt::new((a.x + c.x) / 2.0, (a.y + c.y) / 2.0);
+                assert!(blocks[0].quad.contains(center), "{degrees}: {l:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn tilted_block_corners_run_in_reading_order() {
+        let blocks = group_lines(tilt(paragraph(), 30.0, &[]), &lang(false, true));
+        let [tl, tr, br, bl] = blocks[0].quad.0;
+        let first = &blocks[0].lines[0].quad.0;
+        assert!(tl.dist(first[0]) < 1.0, "{tl:?} {first:?}");
+        assert_angle(&Quad([tl, tr, br, bl]), 30.0);
+        assert!(tl.dist(bl) < tl.dist(tr));
+    }
+
+    #[test]
+    fn tilted_menu_items_and_prices_stay_apart() {
+        let names = [
+            ("Ramen", 60.0),
+            ("Gyoza", 120.0),
+            ("Edamame", 70.0),
+            ("Beer", 140.0),
+        ];
+        let mut lines = Vec::new();
+        for (i, (name, w)) in names.iter().enumerate() {
+            let y = 10.0 + i as f32 * 26.0;
+            lines.push(line(10.0, y, 10.0 + w, y + 20.0, name));
+            let pw = if i % 2 == 0 { 40.0 } else { 90.0 };
+            lines.push(line(460.0 - pw, y, 460.0, y + 20.0, &format!("${i}")));
+        }
+        for degrees in [15.0, 30.0, 45.0, 60.0] {
+            let blocks = group_lines(tilt(lines.clone(), degrees, &[]), &lang(false, true));
+            assert_eq!(
+                texts(&blocks),
+                ["Ramen", "$0", "Gyoza", "$1", "Edamame", "$2", "Beer", "$3"],
+                "{degrees}"
+            );
+        }
+    }
+
+    #[test]
+    fn paragraphs_at_different_angles_group_separately() {
+        let mut lines = tilt(paragraph(), 15.0, &[]);
+        let shifted: Vec<Line> = tilt(paragraph(), 45.0, &[])
+            .into_iter()
+            .map(|mut l| {
+                l.text = l.text.replace('p', "q");
+                l.quad = Quad(l.quad.0.map(|p| Pt::new(p.x + 200.0, p.y + 150.0)));
+                l
+            })
+            .collect();
+        lines.extend(shifted);
+        let blocks = group_lines(lines, &lang(false, true));
+        let mut got = texts(&blocks);
+        got.sort();
+        assert_eq!(got, vec!["p0 p1 p2 p3", "p4", "q0 q1 q2 q3", "q4"]);
+        for b in &blocks {
+            let want = if b.text.starts_with('p') { 15.0 } else { 45.0 };
+            assert_angle(&b.quad, want);
+        }
+    }
+
+    fn at(degrees: f32, width: f32) -> Line {
+        tilt(vec![line(0.0, 0.0, width, 20.0, "x")], degrees, &[]).remove(0)
+    }
+
+    #[test]
+    fn clusters_lines_by_reading_angle() {
+        let lines = vec![
+            at(7.0, 300.0),
+            at(6.0, 250.0),
+            at(8.5, 200.0),
+            at(0.0, 40.0),
+            at(-0.5, 60.0),
+            at(30.0, 300.0),
+            at(33.0, 100.0),
+            at(-84.0, 200.0),
+            at(179.0, 100.0),
+            at(-175.0, 100.0),
+        ];
+        let clusters = cluster_by_angle(lines);
+        let mut got: Vec<(i32, usize)> = clusters
+            .iter()
+            .map(|c| (c.angle().to_degrees().round() as i32, c.lines.len()))
+            .collect();
+        got.sort();
+        assert_eq!(got, vec![(-178, 2), (-84, 1), (6, 5), (31, 2)]);
+    }
+
+    fn with_confidence(mut l: Line, confidence: f32) -> Line {
+        l.confidence = confidence;
+        l
+    }
+
+    #[test]
+    fn heavily_overlapping_blocks_keep_the_more_confident_one() {
+        let row = with_confidence(line(10.0, 100.0, 310.0, 130.0, "row"), 0.9);
+        let crossing = with_confidence(
+            tilt(
+                vec![line(60.0, 100.0, 250.0, 130.0, "crossing")],
+                0.0,
+                &[12.0],
+            )
+            .remove(0),
+            0.6,
+        );
+        let elsewhere = line(10.0, 300.0, 200.0, 330.0, "elsewhere");
+        let blocks = group_lines(
+            vec![crossing.clone(), row.clone(), elsewhere.clone()],
+            &lang(false, true),
+        );
+        assert_eq!(texts(&blocks), vec!["row", "elsewhere"]);
+
+        let blocks = group_lines(
+            vec![with_confidence(crossing, 0.95), row, elsewhere],
+            &lang(false, true),
+        );
+        let mut got = texts(&blocks);
+        got.sort();
+        assert_eq!(got, vec!["crossing", "elsewhere"]);
+    }
+
+    #[test]
+    fn rotated_neighbors_whose_boxes_overlap_both_stay() {
+        let lines = tilt(
+            vec![
+                line(0.0, 0.0, 400.0, 60.0, "TITLE"),
+                line(0.0, 66.0, 400.0, 80.0, "small print"),
+            ],
+            45.0,
+            &[],
+        );
+        let (a, b) = (lines[0].quad.bbox(), lines[1].quad.bbox());
+        assert!(a.iou(&b) > 0.5, "the axis-aligned boxes overlap");
+        let blocks = group_lines(lines, &lang(false, true));
+        let mut got = texts(&blocks);
+        got.sort();
+        assert_eq!(got, vec!["TITLE", "small print"]);
+    }
+
+    #[test]
+    fn a_slight_overlap_keeps_both_blocks() {
+        let lines = vec![
+            with_confidence(line(10.0, 10.0, 210.0, 40.0, "left"), 0.9),
+            with_confidence(
+                tilt(vec![line(190.0, 10.0, 390.0, 40.0, "right")], 0.0, &[30.0]).remove(0),
+                0.6,
+            ),
+        ];
+        assert_eq!(group_lines(lines, &lang(false, true)).len(), 2);
+    }
+
+    #[test]
+    fn rows_do_not_stack_across_a_row_between_them() {
+        let lines = vec![
+            line(10.0, 10.0, 210.0, 40.0, "r1"),
+            line(10.0, 35.5, 130.0, 65.5, "r2"),
+            line(10.0, 61.0, 220.0, 91.0, "r3"),
+        ];
+        assert_eq!(
+            texts(&group_lines(lines, &lang(false, true))),
+            vec!["r1", "r2", "r3"]
+        );
     }
 }
