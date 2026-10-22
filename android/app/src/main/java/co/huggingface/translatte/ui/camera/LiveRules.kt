@@ -10,6 +10,54 @@ import kotlin.math.min
 /** Places an upright frame of image pixels over the preview: view = image * scale + (left, top). */
 data class FillTransform(val scale: Float, val left: Float, val top: Float)
 
+/**
+ * The two stages of live translation, the same as iOS's `LiveStages`: reading a frame (OCR) and
+ * translating what was read, each with at most one frame. A frame read while the translator is
+ * busy waits for it; no new frame is read while one waits, so none goes stale. Not thread-safe.
+ */
+class LiveStages<T> {
+    var reading = false
+        private set
+    var translating = false
+        private set
+    private var waiting: T? = null
+
+    /** Whether a new frame can't be read yet (pass as `busy` to [LiveRules.shouldTake]). */
+    val readBusy: Boolean get() = reading || waiting != null
+
+    fun startRead() {
+        reading = true
+    }
+
+    /** A frame was read: returns it to translate now, or null when it waits for the translator. */
+    fun readDone(item: T): T? {
+        reading = false
+        if (translating) {
+            waiting = item
+            return null
+        }
+        translating = true
+        return item
+    }
+
+    fun readFailed() {
+        reading = false
+    }
+
+    /** A translation finished or failed: returns the waiting frame to translate next, if any. */
+    fun translateDone(): T? {
+        val next = waiting
+        waiting = null
+        translating = next != null
+        return next
+    }
+
+    /** Drops the waiting frame; frames in a stage finish and are ignored by their caller. */
+    fun reset() {
+        waiting = null
+    }
+}
+
 /** Live translation rules, the same as iOS's `LiveRules`; keep the two in step. */
 object LiveRules {
     /** Frames reach the engine at most this large on their long side. */

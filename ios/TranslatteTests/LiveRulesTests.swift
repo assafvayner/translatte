@@ -105,4 +105,36 @@ final class LiveRulesTests: XCTestCase {
         let bytes = (0..<16).map(UInt8.init)
         XCTAssertEqual(pack(bytes, width: 2, height: 2, rowStride: 8, factor: 1, swap: false), bytes)
     }
+
+    func testAFrameIsReadWhileTheLastIsTranslated() {
+        var stages = LiveStages<String>()
+        XCTAssertFalse(stages.readBusy)
+        stages.startRead()
+        XCTAssertTrue(stages.readBusy)
+        XCTAssertEqual(stages.readDone("a"), "a")
+        XCTAssertTrue(stages.translating)
+        XCTAssertFalse(stages.readBusy)
+        stages.startRead()
+        XCTAssertNil(stages.readDone("b"))
+        XCTAssertTrue(stages.readBusy, "b waits, so no new read")
+        XCTAssertEqual(stages.translateDone(), "b")
+        XCTAssertTrue(stages.translating)
+        XCTAssertFalse(stages.readBusy)
+        XCTAssertNil(stages.translateDone())
+        XCTAssertFalse(stages.translating)
+    }
+
+    func testAResetDropsTheWaitingFrame() {
+        var stages = LiveStages<String>()
+        stages.startRead()
+        _ = stages.readDone("a")
+        stages.startRead()
+        _ = stages.readDone("b")
+        stages.reset()
+        XCTAssertFalse(stages.readBusy)
+        XCTAssertNil(stages.translateDone())
+        stages.startRead()
+        stages.readFailed()
+        XCTAssertFalse(stages.readBusy)
+    }
 }

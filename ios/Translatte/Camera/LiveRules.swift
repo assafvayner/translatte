@@ -8,6 +8,50 @@ struct FillTransform: Equatable {
     let top: CGFloat
 }
 
+/// The two stages of live translation, the same as Android's `LiveStages`: reading a frame (OCR)
+/// and translating what was read, each with at most one frame. A frame read while the translator
+/// is busy waits for it; no new frame is read while one waits, so none goes stale.
+struct LiveStages<T> {
+    private(set) var reading = false
+    private(set) var translating = false
+    private var waiting: T?
+
+    /// Whether a new frame can't be read yet (pass as `busy` to `LiveRules.shouldTake`).
+    var readBusy: Bool { reading || waiting != nil }
+
+    mutating func startRead() {
+        reading = true
+    }
+
+    /// A frame was read: returns it to translate now, or nil when it waits for the translator.
+    mutating func readDone(_ item: T) -> T? {
+        reading = false
+        if translating {
+            waiting = item
+            return nil
+        }
+        translating = true
+        return item
+    }
+
+    mutating func readFailed() {
+        reading = false
+    }
+
+    /// A translation finished or failed: returns the waiting frame to translate next, if any.
+    mutating func translateDone() -> T? {
+        let next = waiting
+        waiting = nil
+        translating = next != nil
+        return next
+    }
+
+    /// Drops the waiting frame; frames in a stage finish and are ignored by their caller.
+    mutating func reset() {
+        waiting = nil
+    }
+}
+
 /// Live translation rules, the same as Android's `LiveRules`; keep the two in step.
 enum LiveRules {
     /// UserDefaults key of the "Live translation (experimental)" setting; on by default.

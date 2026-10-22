@@ -39,6 +39,10 @@ class TranslatteApp : Application() {
     /** Serializes calls that load, use or free models, so the engine never runs two at once. */
     @OptIn(ExperimentalCoroutinesApi::class)
     val engineDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+    /** Translates live frames while [engineDispatcher] reads the next one (see `LiveTranslator`). */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val liveTranslateDispatcher = Dispatchers.IO.limitedParallelism(1)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var releaseJob: Job? = null
 

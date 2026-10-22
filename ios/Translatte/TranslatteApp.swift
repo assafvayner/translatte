@@ -25,7 +25,10 @@ struct TranslatteApp: App {
         #endif
         _model = StateObject(wrappedValue: model)
         _camera = StateObject(wrappedValue: camera)
-        let live = LiveTranslator { [model] frame in try await model.translateFrame(frame) }
+        let live = LiveTranslator(
+            read: { [model] frame in try await model.readFrame(frame) },
+            translate: { [model] read in try await model.translateRegions(read) }
+        )
         camera.onFrame { [weak live] buffer in live?.offer(buffer) }
         _live = State(wrappedValue: live)
         _navigator = StateObject(wrappedValue: AppNavigator(

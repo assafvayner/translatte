@@ -72,7 +72,8 @@ fun MainNav(
             languageBar = languageBar,
             live = LiveRules.isActive(live, vm.sourceLanguages.any { it.code == vm.sourceCode }),
             sourceCode = vm.sourceCode,
-            translateFrame = vm::translateFrame,
+            readFrame = vm::readFrame,
+            translateRegions = vm::translateRegions,
             onLiveSnap = { bitmap, result ->
                 vm.showLive(bitmap, result)
                 resultOrigin = Screen.Camera

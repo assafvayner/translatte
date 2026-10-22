@@ -49,6 +49,40 @@ class LiveRulesTest {
     }
 
     @Test
+    fun aFrameIsReadWhileTheLastIsTranslated() {
+        val stages = LiveStages<String>()
+        assertFalse(stages.readBusy)
+        stages.startRead()
+        assertTrue(stages.readBusy)
+        assertEquals("a", stages.readDone("a"))
+        assertTrue(stages.translating)
+        assertFalse(stages.readBusy)
+        stages.startRead()
+        assertEquals(null, stages.readDone("b"))
+        assertTrue("b waits, so no new read", stages.readBusy)
+        assertEquals("b", stages.translateDone())
+        assertTrue(stages.translating)
+        assertFalse(stages.readBusy)
+        assertEquals(null, stages.translateDone())
+        assertFalse(stages.translating)
+    }
+
+    @Test
+    fun aResetDropsTheWaitingFrame() {
+        val stages = LiveStages<String>()
+        stages.startRead()
+        stages.readDone("a")
+        stages.startRead()
+        stages.readDone("b")
+        stages.reset()
+        assertFalse(stages.readBusy)
+        assertEquals(null, stages.translateDone())
+        stages.startRead()
+        stages.readFailed()
+        assertFalse(stages.readBusy)
+    }
+
+    @Test
     fun downscalesTheLongSideTo1280OrLess() {
         assertEquals(1, LiveRules.downscaleFactor(960, 720))
         assertEquals(1, LiveRules.downscaleFactor(1280, 960))
