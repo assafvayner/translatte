@@ -94,7 +94,7 @@ class LiveEventLog(private val emit: (String) -> Unit) {
                     if (i > 0) append(",")
                     append("{\"src\":")
                     appendString(r.sourceText)
-                    append(",\"box\":[${box(r.corners).joinToString(",")}]}")
+                    append(",\"box\":[${box(r.corners).joinToString(",")}],\"quad\":[${quad(r.corners).joinToString(",")}]}")
                 }
                 append("]}")
             }
@@ -107,6 +107,7 @@ class LiveEventLog(private val emit: (String) -> Unit) {
             append(",\"tr\":")
             r.translatedText?.let { appendString(it) } ?: append("null")
             append(",\"box\":[${box(r.corners).joinToString(",")}]")
+            append(",\"quad\":[${quad(r.corners).joinToString(",")}]")
             e.reason?.let { append(",\"reason\":\"$it\"") }
             append("}")
         }
@@ -118,6 +119,9 @@ class LiveEventLog(private val emit: (String) -> Unit) {
             corners.maxOf { it.x }.roundToInt(),
             corners.maxOf { it.y }.roundToInt(),
         )
+
+        /** The quad's corners, [x0, y0, x1, y1, ...], rounded to whole pixels. */
+        fun quad(corners: List<Point>): List<Int> = corners.flatMap { listOf(it.x.roundToInt(), it.y.roundToInt()) }
 
         private fun intersects(a: List<Point>, b: List<Point>): Boolean =
             minOf(a.maxOf { it.x }, b.maxOf { it.x }) > maxOf(a.minOf { it.x }, b.minOf { it.x }) &&
