@@ -18,6 +18,7 @@ import co.huggingface.translatte.MainViewModel
 import co.huggingface.translatte.Phase
 import co.huggingface.translatte.ui.camera.CameraAccess
 import co.huggingface.translatte.ui.camera.CameraScreen
+import co.huggingface.translatte.ui.camera.ReplaySource
 import co.huggingface.translatte.ui.camera.LiveRules
 import co.huggingface.translatte.ui.camera.cameraGranted
 import co.huggingface.translatte.ui.home.HomeScreen
@@ -40,7 +41,11 @@ fun MainNav(
 ) {
     val context = LocalContext.current
     val hasCamera = remember { context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
-    var screen by rememberSaveable { mutableStateOf(Nav.landing(hasCamera, cameraGranted(context), prefs.cameraAsked)) }
+    var screen by rememberSaveable {
+        mutableStateOf(
+            if (ReplaySource.current != null) Screen.Camera else Nav.landing(hasCamera, cameraGranted(context), prefs.cameraAsked),
+        )
+    }
     var resultOrigin by rememberSaveable { mutableStateOf(Screen.Home) }
     var hintSeen by remember { mutableStateOf(prefs.resultHintSeen) }
     var live by remember { mutableStateOf(prefs.liveTranslation) }
@@ -66,7 +71,8 @@ fun MainNav(
             languageBar = languageBar,
             live = LiveRules.isActive(live, vm.sourceLanguages.any { it.code == vm.sourceCode }),
             sourceCode = vm.sourceCode,
-            translateFrame = vm::translateFrame,
+            readFrame = vm::readFrame,
+            translateRegions = vm::translateRegions,
             onLiveSnap = { bitmap, result ->
                 vm.showLive(bitmap, result)
                 resultOrigin = Screen.Camera

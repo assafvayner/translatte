@@ -113,7 +113,8 @@ fun CameraScreen(
     languageBar: @Composable () -> Unit,
     live: Boolean,
     sourceCode: String,
-    translateFrame: suspend (LiveFrame) -> TranslationResult,
+    readFrame: suspend (LiveFrame) -> TranslationResult,
+    translateRegions: suspend (TranslationResult) -> TranslationResult,
     onLiveSnap: (Bitmap, TranslationResult) -> Unit,
     onBack: () -> Unit,
     onCaptured: (File) -> Unit,
@@ -121,9 +122,11 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val replay = remember { ReplaySource.current }
     var granted by remember {
         mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED,
+            replay != null ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED,
         )
     }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -156,7 +159,7 @@ fun CameraScreen(
         power.addThermalStatusListener(ContextCompat.getMainExecutor(context), listener)
         onDispose { power.removeThermalStatusListener(listener) }
     }
-    val liveTranslator = remember { LiveTranslator(scope, translateFrame) { thermalHot.get() } }
+    val liveTranslator = remember { LiveTranslator(scope, readFrame, translateRegions) { thermalHot.get() } }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val analysis = remember {
         ImageAnalysis.Builder()
@@ -195,7 +198,7 @@ fun CameraScreen(
     LaunchedEffect(sourceCode) { liveTranslator.reset() }
 
     LaunchedEffect(granted) {
-        if (!granted) return@LaunchedEffect
+        if (!granted || replay != null) return@LaunchedEffect
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener(
             {
@@ -291,7 +294,11 @@ fun CameraScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (granted) AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        if (replay != null) {
+            ReplayView(replay, liveTranslator, Modifier.fillMaxSize())
+        } else if (granted) {
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        }
         if (granted && live) {
             LiveOverlay(liveTranslator, Modifier.fillMaxSize())
         }

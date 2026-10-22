@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod pair;
+pub mod reuse;
 
 use crate::manifest::Language;
 use crate::Result;

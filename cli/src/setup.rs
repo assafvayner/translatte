@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest};
 use translatte_core::model_store::ModelStore;
+use translatte_core::ocr::Precision;
 use translatte_core::TranslatteError;
 
 pub fn load_store(manifest: &Path, models: &Path) -> Result<ModelStore> {
@@ -19,8 +20,9 @@ pub fn build_pipeline(
     store: &ModelStore,
     src: &Language,
     translate: bool,
+    precision: Precision,
 ) -> Result<LoadedPipeline> {
-    load_pipeline(store, src, translate).map_err(|e| match e {
+    load_pipeline(store, src, translate, Some(precision)).map_err(|e| match e {
         TranslatteError::ModelNotInstalled(id) => anyhow::anyhow!(
             "model {id} is not installed in {}; run `translatte fetch --langs {}`",
             store.root().display(),

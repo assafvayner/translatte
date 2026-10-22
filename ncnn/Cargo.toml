@@ -1,0 +1,11 @@
+[package]
+name = "ncnn"
+version = "0.1.0"
+edition = "2021"
+links = "ncnn"
+
+[dependencies]
+thiserror.workspace = true
+
+[build-dependencies]
+cmake = "0.1"

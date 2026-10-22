@@ -1,3 +1,4 @@
+mod bench;
 mod draw;
 mod eval;
 mod fetch;
@@ -10,6 +11,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use translatte_core::manifest::Language;
+use translatte_core::ocr::Precision;
 use translatte_core::pipeline::Stage;
 
 #[derive(Parser)]
@@ -36,6 +38,36 @@ enum Command {
         /// Exit non-zero if mean CER exceeds this.
         #[arg(long)]
         max_cer: Option<f64>,
+        /// OCR precision: fp32 or fp16.
+        #[arg(long, default_value = "fp32")]
+        precision: Precision,
+        #[command(flatten)]
+        models: ModelArgs,
+    },
+    /// Time the pipeline stages over a fixtures dir and report OCR CER.
+    Bench {
+        #[arg(default_value = "fixtures")]
+        dir: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        iters: usize,
+        /// Downscale images so the long side is at most this, e.g. 960 for live camera frames.
+        #[arg(long)]
+        max_side: Option<u32>,
+        /// Also translate (loads the pair models).
+        #[arg(long)]
+        translate: bool,
+        /// Only fixtures in these source languages, e.g. fr,ja.
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+        /// Write the recognized lines (text, confidence) per fixture to this JSON file.
+        #[arg(long)]
+        text: Option<PathBuf>,
+        /// Run the fixtures, in name order, once each as consecutive live camera frames.
+        #[arg(long)]
+        live: bool,
+        /// OCR precision: fp32 or fp16.
+        #[arg(long, default_value = "fp32")]
+        precision: Precision,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -67,6 +99,9 @@ enum Command {
         /// OCR only; skip loading the translation model and outline the detected text boxes instead.
         #[arg(long)]
         no_translate: bool,
+        /// OCR precision: fp32 or fp16.
+        #[arg(long, default_value = "fp32")]
+        precision: Precision,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -82,7 +117,8 @@ fn main() {
     };
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    // Bionic aborts in ONNX Runtime's C++ static destructors at exit; skip them on Android.
+    // Bionic aborted in ONNX Runtime's C++ static destructors at exit. ORT is gone, but exiting
+    // through the remaining C++ libraries' static destructors is untested on Android; skip them.
     #[cfg(target_os = "android")]
     unsafe {
         libc::_exit(code)
@@ -97,11 +133,35 @@ fn real_main() -> Result<i32> {
         Command::Eval {
             dir,
             max_cer,
+            precision,
             models,
         } => {
-            if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer)? {
+            if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer, precision)? {
                 return Ok(1);
             }
+        }
+        Command::Bench {
+            dir,
+            iters,
+            max_side,
+            translate,
+            only,
+            text,
+            live,
+            precision,
+            models,
+        } => {
+            let args = bench::BenchArgs {
+                dir,
+                iters,
+                max_side,
+                translate,
+                only,
+                text,
+                live,
+                precision,
+            };
+            bench::run_bench(&args, &models.manifest, &models.models)?;
         }
         Command::Fetch { langs, all, models } => {
             let store = setup::load_store(&models.manifest, &models.models)?;
@@ -124,6 +184,7 @@ fn real_main() -> Result<i32> {
             output,
             json,
             no_translate,
+            precision,
             models,
         } => {
             let mut img = image::open(&image)
@@ -133,7 +194,7 @@ fn real_main() -> Result<i32> {
             let src = store.manifest().language(&from)?;
             let tgt = store.target_language()?;
             let t0 = Instant::now();
-            let mut pipeline = setup::build_pipeline(&store, src, !no_translate)?;
+            let pipeline = setup::build_pipeline(&store, src, !no_translate, precision)?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());
             if !no_translate {
                 let t = Instant::now();

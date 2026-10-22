@@ -2,9 +2,8 @@ use std::path::Path;
 
 use image::RgbImage;
 use ndarray::{Axis, Ix2};
-use ort::session::Session;
-use ort::value::Tensor;
 
+use super::backend::{NcnnModel, Precision};
 use super::det_post::{db_postprocess, DbParams};
 use super::preprocess::det_preprocess;
 use super::TextDetector;
@@ -17,15 +16,16 @@ const RESIZE_LONG: u32 = 960;
 const MIN_SIDE: f32 = 3.0;
 
 pub struct Detector {
-    session: Session,
+    model: NcnnModel,
     params: DbParams,
 }
 
 impl Detector {
-    pub fn load(path: &Path) -> Result<Self> {
-        let session = super::session_builder(false)?.commit_from_file(path)?;
+    /// Loads the detector whose NCNN parameter file is `param`.
+    pub fn load(param: &Path, precision: Precision) -> Result<Self> {
+        let _pin = super::affinity::pin();
         Ok(Self {
-            session,
+            model: NcnnModel::load(param, precision, 3)?,
             params: DbParams::default(),
         })
     }
@@ -37,19 +37,16 @@ impl TextDetector for Detector {
             return Ok(Vec::new());
         }
         let input = det_preprocess(img, RESIZE_LONG);
-        let outputs = self
-            .session
-            .run(ort::inputs![Tensor::from_array(input.tensor)?])?;
-        let out = outputs[0].try_extract_array::<f32>()?;
+        let _pin = super::affinity::pin();
+        let out = self.model.run(input.tensor.view())?;
         let prob = out
-            .index_axis(Axis(0), 0)
             .index_axis_move(Axis(0), 0)
             .into_dimensionality::<Ix2>()
             .map_err(|e| {
                 TranslatteError::Inference(format!("unexpected detector output shape: {e}"))
             })?;
         let (w, h) = (img.width() as f32, img.height() as f32);
-        Ok(db_postprocess(prob, &self.params)
+        Ok(db_postprocess(prob.view(), &self.params)
             .into_iter()
             .map(|(q, _)| {
                 q.scale(input.scale_x, input.scale_y)

@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import co.huggingface.translatte.ui.MainNav
 import co.huggingface.translatte.ui.Screen
+import co.huggingface.translatte.ui.camera.ReplaySource
 import co.huggingface.translatte.ui.common.AppDialog
 import co.huggingface.translatte.ui.settings.AppTheme
 import co.huggingface.translatte.ui.settings.UiPrefs
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity() {
             resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         window.setBackgroundDrawable(ColorDrawable(windowBackground(prefs.theme.isDark(systemDark)).toArgb()))
         enableEdgeToEdge()
+        configureReplay()
         val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
         setContent {
@@ -126,6 +128,19 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         vm.prepare()
+    }
+
+    /**
+     * Debug builds only: `am start ... --es mock_video <path>` plays a video (a path, or a name in
+     * getExternalFilesDir) in place of the camera for live translation; `--ez mock_video_loop true`
+     * loops it and `--es mock_video_source fr` picks the source language.
+     */
+    private fun configureReplay() {
+        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+        val path = intent.getStringExtra("mock_video") ?: return
+        val file = File(path).takeIf { it.isAbsolute } ?: File(getExternalFilesDir(null), path)
+        ReplaySource.current = ReplaySource(file.path, intent.getBooleanExtra("mock_video_loop", false))
+        intent.getStringExtra("mock_video_source")?.let(vm::setSource)
     }
 
     /**

@@ -179,8 +179,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun showLive(image: Bitmap, result: TranslationResult) = translations.show(image, result)
 
-    /** Translates one live camera frame from the current source language on the engine dispatcher. */
-    suspend fun translateFrame(frame: LiveFrame): TranslationResult {
+    /** Reads one live camera frame (OCR, untranslated) from the current source language on the engine dispatcher. */
+    suspend fun readFrame(frame: LiveFrame): TranslationResult {
         val source = sourceCode
         return withContext(translatte.engineDispatcher) {
             try {
@@ -189,11 +189,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (memoryWarning != e.message) withContext(Dispatchers.Main) { memoryWarning = e.message }
                 throw e
             }
-            engine.translateFrame(frame.rgba, frame.width.toUInt(), frame.height.toUInt(), frame.rotation.toUInt(), source).also {
+            engine.ocrFrame(frame.rgba, frame.width.toUInt(), frame.height.toUInt(), frame.rotation.toUInt(), source).also {
                 translatte.modelsLoaded = true
             }
         }
     }
+
+    /** Translates the regions [readFrame] read from their source language, while the engine dispatcher reads the next frame. */
+    suspend fun translateRegions(read: TranslationResult): TranslationResult =
+        withContext(translatte.liveTranslateDispatcher) { engine.translateRegions(read) }
 
     private suspend fun translateOnEngine(bitmap: Bitmap, onStage: (String) -> Unit): TranslationResult {
         val source = sourceCode

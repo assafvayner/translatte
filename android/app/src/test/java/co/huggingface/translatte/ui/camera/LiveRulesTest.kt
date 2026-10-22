@@ -49,6 +49,54 @@ class LiveRulesTest {
     }
 
     @Test
+    fun aFrameIsReadWhileTheLastIsTranslated() {
+        val stages = LiveStages<String>()
+        assertFalse(stages.readBusy)
+        stages.startRead()
+        assertTrue(stages.readBusy)
+        assertEquals("a", stages.readDone("a"))
+        assertTrue(stages.translating)
+        assertFalse(stages.readBusy)
+        stages.startRead()
+        assertEquals(null, stages.readDone("b"))
+        assertTrue("b waits, so no new read", stages.readBusy)
+        assertEquals("b", stages.translateDone())
+        assertTrue(stages.translating)
+        assertFalse(stages.readBusy)
+        assertEquals(null, stages.translateDone())
+        assertFalse(stages.translating)
+    }
+
+    @Test
+    fun aResetDropsTheWaitingFrame() {
+        val stages = LiveStages<String>()
+        stages.startRead()
+        stages.readDone("a")
+        stages.startRead()
+        stages.readDone("b")
+        stages.reset()
+        assertFalse(stages.readBusy)
+        assertEquals(null, stages.translateDone())
+        stages.startRead()
+        stages.readFailed()
+        assertFalse(stages.readBusy)
+    }
+
+    @Test
+    fun aCancelledTranslationDropsTheWaitingFrame() {
+        val stages = LiveStages<String>()
+        stages.startRead()
+        stages.readDone("a")
+        stages.startRead()
+        stages.readDone("b")
+        stages.translateCancelled()
+        assertFalse(stages.translating)
+        assertFalse(stages.readBusy)
+        stages.startRead()
+        assertEquals("c", stages.readDone("c"))
+    }
+
+    @Test
     fun downscalesTheLongSideTo1280OrLess() {
         assertEquals(1, LiveRules.downscaleFactor(960, 720))
         assertEquals(1, LiveRules.downscaleFactor(1280, 960))
@@ -67,8 +115,8 @@ class LiveRulesTest {
 
     @Test
     fun readoutShowsTheRateAndStageTimes() {
-        assertEquals("2.5/s · det 120 · rec 85 · tr 40 ms", LiveRules.readout(400, StageTimings(120u, 85u, 40u)))
-        assertEquals("–/s · det 0 · rec 0 · tr 0 ms", LiveRules.readout(null, noTimings))
+        assertEquals("fp16 · 2.5/s · det 120 · rec 85 · tr 40 ms", LiveRules.readout(400, StageTimings(120u, 85u, 40u, "fp16")))
+        assertEquals("fp32 · –/s · det 0 · rec 0 · tr 0 ms", LiveRules.readout(null, noTimings))
     }
 
     @Test

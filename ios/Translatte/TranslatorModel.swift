@@ -38,6 +38,7 @@ final class TranslatorModel: ObservableObject {
     private let usesHostModels: Bool
     private var engine: Engine?
     private let worker = DispatchQueue(label: "translatte.engine", qos: .userInitiated)
+    private let liveTranslateQueue = DispatchQueue(label: "translatte.live-translate", qos: .userInitiated)
     private var settingLanguages = false
     /// Only touched on `worker`.
     private nonisolated(unsafe) var modelsLoaded = false
@@ -199,14 +200,14 @@ final class TranslatorModel: ObservableObject {
         phase = .done
     }
 
-    /// Translates one live camera frame from the current source language on the worker queue.
-    func translateFrame(_ frame: LiveFrame) async throws -> TranslationResult {
+    /// Reads one live camera frame (OCR, untranslated) from the current source language on the worker queue.
+    func readFrame(_ frame: LiveFrame) async throws -> TranslationResult {
         guard let engine else { throw AppError(errorDescription: "The engine isn't ready") }
         let source = sourceCode
         do {
             let result = try await onWorker { [self] in
                 try checkMemory()
-                let output = try engine.translateFrame(
+                let output = try engine.ocrFrame(
                     rgba: frame.rgba, width: UInt32(frame.width), height: UInt32(frame.height),
                     rotationDegrees: UInt32(frame.rotation), source: source
                 )
@@ -218,6 +219,16 @@ final class TranslatorModel: ObservableObject {
         } catch let error as AppError {
             if notice != error.localizedDescription { notice = error.localizedDescription }
             throw error
+        }
+    }
+
+    /// Translates the regions `readFrame` read from their source language, on its own queue while the worker reads the next frame.
+    func translateRegions(_ read: TranslationResult) async throws -> TranslationResult {
+        guard let engine else { throw AppError(errorDescription: "The engine isn't ready") }
+        return try await withCheckedThrowingContinuation { continuation in
+            liveTranslateQueue.async {
+                continuation.resume(with: Result { try engine.translateRegions(frame: read) })
+            }
         }
     }
 

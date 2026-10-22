@@ -14,14 +14,15 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uniffi.translatte_ffi.Engine
 import uniffi.translatte_ffi.configureDownloads
 import java.io.File
+import java.util.concurrent.Executors
 import kotlin.time.Duration.Companion.minutes
 
 class TranslatteApp : Application() {
@@ -32,9 +33,15 @@ class TranslatteApp : Application() {
         Engine(modelsDir.path, manifest)
     }
 
-    /** Serializes calls that load, use or free models, so the engine never runs two at once. */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val engineDispatcher = Dispatchers.IO.limitedParallelism(1)
+    /**
+     * Serializes calls that load, use or free models, so the engine never runs two at once. Always the
+     * same thread: OCR's OpenMP runtime keeps a thread team per calling thread, so each new caller
+     * would start (and keep) another team.
+     */
+    val engineDispatcher = singleThread("translatte-engine")
+
+    /** Translates live frames while [engineDispatcher] reads the next one (see `LiveTranslator`). */
+    val liveTranslateDispatcher = singleThread("translatte-live-translate")
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var releaseJob: Job? = null
 
@@ -105,6 +112,9 @@ class TranslatteApp : Application() {
 
     companion object {
         const val DOWNLOAD_CHANNEL = "downloads"
+
+        private fun singleThread(name: String) =
+            Executors.newSingleThreadExecutor { Thread(it, name).apply { isDaemon = true } }.asCoroutineDispatcher()
         private const val TAG = "translatte"
         private val RELEASE_AFTER = 2.minutes
     }

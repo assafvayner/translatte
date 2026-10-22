@@ -5,7 +5,8 @@
 """Generate models/manifest.json from the pinned upstream repos in REVISIONS.
 
 Sizes of upstream files come from Hub metadata; derived files (rec-*/dict.txt) are
-computed from the pinned inference.yml. Models are downloaded by `translatte fetch`, which reads
+computed from the pinned inference.yml. The OCR models run on NCNN files converted from the
+PaddlePaddle ONNX files by scripts/convert_ocr_ncnn.py and published in NCNN_REPO. Models are downloaded by `translatte fetch`, which reads
 `source`/`source_path`/`derive` from the manifest and fetches straight from these repos.
 """
 
@@ -17,6 +18,9 @@ import yaml
 from huggingface_hub import HfApi, hf_hub_download
 
 DET_REPO = "PaddlePaddle/PP-OCRv5_mobile_det_onnx"
+# NCNN conversions of the OCR models: <model id>/inference.ncnn.{param,bin}.
+NCNN_REPO = "assafvayner/translatte-ocr-ncnn"
+NCNN_FILES = ["inference.ncnn.param", "inference.ncnn.bin"]
 # Mozilla translations models (MPL-2.0), mirrored unmodified by scripts/mirror_pair_models.py.
 PAIR_REPO = "assafvayner/translatte-pair-models"
 
@@ -35,6 +39,7 @@ SCRIPT_PACKS = {
 REVISIONS = {
     "PaddlePaddle/PP-OCRv5_mobile_det_onnx": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
     PAIR_REPO: "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f",
+    NCNN_REPO: "cbb0b8d2265d44c08e0387ae637d612695afb5d8",
     "PaddlePaddle/PP-OCRv5_mobile_rec_onnx": "ed152b8b495f84de93cda5709d768548a9127622",
     "PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx": "89d3a50e2c27e2e7cceeab0e944c25c807d5db4f",
     "PaddlePaddle/eslav_PP-OCRv5_mobile_rec_onnx": "9a32171fc5718746875e1a261818884517975013",
@@ -116,6 +121,12 @@ def paddle_dict(yml_text: str) -> bytes:
     return ("\n".join(chars) + "\n").encode("utf-8")
 
 
+def ncnn_entries(model_id: str) -> list:
+    """The NCNN files of an OCR model, which come from NCNN_REPO rather than the model's repo."""
+    return [{**upstream_entry(NCNN_REPO, f"{model_id}/{name}", f"{model_id}/{name}"), "source": source(NCNN_REPO)}
+            for name in NCNN_FILES]
+
+
 def dict_entry(repo: str, rel: str) -> dict:
     yml = Path(hf_hub_download(repo, "inference.yml", revision=REVISIONS[repo]))
     data = paddle_dict(yml.read_text(encoding="utf-8"))
@@ -145,12 +156,11 @@ def main() -> None:
 
     models = [
         {"id": "det", "kind": "core", "display_name": "Text detector", "source": source(DET_REPO),
-         "files": [upstream_entry(DET_REPO, "inference.onnx", "det/inference.onnx")]},
+         "files": ncnn_entries("det")},
     ]
     for pack, (repo, display) in SCRIPT_PACKS.items():
         models.append({"id": pack, "kind": "script_pack", "display_name": display, "source": source(repo),
-                       "files": [upstream_entry(repo, "inference.onnx", f"{pack}/inference.onnx"),
-                                 dict_entry(repo, f"{pack}/dict.txt")]})
+                       "files": [*ncnn_entries(pack), dict_entry(repo, f"{pack}/dict.txt")]})
     seen = set()
     for _, name, _, directory, _, _ in LANGUAGES:
         if directory not in seen:

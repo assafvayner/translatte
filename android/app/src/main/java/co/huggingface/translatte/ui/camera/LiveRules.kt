@@ -10,6 +10,60 @@ import kotlin.math.min
 /** Places an upright frame of image pixels over the preview: view = image * scale + (left, top). */
 data class FillTransform(val scale: Float, val left: Float, val top: Float)
 
+/**
+ * The two stages of live translation, the same as iOS's `LiveStages`: reading a frame (OCR) and
+ * translating what was read, each with at most one frame. A frame read while the translator is
+ * busy waits for it; no new frame is read while one waits, so none goes stale. Not thread-safe.
+ */
+class LiveStages<T> {
+    var reading = false
+        private set
+    var translating = false
+        private set
+    private var waiting: T? = null
+
+    /** Whether a new frame can't be read yet (pass as `busy` to [LiveRules.shouldTake]). */
+    val readBusy: Boolean get() = reading || waiting != null
+
+    fun startRead() {
+        reading = true
+    }
+
+    /** A frame was read: returns it to translate now, or null when it waits for the translator. */
+    fun readDone(item: T): T? {
+        reading = false
+        if (translating) {
+            waiting = item
+            return null
+        }
+        translating = true
+        return item
+    }
+
+    fun readFailed() {
+        reading = false
+    }
+
+    /** A translation finished or failed: returns the waiting frame to translate next, if any. */
+    fun translateDone(): T? {
+        val next = waiting
+        waiting = null
+        translating = next != null
+        return next
+    }
+
+    /** A translation was cancelled: drops the waiting frame too, which no one is left to translate. */
+    fun translateCancelled() {
+        waiting = null
+        translating = false
+    }
+
+    /** Drops the waiting frame; frames in a stage finish and are ignored by their caller. */
+    fun reset() {
+        waiting = null
+    }
+}
+
 /** Live translation rules, the same as iOS's `LiveRules`; keep the two in step. */
 object LiveRules {
     /** Frames reach the engine at most this large on their long side. */
@@ -26,6 +80,9 @@ object LiveRules {
 
     /** How long a tracked box takes to slide to its new place. */
     const val MOVE_MS = 150
+
+    /** How often stale boxes are pruned while updates stall. */
+    const val PRUNE_INTERVAL_MS = 100L
 
     fun isActive(enabled: Boolean, sourceInstalled: Boolean): Boolean = enabled && sourceInstalled
 
@@ -57,10 +114,10 @@ object LiveRules {
     fun snapUsesLive(result: TranslationResult?): Boolean =
         result != null && result.translationError == null && result.regions.any { it.translatedText != null }
 
-    /** Debug readout, e.g. "2.5/s · det 120 · rec 85 · tr 40 ms"; [intervalMs] is the time since the previous update. */
+    /** Debug readout, e.g. "fp16 · 2.5/s · det 120 · rec 85 · tr 40 ms"; [intervalMs] is the time since the previous update. */
     fun readout(intervalMs: Long?, timings: StageTimings): String {
         val rate = if (intervalMs == null || intervalMs <= 0) "–" else String.format(Locale.US, "%.1f", 1000.0 / intervalMs)
-        return "$rate/s · det ${timings.detectMs} · rec ${timings.recognizeMs} · tr ${timings.translateMs} ms"
+        return "${timings.precision} · $rate/s · det ${timings.detectMs} · rec ${timings.recognizeMs} · tr ${timings.translateMs} ms"
     }
 
     /** Scales an image to cover the view and centers it, cropping the overflow, as the camera preview does. */

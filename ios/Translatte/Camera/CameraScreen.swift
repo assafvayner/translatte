@@ -79,8 +79,12 @@ struct CameraScreen: View {
         }
         .onChange(of: model.sourceCode) { live.reset() }
         .task(id: liveActive) {
-            guard liveActive, let mock = camera.mockImage else { return }
-            await live.runMock(mock)
+            guard liveActive else { return }
+            if let replay = camera.replay {
+                await live.runReplay(replay)
+            } else if let mock = camera.mockImage {
+                await live.runMock(mock)
+            }
         }
         .sheet(isPresented: $pickingLanguages) {
             LanguagePickerSheet().environmentObject(model)
@@ -88,7 +92,11 @@ struct CameraScreen: View {
     }
 
     @ViewBuilder private var viewfinder: some View {
-        if let mock = camera.mockImage {
+        if let replay = camera.replay {
+            ReplayPreview(player: replay.player)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+        } else if let mock = camera.mockImage {
             Color.clear
                 .overlay { Image(uiImage: mock).resizable().scaledToFill() }
                 .clipped()

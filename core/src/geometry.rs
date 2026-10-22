@@ -41,7 +41,34 @@ impl BBox {
             y1: self.y1.max(o.y1),
         }
     }
+
+    /// Intersection over union; 0 when either box is empty.
+    pub fn iou(&self, o: &BBox) -> f32 {
+        let iw = (self.x1.min(o.x1) - self.x0.max(o.x0)).max(0.0);
+        let ih = (self.y1.min(o.y1) - self.y0.max(o.y0)).max(0.0);
+        let inter = iw * ih;
+        let union = self.width() * self.height() + o.width() * o.height() - inter;
+        if union > 0.0 {
+            inter / union
+        } else {
+            0.0
+        }
+    }
 }
+
+/// Which way a text line reads in the image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Direction {
+    #[default]
+    Horizontal,
+    /// Reads downward: CJK columns, or Latin rotated 90° clockwise.
+    TopToBottom,
+    /// Reads upward: Latin rotated 90° counter-clockwise.
+    BottomToTop,
+}
+
+/// Crops at least this much taller than wide are read as vertical text, as in PaddleOCR.
+pub const TALL_RATIO: f32 = 1.5;
 
 /// Corners in order: top-left, top-right, bottom-right, bottom-left.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -85,6 +112,37 @@ impl Quad {
     pub fn angle(&self) -> f32 {
         let [tl, tr, _, _] = self.0;
         (tr.y - tl.y).atan2(tr.x - tl.x)
+    }
+
+    pub fn is_tall(&self) -> bool {
+        self.height() >= TALL_RATIO * self.width()
+    }
+
+    /// Reorders the corners so TL→TR runs along `direction`'s reading direction.
+    pub fn turned(&self, direction: Direction) -> Quad {
+        let [tl, tr, br, bl] = self.0;
+        match direction {
+            Direction::Horizontal => *self,
+            Direction::TopToBottom => Quad([tr, br, bl, tl]),
+            Direction::BottomToTop => Quad([bl, tl, tr, br]),
+        }
+    }
+
+    /// Maps into a frame where `direction`'s reading direction is +x and following lines are +y.
+    pub fn to_reading_frame(&self, direction: Direction) -> Quad {
+        Quad(self.0.map(|p| match direction {
+            Direction::Horizontal => p,
+            Direction::TopToBottom => Pt::new(p.y, -p.x),
+            Direction::BottomToTop => Pt::new(-p.y, p.x),
+        }))
+    }
+
+    pub fn from_reading_frame(&self, direction: Direction) -> Quad {
+        Quad(self.0.map(|p| match direction {
+            Direction::Horizontal => p,
+            Direction::TopToBottom => Pt::new(-p.y, p.x),
+            Direction::BottomToTop => Pt::new(p.y, -p.x),
+        }))
     }
 
     pub fn bbox(&self) -> BBox {
@@ -134,6 +192,27 @@ mod tests {
 
     fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Quad {
         Quad::from_bbox(BBox { x0, y0, x1, y1 })
+    }
+
+    #[test]
+    fn iou_of_boxes() {
+        let a = BBox {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 10.0,
+            y1: 10.0,
+        };
+        let half = BBox { x0: 5.0, ..a };
+        let apart = BBox {
+            x0: 20.0,
+            x1: 30.0,
+            ..a
+        };
+        let empty = BBox { x1: 0.0, ..a };
+        assert_eq!(a.iou(&a), 1.0);
+        assert_eq!(a.iou(&half), 0.5);
+        assert_eq!(a.iou(&apart), 0.0);
+        assert_eq!(empty.iou(&empty), 0.0);
     }
 
     #[test]
@@ -255,5 +334,49 @@ mod tests {
                 y1: 5.0
             }
         );
+    }
+
+    #[test]
+    fn turning_a_tall_quad_puts_the_reading_edge_on_top() {
+        let tall = rect(10.0, 10.0, 30.0, 110.0);
+        let down = tall.turned(Direction::TopToBottom);
+        assert_eq!(
+            down.0,
+            [
+                Pt::new(30.0, 10.0),
+                Pt::new(30.0, 110.0),
+                Pt::new(10.0, 110.0),
+                Pt::new(10.0, 10.0)
+            ]
+        );
+        assert!((down.angle() - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!((down.width(), down.height()), (100.0, 20.0));
+
+        let up = tall.turned(Direction::BottomToTop);
+        assert_eq!(up.0[0], Pt::new(10.0, 110.0));
+        assert!((up.angle() + std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(up.bbox(), tall.bbox());
+
+        assert_eq!(tall.turned(Direction::Horizontal), tall);
+    }
+
+    #[test]
+    fn only_clearly_tall_quads_are_vertical_candidates() {
+        assert!(rect(0.0, 0.0, 20.0, 30.0).is_tall());
+        assert!(!rect(0.0, 0.0, 20.0, 29.0).is_tall());
+        assert!(!rect(0.0, 0.0, 100.0, 20.0).is_tall());
+    }
+
+    #[test]
+    fn reading_frame_round_trips_and_levels_turned_quads() {
+        let tall = rect(10.0, 10.0, 30.0, 110.0);
+        for d in [
+            Direction::Horizontal,
+            Direction::TopToBottom,
+            Direction::BottomToTop,
+        ] {
+            assert_eq!(tall.to_reading_frame(d).from_reading_frame(d), tall);
+            assert!(tall.turned(d).to_reading_frame(d).angle().abs() < 1e-6);
+        }
     }
 }

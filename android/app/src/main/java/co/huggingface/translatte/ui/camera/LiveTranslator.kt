@@ -14,24 +14,33 @@ import co.huggingface.translatte.Images
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.translatte_ffi.TranslationResult
 
 private const val TAG = "translatte"
 
-/** One camera frame as the engine takes it: tightly packed RGBA rows, before rotating upright. */
-class LiveFrame(val rgba: ByteArray, val width: Int, val height: Int, val rotation: Int)
+/**
+ * One camera frame as the engine takes it: tightly packed RGBA rows, before rotating upright.
+ * [ptsMs] is a replayed video frame's position.
+ */
+class LiveFrame(val rgba: ByteArray, val width: Int, val height: Int, val rotation: Int, val ptsMs: Long? = null)
+
+/** A frame [LiveTranslator] read, waiting to be translated; [generation] drops it after a reset. */
+private class ReadFrame(val frame: LiveFrame, val result: TranslationResult, val generation: Int)
 
 /**
- * Live translation of camera frames, mirroring iOS's `LiveTranslator`: at most one frame in
- * flight (the newest frame after it finishes is next), paced by [LiveRules], with results
- * steadied by [LiveOverlayTracker]. [scope] is a main-thread scope that publishes results;
- * [translate] runs a frame through the engine; [hot] reports a serious thermal state.
+ * Live translation of camera frames, mirroring iOS's `LiveTranslator`: two [LiveStages], so one
+ * frame is translated while the next is read, paced by [LiveRules], with results steadied by
+ * [LiveOverlayTracker]. [scope] is a main-thread scope that publishes results; [read] runs OCR on
+ * a frame and [translate] translates what it read; [hot] reports a serious thermal state.
  */
 class LiveTranslator(
     private val scope: CoroutineScope,
-    private val translate: suspend (LiveFrame) -> TranslationResult,
+    private val read: suspend (LiveFrame) -> TranslationResult,
+    private val translate: suspend (TranslationResult) -> TranslationResult,
     private val hot: () -> Boolean,
 ) : ImageAnalysis.Analyzer {
     var overlay by mutableStateOf<List<TrackedRegion>>(emptyList())
@@ -47,21 +56,32 @@ class LiveTranslator(
     var enabled = false
 
     private val lock = Any()
-    private var busy = false
+    private val stages = LiveStages<ReadFrame>()
     private var lastStartMs: Long? = null
     private val tracker = LiveOverlayTracker()
     @Volatile
     private var latest: Pair<LiveFrame, TranslationResult>? = null
     private var failures = 0
     private var lastFailMs: Long? = null
-    private val buffers = arrayOfNulls<ByteArray>(2)
+    /** Frame buffers, reused once neither [latest] nor the frame being translated holds them; both are set under [lock]. */
+    private val buffers = arrayOfNulls<ByteArray>(3)
+    @Volatile
+    private var translating: LiveFrame? = null
     private var lastDoneMs: Long? = null
     private var generation = 0
+    private var pruner: Job? = null
+    private val events = if (BuildConfig.DEBUG) LiveEventLog { Log.i(TAG, "liveev $it") } else null
 
     /** Clears the overlay and drops results still in flight (source change, live turned off). Main thread. */
     fun reset() {
         generation++
-        synchronized(lock) { failures = 0 }
+        pruner?.cancel()
+        pruner = null
+        synchronized(lock) {
+            failures = 0
+            stages.reset()
+        }
+        events?.reset(SystemClock.elapsedRealtime(), overlay)
         tracker.reset()
         overlay = emptyList()
         latest = null
@@ -84,7 +104,8 @@ class LiveTranslator(
             val plane = it.planes[0]
             val crop = it.cropRect
             val factor = LiveRules.downscaleFactor(crop.width(), crop.height())
-            val free = if (latest?.first?.rgba === buffers[0]) 1 else 0
+            val held = synchronized(lock) { listOf(latest?.first?.rgba, translating?.rgba) }
+            val free = buffers.indices.first { i -> held.none { it != null && it === buffers[i] } }
             val rgba = LiveRules.packRgba(
                 plane.buffer, crop.width(), crop.height(), plane.rowStride, factor, swapRedBlue = false,
                 left = crop.left, top = crop.top, reuse = buffers[free],
@@ -95,46 +116,105 @@ class LiveTranslator(
         }
     }
 
+    /** A replayed video frame: [grab] makes the frame only when one is let through. Main thread. */
+    fun offer(grab: () -> LiveFrame?) {
+        if (!enabled || !take()) return
+        val frame = grab() ?: return synchronized(lock) { stages.readFailed() }
+        scope.launch { run(frame) }
+    }
+
+    /** Debug builds: event times count from the start of a replayed video, now at [positionMs]. */
+    fun markStart(positionMs: Long) {
+        events?.start(SystemClock.elapsedRealtime() - positionMs)
+    }
+
     private fun take(): Boolean = synchronized(lock) {
         val now = SystemClock.elapsedRealtime()
-        if (busy || !LiveRules.shouldTake(busy, hot(), now, lastStartMs, failures, lastFailMs)) {
+        if (!LiveRules.shouldTake(stages.readBusy, hot(), now, lastStartMs, failures, lastFailMs)) {
             false
         } else {
-            busy = true
+            stages.startRead()
             lastStartMs = now
             true
         }
     }
 
+    /** Reads [frame], then translates it now or once the translation in flight is done. */
     private suspend fun run(frame: LiveFrame) {
         val gen = generation
-        try {
-            val result = translate(frame)
-            synchronized(lock) { failures = 0 }
-            if (gen == generation) publish(frame, result)
+        val result = try {
+            read(frame)
         } catch (e: CancellationException) {
+            synchronized(lock) { stages.readFailed() }
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "live frame failed", e)
-            synchronized(lock) {
-                failures++
-                lastFailMs = SystemClock.elapsedRealtime()
+            fail(e)
+            synchronized(lock) { stages.readFailed() }
+            return
+        }
+        val next = synchronized(lock) {
+            stages.readDone(ReadFrame(frame, result, gen))?.also { translating = it.frame }
+        } ?: return
+        translateFrom(next)
+    }
+
+    /** Translates [first], then each frame read meanwhile, until none waits; skips frames read before a reset. */
+    private suspend fun translateFrom(first: ReadFrame) {
+        var item: ReadFrame? = first
+        while (item != null) {
+            if (item.generation == generation) {
+                try {
+                    val result = translate(item.result)
+                    synchronized(lock) { failures = 0 }
+                    if (item.generation == generation) publish(item.frame, result)
+                } catch (e: CancellationException) {
+                    synchronized(lock) {
+                        stages.translateCancelled()
+                        translating = null
+                    }
+                    throw e
+                } catch (e: Exception) {
+                    fail(e)
+                }
             }
-        } finally {
-            synchronized(lock) { busy = false }
+            item = synchronized(lock) { stages.translateDone().also { translating = it?.frame } }
+        }
+    }
+
+    private fun fail(e: Exception) {
+        Log.w(TAG, "live frame failed", e)
+        synchronized(lock) {
+            failures++
+            lastFailMs = SystemClock.elapsedRealtime()
         }
     }
 
     private fun publish(frame: LiveFrame, result: TranslationResult) {
         val now = SystemClock.elapsedRealtime()
-        overlay = tracker.update(result.regions)
+        val prev = overlay
+        overlay = tracker.update(result.regions, now)
+        if (overlay.isNotEmpty() && pruner == null) pruner = scope.launch { prune() }
         imageSize = IntSize(result.imageWidth.toInt(), result.imageHeight.toInt())
-        latest = frame to result
+        synchronized(lock) { latest = frame to result }
         if (BuildConfig.DEBUG) {
             val line = LiveRules.readout(lastDoneMs?.let { now - it }, result.timings)
             readout = line
             Log.i(TAG, "live $line regions ${result.regions.size}")
+            events?.update(now, prev, overlay, result, lastDoneMs?.let { now - it }, frame.ptsMs)
         }
         lastDoneMs = now
+    }
+
+    private suspend fun prune() {
+        while (overlay.isNotEmpty()) {
+            delay(LiveRules.PRUNE_INTERVAL_MS)
+            val now = SystemClock.elapsedRealtime()
+            val kept = tracker.prune(now)
+            if (kept.size != overlay.size) {
+                events?.prune(now, overlay, kept)
+                overlay = kept
+            }
+        }
+        pruner = null
     }
 }

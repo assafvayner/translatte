@@ -34,15 +34,11 @@ pub enum TranslatteError {
     Download(String),
     #[error("download cancelled")]
     Cancelled,
+    #[error("the models were unloaded")]
+    Unloaded,
 }
 
 pub type Result<T> = std::result::Result<T, TranslatteError>;
-
-impl From<ort::Error> for TranslatteError {
-    fn from(e: ort::Error) -> Self {
-        Self::Inference(e.to_string())
-    }
-}
 
 impl From<image::ImageError> for TranslatteError {
     fn from(e: image::ImageError) -> Self {

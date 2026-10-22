@@ -2,6 +2,7 @@ use crate::manifest::{Language, DETECTOR_ID};
 use crate::model_store::ModelStore;
 use crate::ocr::detector::Detector;
 use crate::ocr::recognizer::Recognizer;
+use crate::ocr::{load_detector, load_recognizer, Precision};
 use crate::pipeline::Pipeline;
 use crate::translate::cache::CachingTranslator;
 use crate::translate::pair::{PairTranslator, StoreLoader};
@@ -10,14 +11,15 @@ use crate::{Result, TranslatteError};
 pub type LoadedPipeline =
     Pipeline<Detector, Recognizer, CachingTranslator<PairTranslator<StoreLoader>>>;
 
-/// Loads the detector and the recognizer for `src`'s script pack and, when `translate` is set,
-/// a translator that loads `src`'s pair model on first use (or `warm`) and swaps it when another
-/// language with the same script pack is translated, behind a cache of recent translations (see
-/// [`CachingTranslator`]).
+/// Loads the detector and the recognizer for `src`'s script pack, fp32 for photos and fp16 for
+/// live frames, loaded by the first live frame (or `precision` for both, loaded now), and, when `translate` is set, a translator that loads
+/// `src`'s pair model on first use (or `warm`) and swaps it when another language with the same
+/// script pack is translated, behind a cache of recent translations (see [`CachingTranslator`]).
 pub fn load_pipeline(
     store: &ModelStore,
     src: &Language,
     translate: bool,
+    precision: Option<Precision>,
 ) -> Result<LoadedPipeline> {
     let Some(pack) = &src.script_pack else {
         return Err(TranslatteError::NoScriptPack(src.code.clone()));
@@ -31,14 +33,26 @@ pub fn load_pipeline(
             .ok_or_else(|| TranslatteError::NoPairModel(src.code.clone()))?;
         store.require_installed(pair)?;
     }
-    let detector = Detector::load(&store.model_file(DETECTOR_ID, "inference.onnx")?)?;
-    let recognizer = Recognizer::load(
-        &store.model_file(pack, "inference.onnx")?,
-        &store.model_file(pack, "dict.txt")?,
-    )?;
+    let photo = precision.unwrap_or(Precision::Fp32);
     let translator = translate
         .then(|| CachingTranslator::new(PairTranslator::new(StoreLoader::new(store.clone()))));
-    Ok(Pipeline::new(detector, recognizer, translator).with_script_pack(pack.as_str()))
+    let pipeline = Pipeline::new(
+        load_detector(store, photo)?,
+        load_recognizer(store, pack, photo)?,
+        translator,
+    )
+    .with_script_pack(pack.as_str())
+    .with_precision(photo);
+    if precision.is_some() {
+        return Ok(pipeline);
+    }
+    let (store, pack) = (store.clone(), pack.clone());
+    Ok(pipeline.with_live_ocr(Precision::Fp16, move || {
+        Ok((
+            load_detector(&store, Precision::Fp16)?,
+            load_recognizer(&store, &pack, Precision::Fp16)?,
+        ))
+    }))
 }
 
 #[cfg(test)]
@@ -69,7 +83,7 @@ mod tests {
         let (_d, s) = store();
         let en = s.manifest().language(TARGET_LANGUAGE).unwrap();
         assert!(matches!(
-            load_pipeline(&s, en, false),
+            load_pipeline(&s, en, false, None),
             Err(TranslatteError::NoScriptPack(c)) if c == "en"
         ));
     }
@@ -79,13 +93,13 @@ mod tests {
         let (_d, s) = store();
         let fr = s.manifest().language("fr").unwrap();
         assert!(matches!(
-            load_pipeline(&s, fr, true),
+            load_pipeline(&s, fr, true, None),
             Err(TranslatteError::ModelNotInstalled(id)) if id == DETECTOR_ID
         ));
         install(&s, "det");
         install(&s, "rec-latin");
         assert!(matches!(
-            load_pipeline(&s, fr, true),
+            load_pipeline(&s, fr, true, None),
             Err(TranslatteError::ModelNotInstalled(id)) if id == "pair-fr-en"
         ));
     }

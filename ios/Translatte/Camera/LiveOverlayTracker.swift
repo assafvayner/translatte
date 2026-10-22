@@ -5,25 +5,31 @@ struct TrackedRegion: Equatable {
     let id: Int
     let region: Region
     let from: [Point]
-    let missed: Int
+    let missedSinceMs: Int64?
 }
 
 /// Keeps the live overlay steady between updates, with the same rules as Android's `LiveOverlayTracker`.
-/// Each translated new region takes the not-yet-taken previous region it overlaps most (IoU at least
-/// `minIoU`). With the same source text, it keeps that region's identity and translation and slides
-/// from the old box. With different text, it replaces it. Previous regions nothing took stay for
-/// `maxMissed` updates.
+/// Each new region takes the not-yet-taken previous region it overlaps most (IoU at least `minIoU`).
+/// With the same source text, it keeps that region's identity and translation and slides from the old
+/// box, even when its own translation is missing; with different text, a translated one replaces it
+/// and an untranslated one is skipped. Previous regions nothing took stay, however long updates
+/// take, until `maxUnseenMs` after the first update that missed them, unless a new region overlaps them. An update with no regions
+/// clears everything.
 struct LiveOverlayTracker {
     static let minIoU: Float = 0.3
-    static let maxMissed = 2
+    static let maxUnseenMs: Int64 = 500
 
     private(set) var regions: [TrackedRegion] = []
     private var nextId = 0
 
-    mutating func update(_ incoming: [Region]) -> [TrackedRegion] {
+    mutating func update(_ incoming: [Region], nowMs: Int64) -> [TrackedRegion] {
+        guard !incoming.isEmpty else {
+            regions = []
+            return regions
+        }
         var taken = Array(repeating: false, count: regions.count)
         var out: [TrackedRegion] = []
-        for r in incoming where r.translatedText != nil {
+        for r in incoming {
             var best = -1
             var bestIoU: Float = 0
             for (i, old) in regions.enumerated() {
@@ -33,26 +39,47 @@ struct LiveOverlayTracker {
                     bestIoU = v
                 }
             }
-            if best >= 0 { taken[best] = true }
             if best >= 0, regions[best].region.sourceText == r.sourceText {
+                taken[best] = true
                 let old = regions[best]
                 var kept = r
                 kept.translatedText = old.region.translatedText
-                out.append(TrackedRegion(id: old.id, region: kept, from: old.region.corners, missed: 0))
-            } else {
-                out.append(TrackedRegion(id: nextId, region: r, from: r.corners, missed: 0))
+                out.append(TrackedRegion(id: old.id, region: kept, from: old.region.corners, missedSinceMs: nil))
+            } else if r.translatedText != nil {
+                if best >= 0 { taken[best] = true }
+                out.append(TrackedRegion(id: nextId, region: r, from: r.corners, missedSinceMs: nil))
                 nextId += 1
             }
         }
-        for (i, old) in regions.enumerated() where !taken[i] && old.missed < Self.maxMissed {
-            out.append(TrackedRegion(id: old.id, region: old.region, from: old.region.corners, missed: old.missed + 1))
+        for (i, old) in regions.enumerated()
+        where !taken[i] && !incoming.contains(where: { Self.intersects(old.region.corners, $0.corners) }) {
+            let missedSince = old.missedSinceMs ?? nowMs
+            if nowMs - missedSince < Self.maxUnseenMs {
+                out.append(TrackedRegion(id: old.id, region: old.region, from: old.region.corners, missedSinceMs: missedSince))
+            }
         }
         regions = out
         return out
     }
 
+    /// Drops missed regions `maxUnseenMs` after the update that missed them; never drops on a lack of updates.
+    mutating func prune(nowMs: Int64) -> [TrackedRegion] {
+        let kept = regions.filter { $0.missedSinceMs.map { nowMs - $0 < Self.maxUnseenMs } ?? true }
+        if kept.count != regions.count { regions = kept }
+        return regions
+    }
+
     mutating func reset() {
         regions = []
+    }
+
+    /// Whether the two quads' axis-aligned bounds overlap by a positive area.
+    static func intersects(_ a: [Point], _ b: [Point]) -> Bool {
+        guard let ax0 = a.map(\.x).min(), let ax1 = a.map(\.x).max(),
+              let ay0 = a.map(\.y).min(), let ay1 = a.map(\.y).max(),
+              let bx0 = b.map(\.x).min(), let bx1 = b.map(\.x).max(),
+              let by0 = b.map(\.y).min(), let by1 = b.map(\.y).max() else { return false }
+        return min(ax1, bx1) > max(ax0, bx0) && min(ay1, by1) > max(ay0, by0)
     }
 
     /// Intersection over union of the two quads' axis-aligned bounds.

@@ -8,6 +8,8 @@ struct LiveFrame {
     let height: Int
     /// Clockwise degrees that turn the frame upright.
     let rotation: Int
+    /// A replayed video frame's position.
+    var ptsMs: Int64?
 
     init(rgba: Data, width: Int, height: Int, rotation: Int) {
         self.rgba = rgba
@@ -69,9 +71,16 @@ struct LiveFrame {
     }
 }
 
-/// Live translation of camera frames, mirroring Android's `LiveTranslator`: at most one frame in
-/// flight (the newest frame after it finishes is next), paced by `LiveRules`, with results steadied
-/// by `LiveOverlayTracker`.
+/// A frame `LiveTranslator` read, waiting to be translated; `generation` drops it after a reset.
+private struct ReadFrame {
+    let frame: LiveFrame
+    let result: TranslationResult
+    let generation: Int
+}
+
+/// Live translation of camera frames, mirroring Android's `LiveTranslator`: two `LiveStages`, so
+/// one frame is translated while the next is read, paced by `LiveRules`, with results steadied by
+/// `LiveOverlayTracker`. `read` runs OCR on a frame and `translate` translates what it read.
 @MainActor
 final class LiveTranslator: ObservableObject {
     @Published private(set) var overlay: [TrackedRegion] = []
@@ -79,15 +88,27 @@ final class LiveTranslator: ObservableObject {
     /// Debug builds: updates/s and stage times of the latest update.
     @Published private(set) var readout: String?
 
-    private let translate: (LiveFrame) async throws -> TranslationResult
+    private let read: (LiveFrame) async throws -> TranslationResult
+    private let translate: (TranslationResult) async throws -> TranslationResult
     private let gate = LiveGate()
     private var tracker = LiveOverlayTracker()
     private var latest: (frame: LiveFrame, result: TranslationResult)?
     private var lastDoneMs: Int64?
     private var generation = 0
+    private var pruner: Task<Void, Never>?
+    private let events: LiveEventLog?
 
-    init(translate: @escaping (LiveFrame) async throws -> TranslationResult) {
+    init(
+        read: @escaping (LiveFrame) async throws -> TranslationResult,
+        translate: @escaping (TranslationResult) async throws -> TranslationResult
+    ) {
+        self.read = read
         self.translate = translate
+        #if DEBUG
+        events = LiveEventLog(emit: LiveEventSink.write)
+        #else
+        events = nil
+        #endif
     }
 
     var enabled: Bool {
@@ -98,7 +119,10 @@ final class LiveTranslator: ObservableObject {
     /// Clears the overlay and drops results still in flight (source change, live turned off, leaving the camera).
     func reset() {
         generation += 1
-        gate.clearFailures()
+        pruner?.cancel()
+        pruner = nil
+        gate.reset()
+        events?.reset(nowMs: Self.nowMs(), prev: overlay)
         tracker.reset()
         overlay = []
         latest = nil
@@ -115,45 +139,88 @@ final class LiveTranslator: ObservableObject {
 
     /// Runs on the camera's frame queue for every frame; converts and translates only those `LiveRules` lets through.
     /// The UI is portrait-only, so back-camera buffers need a clockwise quarter turn.
-    nonisolated func offer(_ pixelBuffer: CVPixelBuffer) {
+    nonisolated func offer(_ pixelBuffer: CVPixelBuffer, rotation: Int = 90, ptsMs: Int64? = nil) {
         guard gate.tryTake(nowMs: Self.nowMs(), hot: ThermalMonitor.shared.hot) else { return }
-        guard let frame = LiveFrame(pixelBuffer: pixelBuffer, rotation: 90) else { return gate.finish(failed: true, nowMs: Self.nowMs()) }
+        guard var frame = LiveFrame(pixelBuffer: pixelBuffer, rotation: rotation) else { return gate.readFailed(nowMs: Self.nowMs()) }
+        frame.ptsMs = ptsMs
         Task { @MainActor in await self.run(frame) }
+    }
+
+    /// Debug builds: plays `replay` in place of the camera, offering its frames, until cancelled.
+    /// Event times count from the start of the video.
+    func runReplay(_ replay: LiveReplay) async {
+        await replay.play(
+            started: { [weak self] positionMs in self?.events?.start(nowMs: Self.nowMs() - positionMs) },
+            frame: { [weak self] buffer, rotation, ptsMs in self?.offer(buffer, rotation: rotation, ptsMs: ptsMs) }
+        )
     }
 
     /// The simulator has no camera: feeds the mock still as frames until cancelled.
     func runMock(_ image: UIImage) async {
         guard let frame = LiveFrame(image: image) else { return }
         while !Task.isCancelled {
-            if gate.tryTake(nowMs: Self.nowMs(), hot: ThermalMonitor.shared.hot) { await run(frame) }
+            if gate.tryTake(nowMs: Self.nowMs(), hot: ThermalMonitor.shared.hot) { Task { await run(frame) } }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
+    /// Reads `frame`, then translates it now or once the translation in flight is done.
     private func run(_ frame: LiveFrame) async {
         let run = generation
+        let result: TranslationResult
         do {
-            let result = try await translate(frame)
-            gate.finish(failed: false, nowMs: Self.nowMs())
-            guard run == generation else { return }
-            publish(frame, result)
+            result = try await read(frame)
         } catch {
-            gate.finish(failed: true, nowMs: Self.nowMs())
+            gate.readFailed(nowMs: Self.nowMs())
             NSLog("translatte: live frame failed: %@", "\(error)")
+            return
+        }
+        var next = gate.readDone(ReadFrame(frame: frame, result: result, generation: run))
+        while let item = next {
+            if item.generation != generation {
+                next = gate.translateDone()
+                continue
+            }
+            do {
+                let translated = try await translate(item.result)
+                gate.succeeded()
+                if item.generation == generation { publish(item.frame, translated) }
+            } catch {
+                gate.failed(nowMs: Self.nowMs())
+                NSLog("translatte: live frame failed: %@", "\(error)")
+            }
+            next = gate.translateDone()
         }
     }
 
     private func publish(_ frame: LiveFrame, _ result: TranslationResult) {
         let now = Self.nowMs()
-        overlay = tracker.update(result.regions)
+        let prev = overlay
+        overlay = tracker.update(result.regions, nowMs: now)
+        if !overlay.isEmpty, pruner == nil { pruner = Task { await self.prune() } }
         imageSize = CGSize(width: Int(result.imageWidth), height: Int(result.imageHeight))
         latest = (frame, result)
         #if DEBUG
         let line = LiveRules.readout(intervalMs: lastDoneMs.map { now - $0 }, timings: result.timings)
         readout = line
         NSLog("translatte: live %@ regions %d", line, result.regions.count)
+        events?.update(nowMs: now, prev: prev, next: overlay, result: result, intervalMs: lastDoneMs.map { now - $0 }, ptsMs: frame.ptsMs)
         #endif
         lastDoneMs = now
+    }
+
+    private func prune() async {
+        while !Task.isCancelled, !overlay.isEmpty {
+            try? await Task.sleep(nanoseconds: UInt64(LiveRules.pruneIntervalMs) * 1_000_000)
+            guard !Task.isCancelled else { return }
+            let now = Self.nowMs()
+            let kept = tracker.prune(nowMs: now)
+            if kept.count != overlay.count {
+                events?.prune(nowMs: now, prev: overlay, next: kept)
+                overlay = kept
+            }
+        }
+        pruner = nil
     }
 
     private nonisolated static func nowMs() -> Int64 {
@@ -161,11 +228,11 @@ final class LiveTranslator: ObservableObject {
     }
 }
 
-/// Pacing state shared by the camera's frame queue and the main actor.
+/// Pacing and stage state shared by the camera's frame queue and the main actor.
 private final class LiveGate: @unchecked Sendable {
     private let lock = NSLock()
     private var isEnabled = false
-    private var busy = false
+    private var stages = LiveStages<ReadFrame>()
     private var lastStartMs: Int64?
     private var failures = 0
     private var lastFailMs: Int64?
@@ -178,32 +245,46 @@ private final class LiveGate: @unchecked Sendable {
     func tryTake(nowMs: Int64, hot: Bool) -> Bool {
         lock.withLock {
             guard isEnabled, LiveRules.shouldTake(
-                busy: busy, hot: hot, nowMs: nowMs, lastStartMs: lastStartMs, failures: failures, lastFailMs: lastFailMs
+                busy: stages.readBusy, hot: hot, nowMs: nowMs, lastStartMs: lastStartMs, failures: failures, lastFailMs: lastFailMs
             ) else {
                 return false
             }
-            busy = true
+            stages.startRead()
             lastStartMs = nowMs
             return true
         }
     }
 
-    func finish(failed: Bool, nowMs: Int64) {
+    func readDone(_ item: ReadFrame) -> ReadFrame? {
+        lock.withLock { stages.readDone(item) }
+    }
+
+    func readFailed(nowMs: Int64) {
+        lock.withLock { stages.readFailed() }
+        failed(nowMs: nowMs)
+    }
+
+    func translateDone() -> ReadFrame? {
+        lock.withLock { stages.translateDone() }
+    }
+
+    func succeeded() {
+        lock.withLock { failures = 0 }
+    }
+
+    func failed(nowMs: Int64) {
         lock.withLock {
-            busy = false
-            if failed {
-                failures += 1
-                lastFailMs = nowMs
-            } else {
-                failures = 0
-            }
+            failures += 1
+            lastFailMs = nowMs
         }
     }
 
-    func clearFailures() {
+    /// Clears failures and drops a frame waiting to be translated.
+    func reset() {
         lock.withLock {
             failures = 0
             lastFailMs = nil
+            stages.reset()
         }
     }
 }

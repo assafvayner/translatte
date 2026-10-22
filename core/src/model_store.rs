@@ -19,6 +19,11 @@ pub enum InstallState {
 /// directories. Add an id here whenever the manifest drops a model.
 pub const RETIRED_MODEL_IDS: &[&str] = &["rec-el", "rec-cyrillic", "rec-en", "translator"];
 
+/// File names earlier manifests listed in models that are still shipped; [`ModelStore::prune`]
+/// deletes them from those models' directories unless the manifest lists them again. The OCR
+/// models' ONNX files went when they moved to NCNN.
+pub const RETIRED_FILE_NAMES: &[&str] = &["inference.onnx"];
+
 #[derive(Clone)]
 pub struct ModelStore {
     manifest: Manifest,
@@ -89,7 +94,7 @@ impl ModelStore {
             .models
             .iter()
             .find(|m| m.files.iter().any(|f| f.path == file.path))
-            .map(|m| &m.source);
+            .map(|m| m.file_source(file));
         let mut p = self.root.join(&file.path).into_os_string();
         p.push(format!(".{}.part", part_tag(source, file)));
         PathBuf::from(p)
@@ -97,7 +102,8 @@ impl ModelStore {
 
     /// Removes model data an app update left behind: directories of [`RETIRED_MODEL_IDS`] that the
     /// manifest no longer lists, installed files whose size no longer matches (a replaced model),
-    /// and partial downloads of other upstream files. Other directories in the root (e.g. a
+    /// [`RETIRED_FILE_NAMES`] in model directories, and partial downloads of other upstream files.
+    /// Other directories in the root (e.g. a
     /// model pushed by hand for comparisons) are left alone. Returns the removed paths. Must not
     /// run concurrently with a download.
     pub fn prune(&self) -> Result<Vec<PathBuf>> {
@@ -131,6 +137,7 @@ impl ModelStore {
                 Err(e) => return Err(e.into()),
             }
             keep.insert(self.part_path(f));
+            keep.insert(dest.clone());
             if let Some(dir) = dest.parent() {
                 model_dirs.insert(dir.to_path_buf());
             }
@@ -144,7 +151,11 @@ impl ModelStore {
             for entry in entries {
                 let path = entry?.path();
                 let is_part = path.extension().is_some_and(|e| e == "part");
-                if is_part && !keep.contains(&path) && path.is_file() {
+                let retired = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| RETIRED_FILE_NAMES.contains(&n));
+                if (is_part || retired) && !keep.contains(&path) && path.is_file() {
                     std::fs::remove_file(&path)?;
                     removed.push(path);
                 }
@@ -558,6 +569,23 @@ mod tests {
         assert!(s.root().join("translator-alt/model.gguf").exists());
         assert!(s.root().join("loose-file").exists());
         assert!(s.prune().unwrap().is_empty());
+    }
+
+    #[test]
+    fn prune_removes_retired_files_the_manifest_no_longer_lists() {
+        let json = SAMPLE.replace("rec-latin/inference.onnx", "rec-latin/inference.ncnn.param");
+        let dir = tempfile::tempdir().unwrap();
+        let s = ModelStore::new(Manifest::from_json(&json).unwrap(), dir.path().into());
+        write(&s, "rec-latin/inference.onnx", "abcdef");
+        write(&s, "rec-latin/inference.ncnn.param", "abc");
+        write(&s, "rec-latin/notes.txt", "x");
+        write(&s, "det/inference.onnx", "abc");
+        assert_eq!(
+            s.prune().unwrap(),
+            vec![s.root().join("rec-latin/inference.onnx")]
+        );
+        assert!(s.root().join("rec-latin/notes.txt").exists());
+        assert!(s.root().join("det/inference.onnx").exists());
     }
 
     #[test]

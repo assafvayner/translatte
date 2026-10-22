@@ -8,10 +8,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(feature = "download")]
 use translatte_core::download::Downloader;
 use translatte_core::frame::upright_rgb;
+use translatte_core::geometry::{Pt, Quad};
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest, ModelEntry, ModelKind};
 use translatte_core::model_store::{InstallState, ModelStore};
-use translatte_core::pipeline::{PipelineOutput, Stage};
+use translatte_core::pipeline::{PipelineOutput, Stage, TranslatedRegion};
 use translatte_core::TranslatteError;
 
 uniffi::setup_scaffolding!();
@@ -141,12 +142,38 @@ pub struct Region {
     pub angle: f32,
 }
 
-/// Milliseconds each pipeline stage took, for the live camera's debug readout.
-#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+impl Region {
+    fn to_core(&self) -> Result<TranslatedRegion, FfiError> {
+        let corners: [Point; 4] =
+            self.corners
+                .as_slice()
+                .try_into()
+                .map_err(|_| FfiError::Failed {
+                    reason: format!("a region has {} corners, expected 4", self.corners.len()),
+                })?;
+        Ok(TranslatedRegion {
+            quad: Quad(corners.map(|p| Pt { x: p.x, y: p.y })),
+            source_text: self.source_text.clone(),
+            translated_text: self.translated_text.clone(),
+            bg_rgb: [self.background.r, self.background.g, self.background.b],
+            fg_rgb: [self.foreground.r, self.foreground.g, self.foreground.b],
+            angle: self.angle,
+        })
+    }
+}
+
+/// Milliseconds each pipeline stage took and the precision OCR ran at (`fp32` for photos, `fp16`
+/// for live frames), for the live camera's debug readout.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StageTimings {
     pub detect_ms: u32,
     pub recognize_ms: u32,
     pub translate_ms: u32,
+    #[uniffi(default = "fp32")]
+    pub precision: String,
+    /// Blocks of a live frame that took an earlier frame's translation.
+    #[uniffi(default = 0)]
+    pub reused: u32,
 }
 
 impl From<translatte_core::pipeline::StageTimings> for StageTimings {
@@ -155,6 +182,8 @@ impl From<translatte_core::pipeline::StageTimings> for StageTimings {
             detect_ms: t.detect_ms,
             recognize_ms: t.recognize_ms,
             translate_ms: t.translate_ms,
+            precision: t.precision.name().into(),
+            reused: t.reused,
         }
     }
 }
@@ -166,10 +195,13 @@ pub struct TranslationResult {
     pub regions: Vec<Region>,
     pub translation_error: Option<String>,
     pub timings: StageTimings,
+    /// The language code the text was read as; `translate_regions` translates from it.
+    #[uniffi(default = "")]
+    pub source: String,
 }
 
 impl TranslationResult {
-    fn from_output(out: PipelineOutput, width: u32, height: u32) -> Self {
+    fn from_output(out: PipelineOutput, width: u32, height: u32, source: &str) -> Self {
         let regions = out
             .regions
             .into_iter()
@@ -188,6 +220,7 @@ impl TranslationResult {
             regions,
             translation_error: out.translation_error,
             timings: out.timings.into(),
+            source: source.to_string(),
         }
     }
 }
@@ -259,7 +292,7 @@ impl DownloadToken {
 struct Cached {
     script_pack: String,
     translate: bool,
-    pipeline: LoadedPipeline,
+    pipeline: Arc<LoadedPipeline>,
 }
 
 /// Entry point for native apps. Pipelines are cached per script pack, so switching between
@@ -286,8 +319,8 @@ impl Engine {
     }
 
     /// Deletes model files the manifest no longer describes (retired models such as the old
-    /// LLM translator, replaced files, partial downloads of other upstream files), so they don't keep taking space
-    /// after an app update. Returns how many files or directories were removed. Call it once after
+    /// LLM translator, the OCR models' ONNX files, replaced files, partial downloads of other
+    /// upstream files), so they don't keep taking space after an app update. Returns how many files or directories were removed. Call it once after
     /// creating the engine; it blocks, so call it off the main thread.
     pub fn prune_models(&self) -> Result<u32, FfiError> {
         // A download started meanwhile waits rather than racing the cleanup.
@@ -342,7 +375,7 @@ impl Engine {
 
     /// Deletes a language pack: its translation model, and its script pack unless another
     /// installed language reads with it. If that script is the one loaded, all loaded models are
-    /// freed first and this returns true. Fails while a download is running, which could otherwise
+    /// freed first (as `unload` frees them) and this returns true. Fails while a download is running, which could otherwise
     /// write the files again.
     pub fn delete_language(&self, code: String) -> Result<bool, FfiError> {
         #[cfg(feature = "download")]
@@ -361,7 +394,7 @@ impl Engine {
             .as_ref()
             .is_some_and(|c| Some(&c.script_pack) == language.script_pack.as_ref());
         if unloaded {
-            *cached = None;
+            drop_cached(&mut cached);
         }
         self.store.delete_language(&code)?;
         Ok(unloaded)
@@ -392,8 +425,7 @@ impl Engine {
     pub fn prepare(&self, source: String) -> Result<(), FfiError> {
         let src = self.store.manifest().language(&source)?;
         let tgt = self.store.target_language()?;
-        let mut cached = self.lock_cached();
-        Ok(self.pipeline(&mut cached, src, true)?.warm(src, tgt)?)
+        Ok(self.pipeline(src, true)?.warm(src, tgt)?)
     }
 
     /// Decodes a PNG or JPEG, runs OCR for `source` and, when `translate` is set, translates the
@@ -411,22 +443,22 @@ impl Engine {
         let tgt = self.store.target_language()?;
         let img = image::load_from_memory(&image)?.to_rgb8();
 
-        let mut cached = self.lock_cached();
-        let pipeline = self.pipeline(&mut cached, src, translate)?;
+        let pipeline = self.pipeline(src, translate)?;
         let out = pipeline.run(&img, src, tgt, &mut |s| report(&listener, s))?;
         Ok(TranslationResult::from_output(
             out,
             img.width(),
             img.height(),
+            &source,
         ))
     }
 
-    /// Runs the same pipeline as `translate_image` on a camera frame: tightly packed RGBA rows of
-    /// `width` x `height`, turned upright by rotating clockwise by `rotation_degrees` (0, 90, 180 or
-    /// 270). Region coordinates, `image_width` and `image_height` are in the upright frame. Always
-    /// translates; shares the pipeline and translation cache with `translate_image`. Blocking; call
-    /// it off the main thread.
-    pub fn translate_frame(
+    /// Reads the text of a camera frame without translating it (`translated_text` is `None`,
+    /// `translate_ms` 0): tightly packed RGBA rows of `width` x `height`, turned upright by rotating
+    /// clockwise by `rotation_degrees` (0, 90, 180 or 270). Region coordinates, `image_width` and
+    /// `image_height` are in the upright frame. Pass the result to `translate_regions`; that may run
+    /// on another thread while the next frame is read. Blocking; call it off the main thread.
+    pub fn ocr_frame(
         &self,
         rgba: Vec<u8>,
         width: u32,
@@ -435,22 +467,58 @@ impl Engine {
         source: String,
     ) -> Result<TranslationResult, FfiError> {
         let src = self.store.manifest().language(&source)?;
-        let tgt = self.store.target_language()?;
         let img = upright_rgb(rgba, width, height, rotation_degrees)?;
-
-        let mut cached = self.lock_cached();
-        let pipeline = self.pipeline(&mut cached, src, true)?;
-        let out = pipeline.run(&img, src, tgt, &mut |_| {})?;
+        let out = self.pipeline(src, true)?.read_frame(&img, src)?;
         Ok(TranslationResult::from_output(
             out,
             img.width(),
             img.height(),
+            &source,
         ))
     }
 
-    /// Frees loaded models (e.g. when the app is backgrounded).
+    /// Translates the regions `ocr_frame` read from the frame's `source`, reusing the last frames'
+    /// translations of blocks that barely changed, and fills in `translate_ms`. Never loads models:
+    /// unless the loaded pipeline translates from that source's script pack (e.g. after `unload`,
+    /// or once another source was picked), the regions come back untranslated. Blocking; call it
+    /// off the main thread.
+    pub fn translate_regions(
+        &self,
+        frame: TranslationResult,
+    ) -> Result<TranslationResult, FfiError> {
+        let src = self.store.manifest().language(&frame.source)?;
+        let tgt = self.store.target_language()?;
+        let regions = frame
+            .regions
+            .iter()
+            .map(Region::to_core)
+            .collect::<Result<Vec<_>, _>>()?;
+        let Some(pipeline) = self.cached_pipeline(src) else {
+            return Ok(frame);
+        };
+        let out = pipeline.translate_frame(
+            PipelineOutput {
+                regions,
+                translation_error: None,
+                timings: Default::default(),
+            },
+            src,
+            tgt,
+        );
+        let mut result = frame;
+        for (r, o) in result.regions.iter_mut().zip(out.regions) {
+            r.translated_text = o.translated_text;
+        }
+        result.translation_error = out.translation_error;
+        result.timings.translate_ms = out.timings.translate_ms;
+        result.timings.reused = out.timings.reused;
+        Ok(result)
+    }
+
+    /// Frees loaded models (e.g. when the app is backgrounded). Calls still running keep the
+    /// models they use until they finish, but load no more for live frames.
     pub fn unload(&self) {
-        *self.lock_cached() = None;
+        drop_cached(&mut self.lock_cached());
     }
 }
 
@@ -482,31 +550,48 @@ impl Engine {
     fn lock_cached(&self) -> MutexGuard<'_, Option<Cached>> {
         self.cached.lock().unwrap_or_else(|poisoned| {
             let mut cached = poisoned.into_inner();
-            *cached = None;
+            drop_cached(&mut cached);
             self.cached.clear_poison();
             cached
         })
     }
 
-    fn pipeline<'a>(
-        &self,
-        cached: &'a mut Option<Cached>,
-        src: &Language,
-        translate: bool,
-    ) -> Result<&'a mut LoadedPipeline, FfiError> {
+    /// The pipeline for `src`, loading it unless the cached one fits. Runs use it without holding
+    /// the cache lock, so a frame can be translated while the next one is read.
+    fn pipeline(&self, src: &Language, translate: bool) -> Result<Arc<LoadedPipeline>, FfiError> {
+        let mut cached = self.lock_cached();
         let reusable = cached.as_ref().is_some_and(|c| {
             Some(&c.script_pack) == src.script_pack.as_ref() && c.translate == translate
         });
         if !reusable {
-            *cached = None;
-            let pipeline = load_pipeline(&self.store, src, translate)?;
+            drop_cached(&mut cached);
+            let pipeline = load_pipeline(&self.store, src, translate, None)?;
             *cached = Some(Cached {
                 script_pack: src.script_pack.clone().unwrap_or_default(),
                 translate,
-                pipeline,
+                pipeline: Arc::new(pipeline),
             });
         }
-        Ok(&mut cached.as_mut().expect("pipeline loaded above").pipeline)
+        Ok(cached
+            .as_ref()
+            .expect("pipeline loaded above")
+            .pipeline
+            .clone())
+    }
+
+    /// The loaded pipeline if it translates from `src`'s script pack.
+    fn cached_pipeline(&self, src: &Language) -> Option<Arc<LoadedPipeline>> {
+        self.lock_cached()
+            .as_ref()
+            .filter(|c| c.translate && Some(&c.script_pack) == src.script_pack.as_ref())
+            .map(|c| c.pipeline.clone())
+    }
+}
+
+/// Empties the cache, retiring the pipeline so calls still using it load no more models.
+fn drop_cached(cached: &mut Option<Cached>) {
+    if let Some(c) = cached.take() {
+        c.pipeline.retire();
     }
 }
 
@@ -606,9 +691,12 @@ mod tests {
                 detect_ms: 1,
                 recognize_ms: 2,
                 translate_ms: 3,
+                reused: 4,
+                ..Default::default()
             },
         };
-        let r = TranslationResult::from_output(out, 10, 20);
+        let r = TranslationResult::from_output(out, 10, 20, "fr");
+        assert_eq!(r.source, "fr");
         assert_eq!((r.image_width, r.image_height), (10, 20));
         let region = &r.regions[0];
         assert_eq!(
@@ -628,7 +716,9 @@ mod tests {
             StageTimings {
                 detect_ms: 1,
                 recognize_ms: 2,
-                translate_ms: 3
+                translate_ms: 3,
+                precision: "fp32".into(),
+                reused: 4,
             }
         );
     }
@@ -638,21 +728,21 @@ mod tests {
         let dir = tempfile_dir().join("frames");
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         let err = engine
-            .translate_frame(vec![0; 3], 1, 1, 0, "fr".into())
+            .ocr_frame(vec![0; 3], 1, 1, 0, "fr".into())
             .unwrap_err();
         assert!(err.to_string().contains("expected 4"), "{err}");
         let err = engine
-            .translate_frame(vec![0; 4], 1, 1, 45, "fr".into())
+            .ocr_frame(vec![0; 4], 1, 1, 45, "fr".into())
             .unwrap_err();
         assert!(err.to_string().contains("rotation"), "{err}");
         let err = engine
-            .translate_frame(vec![0; 4], 1, 1, 0, "xx".into())
+            .ocr_frame(vec![0; 4], 1, 1, 0, "xx".into())
             .unwrap_err();
         assert!(err.to_string().contains("unknown language"), "{err}");
     }
 
     #[test]
-    fn translate_frame_matches_translate_image_with_real_models() {
+    fn live_frames_match_translate_image_with_real_models() {
         let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
             eprintln!("TRANSLATTE_MODELS not set; skipping");
             return;
@@ -669,20 +759,78 @@ mod tests {
             .translate_image(png, "fr".into(), true, None)
             .unwrap();
 
-        let frame = engine
-            .translate_frame(rgba.clone().into_raw(), w, h, 0, "fr".into())
+        let read = engine
+            .ocr_frame(rgba.clone().into_raw(), w, h, 0, "fr".into())
             .unwrap();
-        assert_eq!((frame.image_width, frame.image_height), (w, h));
+        assert_eq!((read.image_width, read.image_height), (w, h));
+        assert!(read.regions.iter().all(|r| r.translated_text.is_none()));
+        assert!(read.timings.detect_ms + read.timings.recognize_ms > 0);
+        assert_eq!(read.timings.translate_ms, 0);
+        assert_eq!(read.source, "fr");
+        let frame = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(frame.regions, photo.regions);
-        assert!(frame.timings.detect_ms + frame.timings.recognize_ms > 0);
+        assert_eq!(frame.timings.reused, 0);
 
         // A sensor-landscape frame that needs a clockwise quarter turn to be upright.
         let sideways = image::imageops::rotate270(&rgba);
-        let turned = engine
-            .translate_frame(sideways.into_raw(), h, w, 90, "fr".into())
+        let read = engine
+            .ocr_frame(sideways.into_raw(), h, w, 90, "fr".into())
             .unwrap();
-        assert_eq!((turned.image_width, turned.image_height), (w, h));
+        assert_eq!((read.image_width, read.image_height), (w, h));
+        let turned = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(turned.regions, photo.regions);
+        assert_eq!(turned.timings.reused as usize, turned.regions.len());
+
+        engine.unload();
+        let unloaded = engine.translate_regions(read).unwrap();
+        assert!(unloaded.regions.iter().all(|r| r.translated_text.is_none()));
+        assert!(engine.lock_cached().is_none(), "nothing was loaded");
+    }
+
+    fn read_frame(corners: Vec<Point>) -> TranslationResult {
+        TranslationResult {
+            image_width: 1,
+            image_height: 1,
+            regions: vec![Region {
+                corners,
+                source_text: "sortie".into(),
+                translated_text: None,
+                background: Rgb { r: 0, g: 0, b: 0 },
+                foreground: Rgb { r: 0, g: 0, b: 0 },
+                angle: 0.0,
+            }],
+            translation_error: None,
+            timings: StageTimings {
+                detect_ms: 0,
+                recognize_ms: 0,
+                translate_ms: 0,
+                precision: "fp32".into(),
+                reused: 0,
+            },
+            source: "fr".into(),
+        }
+    }
+
+    #[test]
+    fn translate_regions_rejects_a_region_without_four_corners() {
+        let dir = tempfile_dir().join("corners");
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let err = engine
+            .translate_regions(read_frame(vec![Point { x: 0.0, y: 0.0 }]))
+            .unwrap_err();
+        assert!(err.to_string().contains("corners"), "{err}");
+    }
+
+    #[test]
+    fn translate_regions_without_a_loaded_pipeline_leaves_the_regions_untranslated() {
+        let dir = tempfile_dir().join("unloaded");
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let frame = read_frame(vec![Point { x: 0.0, y: 0.0 }; 4]);
+        assert_eq!(engine.translate_regions(frame.clone()).unwrap(), frame);
+        let mut unknown = frame;
+        unknown.source = "xx".into();
+        let err = engine.translate_regions(unknown).unwrap_err();
+        assert!(err.to_string().contains("unknown language"), "{err}");
     }
 
     #[test]
@@ -765,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn pruning_an_old_install_removes_the_llm_and_retired_packs() {
+    fn pruning_an_old_install_removes_the_llm_retired_packs_and_onnx_files() {
         let dir = tempfile_dir().join("prune");
         let old_gguf = dir.join("translator/model.gguf");
         std::fs::create_dir_all(old_gguf.parent().unwrap()).unwrap();
@@ -778,10 +926,12 @@ mod tests {
             std::fs::create_dir_all(dir.join(retired)).unwrap();
             std::fs::write(dir.join(retired).join("inference.onnx"), "x").unwrap();
         }
+        std::fs::create_dir_all(dir.join("rec-latin")).unwrap();
+        std::fs::write(dir.join("rec-latin/inference.onnx"), "x").unwrap();
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
 
-        assert_eq!(engine.prune_models().unwrap(), 3);
-        for gone in ["translator", "rec-el", "rec-en"] {
+        assert_eq!(engine.prune_models().unwrap(), 4);
+        for gone in ["translator", "rec-el", "rec-en", "rec-latin/inference.onnx"] {
             assert!(!dir.join(gone).exists(), "{gone}");
         }
         let models = engine.models().unwrap();

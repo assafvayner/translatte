@@ -1,11 +1,8 @@
-# Sourced by the Android build scripts: NDK toolchain and ONNX Runtime settings for
-# aarch64-linux-android; the bergamot crate's CMake build reads ANDROID_NDK and ANDROID_API_LEVEL
-# from here. Expects ROOT to be the repo root.
+# Sourced by the Android build scripts: NDK toolchain settings for aarch64-linux-android; the
+# bergamot and ncnn crates' CMake builds read ANDROID_NDK and ANDROID_API_LEVEL from here. Expects ROOT to be the repo root.
 
 TARGET=aarch64-linux-android
 API="${ANDROID_API_LEVEL:-31}"
-ORT_VERSION=1.22.0 # ONNX Runtime API version expected by ort 2.0.0-rc.10
-ORT_AAR_SHA256=04a4617a9c797cf49225595e45b5546081cb34c86ac817581141577d3b7dbfe2
 
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/homebrew/share/android-commandlinetools}}"
 if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
@@ -25,20 +22,3 @@ export CXX_aarch64_linux_android="$BIN/${TARGET}${API}-clang++"
 export AR_aarch64_linux_android="$BIN/llvm-ar"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
 
-# ONNX Runtime: the official Android AAR from Maven Central, linked dynamically.
-DEPS="$ROOT/target/android-deps"
-ORT_DIR="$DEPS/ort-$ORT_VERSION"
-if [[ ! -f "$ORT_DIR/lib/libonnxruntime.so" ]]; then
-  mkdir -p "$DEPS/aar" "$ORT_DIR/lib"
-  AAR="$DEPS/aar/onnxruntime-android-$ORT_VERSION.aar"
-  URL="https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/$ORT_VERSION/onnxruntime-android-$ORT_VERSION.aar"
-  [[ -f "$AAR" ]] || curl -fsSL "$URL" -o "$AAR"
-  actual="$(shasum -a 256 "$AAR" | awk '{print $1}')"
-  if [[ "$actual" != "$ORT_AAR_SHA256" ]]; then
-    echo "ORT AAR checksum mismatch: got $actual, pinned $ORT_AAR_SHA256" >&2
-    rm -f "$AAR"
-    exit 1
-  fi
-  unzip -o -j "$AAR" "jni/arm64-v8a/libonnxruntime.so" -d "$ORT_DIR/lib" >/dev/null
-fi
-export ORT_LIB_LOCATION="$ORT_DIR/lib" ORT_PREFER_DYNAMIC_LINK=1

@@ -8,6 +8,50 @@ struct FillTransform: Equatable {
     let top: CGFloat
 }
 
+/// The two stages of live translation, the same as Android's `LiveStages`: reading a frame (OCR)
+/// and translating what was read, each with at most one frame. A frame read while the translator
+/// is busy waits for it; no new frame is read while one waits, so none goes stale.
+struct LiveStages<T> {
+    private(set) var reading = false
+    private(set) var translating = false
+    private var waiting: T?
+
+    /// Whether a new frame can't be read yet (pass as `busy` to `LiveRules.shouldTake`).
+    var readBusy: Bool { reading || waiting != nil }
+
+    mutating func startRead() {
+        reading = true
+    }
+
+    /// A frame was read: returns it to translate now, or nil when it waits for the translator.
+    mutating func readDone(_ item: T) -> T? {
+        reading = false
+        if translating {
+            waiting = item
+            return nil
+        }
+        translating = true
+        return item
+    }
+
+    mutating func readFailed() {
+        reading = false
+    }
+
+    /// A translation finished or failed: returns the waiting frame to translate next, if any.
+    mutating func translateDone() -> T? {
+        let next = waiting
+        waiting = nil
+        translating = next != nil
+        return next
+    }
+
+    /// Drops the waiting frame; frames in a stage finish and are ignored by their caller.
+    mutating func reset() {
+        waiting = nil
+    }
+}
+
 /// Live translation rules, the same as Android's `LiveRules`; keep the two in step.
 enum LiveRules {
     /// UserDefaults key of the "Live translation (experimental)" setting; on by default.
@@ -22,6 +66,8 @@ enum LiveRules {
     static let backoffMaxMs: Int64 = 8000
     /// How long a tracked box takes to slide to its new place.
     static let moveMs = 150
+    /// How often stale boxes are pruned while updates stall.
+    static let pruneIntervalMs: Int64 = 100
 
     static func isActive(enabled: Bool, sourceInstalled: Bool) -> Bool {
         enabled && sourceInstalled
@@ -54,10 +100,10 @@ enum LiveRules {
         return result.regions.contains { $0.translatedText != nil }
     }
 
-    /// Debug readout, e.g. "2.5/s · det 120 · rec 85 · tr 40 ms"; `intervalMs` is the time since the previous update.
+    /// Debug readout, e.g. "fp16 · 2.5/s · det 120 · rec 85 · tr 40 ms"; `intervalMs` is the time since the previous update.
     static func readout(intervalMs: Int64?, timings: StageTimings) -> String {
         let rate = intervalMs.flatMap { $0 > 0 ? String(format: "%.1f", 1000.0 / Double($0)) : nil } ?? "–"
-        return "\(rate)/s · det \(timings.detectMs) · rec \(timings.recognizeMs) · tr \(timings.translateMs) ms"
+        return "\(timings.precision) · \(rate)/s · det \(timings.detectMs) · rec \(timings.recognizeMs) · tr \(timings.translateMs) ms"
     }
 
     /// Scales an image to cover the view and centers it, cropping the overflow, as the camera preview does.
