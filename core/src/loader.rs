@@ -2,7 +2,7 @@ use crate::manifest::{Language, DETECTOR_ID};
 use crate::model_store::ModelStore;
 use crate::ocr::detector::Detector;
 use crate::ocr::recognizer::Recognizer;
-use crate::ocr::OcrEngine;
+use crate::ocr::{load_detector, load_recognizer, Precision};
 use crate::pipeline::Pipeline;
 use crate::translate::cache::CachingTranslator;
 use crate::translate::pair::{PairTranslator, StoreLoader};
@@ -11,15 +11,15 @@ use crate::{Result, TranslatteError};
 pub type LoadedPipeline =
     Pipeline<Detector, Recognizer, CachingTranslator<PairTranslator<StoreLoader>>>;
 
-/// Loads the detector and the recognizer for `src`'s script pack and, when `translate` is set,
-/// a translator that loads `src`'s pair model on first use (or `warm`) and swaps it when another
-/// language with the same script pack is translated, behind a cache of recent translations (see
-/// [`CachingTranslator`]). The OCR models run on `engine`.
+/// Loads the detector and the recognizer for `src`'s script pack, fp32 for photos and fp16 for
+/// live frames (or `precision` for both), and, when `translate` is set, a translator that loads
+/// `src`'s pair model on first use (or `warm`) and swaps it when another language with the same
+/// script pack is translated, behind a cache of recent translations (see [`CachingTranslator`]).
 pub fn load_pipeline(
     store: &ModelStore,
     src: &Language,
     translate: bool,
-    engine: OcrEngine,
+    precision: Option<Precision>,
 ) -> Result<LoadedPipeline> {
     let Some(pack) = &src.script_pack else {
         return Err(TranslatteError::NoScriptPack(src.code.clone()));
@@ -33,39 +33,24 @@ pub fn load_pipeline(
             .ok_or_else(|| TranslatteError::NoPairModel(src.code.clone()))?;
         store.require_installed(pair)?;
     }
-    let (detector, recognizer) = load_ocr(store, pack, engine)?;
+    let photo = precision.unwrap_or(Precision::Fp32);
     let translator = translate
         .then(|| CachingTranslator::new(PairTranslator::new(StoreLoader::new(store.clone()))));
-    Ok(Pipeline::new(detector, recognizer, translator)
-        .with_script_pack(pack.as_str())
-        .with_ocr_engine(engine))
-}
-
-fn load_ocr(store: &ModelStore, pack: &str, engine: OcrEngine) -> Result<(Detector, Recognizer)> {
-    let detector = Detector::load(&store.model_file(DETECTOR_ID, "inference.onnx")?, engine)?;
-    let recognizer = Recognizer::load(
-        &store.model_file(pack, "inference.onnx")?,
-        &store.model_file(pack, "dict.txt")?,
-        engine,
-    )?;
-    Ok((detector, recognizer))
-}
-
-impl LoadedPipeline {
-    /// Reloads the detector and recognizer on `engine`, keeping the translator and its loaded
-    /// model. On error the pipeline keeps its current models.
-    pub fn set_ocr_engine(&self, store: &ModelStore, engine: OcrEngine) -> Result<()> {
-        if engine == self.ocr_engine() {
-            return Ok(());
-        }
-        let pack = self
-            .script_pack()
-            .ok_or_else(|| TranslatteError::Inference("pipeline has no script pack".into()))?
-            .to_string();
-        let (detector, recognizer) = load_ocr(store, &pack, engine)?;
-        self.replace_ocr(detector, recognizer, engine);
-        Ok(())
+    let pipeline = Pipeline::new(
+        load_detector(store, photo)?,
+        load_recognizer(store, pack, photo)?,
+        translator,
+    )
+    .with_script_pack(pack.as_str())
+    .with_precision(photo);
+    if precision.is_some() {
+        return Ok(pipeline);
     }
+    Ok(pipeline.with_live_ocr(
+        load_detector(store, Precision::Fp16)?,
+        load_recognizer(store, pack, Precision::Fp16)?,
+        Precision::Fp16,
+    ))
 }
 
 #[cfg(test)]
@@ -96,7 +81,7 @@ mod tests {
         let (_d, s) = store();
         let en = s.manifest().language(TARGET_LANGUAGE).unwrap();
         assert!(matches!(
-            load_pipeline(&s, en, false, OcrEngine::Ort),
+            load_pipeline(&s, en, false, None),
             Err(TranslatteError::NoScriptPack(c)) if c == "en"
         ));
     }
@@ -106,13 +91,13 @@ mod tests {
         let (_d, s) = store();
         let fr = s.manifest().language("fr").unwrap();
         assert!(matches!(
-            load_pipeline(&s, fr, true, OcrEngine::Ort),
+            load_pipeline(&s, fr, true, None),
             Err(TranslatteError::ModelNotInstalled(id)) if id == DETECTOR_ID
         ));
         install(&s, "det");
         install(&s, "rec-latin");
         assert!(matches!(
-            load_pipeline(&s, fr, true, OcrEngine::Ort),
+            load_pipeline(&s, fr, true, None),
             Err(TranslatteError::ModelNotInstalled(id)) if id == "pair-fr-en"
         ));
     }

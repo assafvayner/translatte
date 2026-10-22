@@ -13,6 +13,5 @@ cargo build --locked -p translatte-cli --release --target "$TARGET" --no-default
 
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 OUT="$TARGET_DIR/$TARGET/release"
-cp "$ORT_DIR/lib/libonnxruntime.so" "$OUT/"
 cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/sysroot/usr/lib/$TARGET/libc++_shared.so" "$OUT/"
-echo "built $OUT/translatte (+ libonnxruntime.so, libc++_shared.so)"
+echo "built $OUT/translatte (+ libc++_shared.so)"

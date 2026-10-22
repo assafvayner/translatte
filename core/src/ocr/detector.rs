@@ -3,7 +3,7 @@ use std::path::Path;
 use image::RgbImage;
 use ndarray::{Axis, Ix2};
 
-use super::backend::{load_model, Infer, OcrEngine};
+use super::backend::{NcnnModel, Precision};
 use super::det_post::{db_postprocess, DbParams};
 use super::preprocess::det_preprocess;
 use super::TextDetector;
@@ -16,16 +16,16 @@ const RESIZE_LONG: u32 = 960;
 const MIN_SIDE: f32 = 3.0;
 
 pub struct Detector {
-    model: Box<dyn Infer>,
+    model: NcnnModel,
     params: DbParams,
 }
 
 impl Detector {
-    /// Loads the detector whose ONNX file is `onnx` (the NCNN files sit next to it).
-    pub fn load(onnx: &Path, engine: OcrEngine) -> Result<Self> {
+    /// Loads the detector whose NCNN parameter file is `param`.
+    pub fn load(param: &Path, precision: Precision) -> Result<Self> {
         let _pin = super::affinity::pin();
         Ok(Self {
-            model: load_model(onnx, engine, false, 4)?,
+            model: NcnnModel::load(param, precision, 4)?,
             params: DbParams::default(),
         })
     }

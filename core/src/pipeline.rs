@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::geometry::Quad;
 use crate::layout::group_lines;
 use crate::manifest::Language;
-use crate::ocr::{env_or, Line, OcrEngine, TextDetector, TextRecognizer};
+use crate::ocr::{env_or, Line, Precision, TextDetector, TextRecognizer};
 use crate::render::style_hints;
 use crate::translate::reuse::FrameReuse;
 use crate::translate::Translator;
@@ -45,14 +45,14 @@ impl Stage {
     }
 }
 
-/// Wall time of each pipeline stage in one run, and the OCR engine that ran, for the live
+/// Wall time of each pipeline stage in one run, and the precision OCR ran at, for the live
 /// camera's debug readout.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StageTimings {
     pub detect_ms: u32,
     pub recognize_ms: u32,
     pub translate_ms: u32,
-    pub ocr_engine: OcrEngine,
+    pub precision: Precision,
     /// Blocks of a live frame that took an earlier frame's translation (see [`FrameReuse`]).
     pub reused: u32,
 }
@@ -72,7 +72,7 @@ pub struct PipelineOutput {
 struct Ocr<D, R> {
     detector: D,
     recognizer: R,
-    engine: OcrEngine,
+    precision: Precision,
 }
 
 struct Translation<T> {
@@ -81,9 +81,11 @@ struct Translation<T> {
 }
 
 /// OCR and translation sit behind separate locks, so one live frame can be translated while the
-/// next is read; a stage still runs one image at a time.
+/// next is read; a stage still runs one image at a time. Live frames may have OCR models of
+/// their own (see [`Self::with_live_ocr`]).
 pub struct Pipeline<D, R, T> {
     ocr: Mutex<Ocr<D, R>>,
+    live_ocr: Option<Mutex<Ocr<D, R>>>,
     translation: Option<Mutex<Translation<T>>>,
     script_pack: Option<String>,
 }
@@ -99,8 +101,9 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             ocr: Mutex::new(Ocr {
                 detector,
                 recognizer,
-                engine: OcrEngine::default(),
+                precision: Precision::default(),
             }),
+            live_ocr: None,
             translation: translator.map(|translator| {
                 Mutex::new(Translation {
                     translator,
@@ -117,27 +120,24 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         self
     }
 
-    /// Records the engine the detector and recognizer run on, for [`StageTimings`].
-    pub fn with_ocr_engine(self, engine: OcrEngine) -> Self {
-        lock(&self.ocr).engine = engine;
+    /// Records the precision the detector and recognizer run at, for [`StageTimings`].
+    pub fn with_precision(self, precision: Precision) -> Self {
+        lock(&self.ocr).precision = precision;
+        self
+    }
+
+    /// Reads live frames with these models instead of the photo ones.
+    pub fn with_live_ocr(mut self, detector: D, recognizer: R, precision: Precision) -> Self {
+        self.live_ocr = Some(Mutex::new(Ocr {
+            detector,
+            recognizer,
+            precision,
+        }));
         self
     }
 
     pub fn script_pack(&self) -> Option<&str> {
         self.script_pack.as_deref()
-    }
-
-    pub fn ocr_engine(&self) -> OcrEngine {
-        lock(&self.ocr).engine
-    }
-
-    /// Swaps in a detector and recognizer running on `engine`, keeping the translator.
-    pub fn replace_ocr(&self, detector: D, recognizer: R, engine: OcrEngine) {
-        *lock(&self.ocr) = Ocr {
-            detector,
-            recognizer,
-            engine,
-        };
     }
 
     fn check_source(&self, src: &Language) -> Result<()> {
@@ -174,7 +174,10 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<(Vec<Line>, StageTimings)> {
         self.check_source(src)?;
-        let mut ocr = lock(&self.ocr);
+        let mut ocr = match (&self.live_ocr, live) {
+            (Some(live_ocr), true) => lock(live_ocr),
+            _ => lock(&self.ocr),
+        };
         on_stage(Stage::Detecting);
         let start = Instant::now();
         let quads = if live {
@@ -192,7 +195,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         let timings = StageTimings {
             detect_ms: millis(detected - start),
             recognize_ms: millis(detected.elapsed()),
-            ocr_engine: ocr.engine,
+            precision: ocr.precision,
             ..StageTimings::default()
         };
         Ok((lines, timings))
@@ -401,23 +404,33 @@ mod tests {
     }
 
     #[test]
-    fn timings_name_the_ocr_engine_after_a_swap() {
+    fn live_frames_use_the_live_ocr_models() {
         let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
         let p = Pipeline::new(
             FakeDet(vec![quad(10.0)]),
-            FakeRec(vec![("sortie", 0.9)], 0),
+            FakeRec(vec![("sortie", 0.9); 3], 0),
             Some(Upper),
         );
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
-        assert_eq!(out.timings.ocr_engine, OcrEngine::Ort);
-        p.replace_ocr(
+        assert_eq!(out.timings.precision, Precision::Fp32);
+        assert_eq!(
+            p.run_frame(&img, &lang(), &lang())
+                .unwrap()
+                .timings
+                .precision,
+            Precision::Fp32
+        );
+        let p = p.with_live_ocr(
             FakeDet(vec![quad(10.0)]),
             FakeRec(vec![("entrée", 0.9)], 0),
-            OcrEngine::NcnnFp16,
+            Precision::Fp16,
         );
-        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
-        assert_eq!(out.timings.ocr_engine, OcrEngine::NcnnFp16);
+        let out = p.run_frame(&img, &lang(), &lang()).unwrap();
+        assert_eq!(out.timings.precision, Precision::Fp16);
         assert_eq!(out.regions[0].translated_text.as_deref(), Some("ENTRÉE"));
+        let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
+        assert_eq!(out.timings.precision, Precision::Fp32);
+        assert_eq!(out.regions[0].source_text, "sortie");
     }
 
     #[test]

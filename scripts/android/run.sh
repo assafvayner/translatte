@@ -47,7 +47,7 @@ push_model() {
   fi
 }
 
-for f in translatte libonnxruntime.so libc++_shared.so; do push "$REL/$f" "$DEV/$f"; done
+for f in translatte libc++_shared.so; do push "$REL/$f" "$DEV/$f"; done
 push "$MANIFEST" "$DEV/manifest.json"
 for id in "${IDS[@]}"; do
   for f in "$MODELS/$id"/*; do push_model "$f" "$DEV/models/$id/$(basename "$f")"; done

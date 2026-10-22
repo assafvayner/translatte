@@ -100,10 +100,10 @@ enum LiveRules {
         return result.regions.contains { $0.translatedText != nil }
     }
 
-    /// Debug readout, e.g. "ort · 2.5/s · det 120 · rec 85 · tr 40 ms"; `intervalMs` is the time since the previous update.
+    /// Debug readout, e.g. "fp16 · 2.5/s · det 120 · rec 85 · tr 40 ms"; `intervalMs` is the time since the previous update.
     static func readout(intervalMs: Int64?, timings: StageTimings) -> String {
         let rate = intervalMs.flatMap { $0 > 0 ? String(format: "%.1f", 1000.0 / Double($0)) : nil } ?? "–"
-        return "\(timings.ocrEngine) · \(rate)/s · det \(timings.detectMs) · rec \(timings.recognizeMs) · tr \(timings.translateMs) ms"
+        return "\(timings.precision) · \(rate)/s · det \(timings.detectMs) · rec \(timings.recognizeMs) · tr \(timings.translateMs) ms"
     }
 
     /// Scales an image to cover the view and centers it, cropping the overflow, as the camera preview does.

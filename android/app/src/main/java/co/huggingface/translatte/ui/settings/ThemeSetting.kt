@@ -2,7 +2,6 @@ package co.huggingface.translatte.ui.settings
 
 import android.app.UiModeManager
 import android.content.Context
-import uniffi.translatte_ffi.OcrEngine
 
 enum class ThemeSetting(val key: String, val label: String, val description: String) {
     SYSTEM("system", "System", "translatte in light mode, americano in dark mode"),
@@ -52,16 +51,10 @@ class UiPrefs(context: Context) {
         get() = prefs.getBoolean(LIVE_TRANSLATION, true)
         set(value) = prefs.edit().putBoolean(LIVE_TRANSLATION, value).apply()
 
-    /** Debug builds only; see [ocrEngineFromKey]. */
-    var ocrEngine: OcrEngine
-        get() = ocrEngineFromKey(prefs.getString(OCR_ENGINE, null))
-        set(value) = prefs.edit().putString(OCR_ENGINE, value.key).apply()
-
     private companion object {
         const val THEME = "theme"
         const val RESULT_HINT_SEEN = "result_hint_seen"
         const val CAMERA_ASKED = "camera_asked"
         const val LIVE_TRANSLATION = "live_translation"
-        const val OCR_ENGINE = "ocr_engine"
     }
 }

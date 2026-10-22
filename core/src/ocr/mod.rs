@@ -10,10 +10,15 @@ pub mod recognizer;
 use image::RgbImage;
 use serde::Serialize;
 
-pub use backend::OcrEngine;
+pub use backend::Precision;
 
 use crate::geometry::{Direction, Quad};
+use crate::manifest::DETECTOR_ID;
+use crate::model_store::ModelStore;
 use crate::Result;
+use backend::PARAM_FILE;
+use detector::Detector;
+use recognizer::Recognizer;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Line {
@@ -65,20 +70,16 @@ pub(crate) fn env_or(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-/// ONNX Runtime session settings shared by the OCR models: one thread per big core (see
-/// [`affinity`]), else 4. The detector's activations (for a
-/// 960px image) are large, and ORT's arena would keep them allocated while the translator runs,
-/// so it gets plain allocations instead; the recognizer's small arena is kept.
-fn session_builder(arena: bool) -> ort::Result<ort::session::builder::SessionBuilder> {
-    let threads = affinity::big_core_count().unwrap_or(4);
-    let builder = ort::session::Session::builder()?
-        .with_intra_threads(env_or("TRANSLATTE_OCR_THREADS", threads))?;
-    if arena {
-        return Ok(builder);
-    }
-    builder
-        .with_execution_providers([ort::execution_providers::CPUExecutionProvider::default()
-            .with_arena_allocator(false)
-            .build()])?
-        .with_memory_pattern(false)
+/// The installed text detector, at `precision`.
+pub fn load_detector(store: &ModelStore, precision: Precision) -> Result<Detector> {
+    Detector::load(&store.model_file(DETECTOR_ID, PARAM_FILE)?, precision)
+}
+
+/// The installed recognizer of script pack `pack`, at `precision`.
+pub fn load_recognizer(store: &ModelStore, pack: &str, precision: Precision) -> Result<Recognizer> {
+    Recognizer::load(
+        &store.model_file(pack, PARAM_FILE)?,
+        &store.model_file(pack, "dict.txt")?,
+        precision,
+    )
 }

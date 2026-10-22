@@ -101,8 +101,8 @@ class LiveRulesTest {
 
     @Test
     fun readoutShowsTheRateAndStageTimes() {
-        assertEquals("ncnn16 · 2.5/s · det 120 · rec 85 · tr 40 ms", LiveRules.readout(400, StageTimings(120u, 85u, 40u, "ncnn16")))
-        assertEquals("ort · –/s · det 0 · rec 0 · tr 0 ms", LiveRules.readout(null, noTimings))
+        assertEquals("fp16 · 2.5/s · det 120 · rec 85 · tr 40 ms", LiveRules.readout(400, StageTimings(120u, 85u, 40u, "fp16")))
+        assertEquals("fp32 · –/s · det 0 · rec 0 · tr 0 ms", LiveRules.readout(null, noTimings))
     }
 
     @Test

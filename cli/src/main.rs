@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use translatte_core::manifest::Language;
-use translatte_core::ocr::OcrEngine;
+use translatte_core::ocr::Precision;
 use translatte_core::pipeline::Stage;
 
 #[derive(Parser)]
@@ -38,9 +38,9 @@ enum Command {
         /// Exit non-zero if mean CER exceeds this.
         #[arg(long)]
         max_cer: Option<f64>,
-        /// OCR runtime: ort, ncnn32 or ncnn16.
-        #[arg(long, default_value = "ort")]
-        engine: OcrEngine,
+        /// OCR precision: fp32 or fp16.
+        #[arg(long, default_value = "fp32")]
+        precision: Precision,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -65,9 +65,9 @@ enum Command {
         /// Run the fixtures, in name order, once each as consecutive live camera frames.
         #[arg(long)]
         live: bool,
-        /// OCR runtime: ort, ncnn32 or ncnn16.
-        #[arg(long, default_value = "ort")]
-        engine: OcrEngine,
+        /// OCR precision: fp32 or fp16.
+        #[arg(long, default_value = "fp32")]
+        precision: Precision,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -99,9 +99,9 @@ enum Command {
         /// OCR only; skip loading the translation model and outline the detected text boxes instead.
         #[arg(long)]
         no_translate: bool,
-        /// OCR runtime: ort, ncnn32 or ncnn16.
-        #[arg(long, default_value = "ort")]
-        engine: OcrEngine,
+        /// OCR precision: fp32 or fp16.
+        #[arg(long, default_value = "fp32")]
+        precision: Precision,
         #[command(flatten)]
         models: ModelArgs,
     },
@@ -132,10 +132,10 @@ fn real_main() -> Result<i32> {
         Command::Eval {
             dir,
             max_cer,
-            engine,
+            precision,
             models,
         } => {
-            if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer, engine)? {
+            if !eval::run_eval(&dir, &models.manifest, &models.models, max_cer, precision)? {
                 return Ok(1);
             }
         }
@@ -147,7 +147,7 @@ fn real_main() -> Result<i32> {
             only,
             text,
             live,
-            engine,
+            precision,
             models,
         } => {
             let args = bench::BenchArgs {
@@ -158,7 +158,7 @@ fn real_main() -> Result<i32> {
                 only,
                 text,
                 live,
-                engine,
+                precision,
             };
             bench::run_bench(&args, &models.manifest, &models.models)?;
         }
@@ -183,7 +183,7 @@ fn real_main() -> Result<i32> {
             output,
             json,
             no_translate,
-            engine,
+            precision,
             models,
         } => {
             let mut img = image::open(&image)
@@ -193,7 +193,7 @@ fn real_main() -> Result<i32> {
             let src = store.manifest().language(&from)?;
             let tgt = store.target_language()?;
             let t0 = Instant::now();
-            let pipeline = setup::build_pipeline(&store, src, !no_translate, engine)?;
+            let pipeline = setup::build_pipeline(&store, src, !no_translate, precision)?;
             eprintln!("loaded models in {:.2?}", t0.elapsed());
             if !no_translate {
                 let t = Instant::now();

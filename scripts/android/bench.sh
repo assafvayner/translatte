@@ -45,7 +45,7 @@ push_if_changed() {
   [[ "$want" == "$have" ]] || push "$1" "$2"
 }
 
-for f in translatte libonnxruntime.so libc++_shared.so; do push "$REL/$f" "$DEV/$f"; done
+for f in translatte libc++_shared.so; do push "$REL/$f" "$DEV/$f"; done
 push "$MANIFEST" "$DEV/manifest.json"
 for f in "${FILES[@]}"; do
   [[ -f "$MODELS/$f" ]] || { echo "model file missing: $MODELS/$f" >&2; exit 1; }

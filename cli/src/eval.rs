@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use translatte_core::loader::LoadedPipeline;
-use translatte_core::ocr::OcrEngine;
+use translatte_core::ocr::Precision;
 
 use crate::setup;
 
@@ -43,7 +43,7 @@ pub fn run_eval(
     manifest: &Path,
     models: &Path,
     max_cer: Option<f64>,
-    engine: OcrEngine,
+    precision: Precision,
 ) -> Result<bool> {
     let store = setup::load_store(manifest, models)?;
     let mut fixtures: Vec<_> = std::fs::read_dir(dir)
@@ -85,7 +85,7 @@ pub fn run_eval(
         if !pipelines.contains_key(&key) {
             pipelines.insert(
                 key.clone(),
-                setup::build_pipeline(&store, src, false, engine)?,
+                setup::build_pipeline(&store, src, false, precision)?,
             );
         }
         let pipeline = pipelines.get_mut(&key).expect("inserted above");
@@ -117,7 +117,11 @@ pub fn run_eval(
             println!("  {lang:<6} {:>3} fixtures, mean CER {m:.3}", s.len());
         }
     }
-    println!("{} fixtures, mean CER {:.3} ({engine})", scores.len(), mean);
+    println!(
+        "{} fixtures, mean CER {:.3} ({precision})",
+        scores.len(),
+        mean
+    );
     Ok(max_cer.is_none_or(|m| mean <= m))
 }
 

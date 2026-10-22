@@ -52,7 +52,7 @@ impl Source for &Recording {
         self.requests
             .lock()
             .unwrap()
-            .push((path.to_string(), range.clone()));
+            .push((format!("{}/{path}", source.repo), range.clone()));
         self.inner.open(source, path, range)
     }
 }
@@ -77,34 +77,40 @@ fn downloads_small_pack_and_resumes_truncated_part() {
         .unwrap();
     assert_eq!(store.state("rec-latin").unwrap(), InstallState::Installed);
     assert_eq!(store.state("rec-latin").unwrap(), InstallState::Installed);
-    let onnx = file(&store, "rec-latin", "inference.onnx");
+    let param = file(&store, "rec-latin", "inference.ncnn.param");
+    let bin = file(&store, "rec-latin", "inference.ncnn.bin");
+    let ncnn = "assafvayner/translatte-ocr-ncnn/rec-latin";
     assert_eq!(
         rec.take(),
         vec![
-            ("inference.onnx".to_string(), Some(0..onnx.size)),
-            ("inference.yml".to_string(), None),
+            (format!("{ncnn}/inference.ncnn.param"), Some(0..param.size)),
+            (format!("{ncnn}/inference.ncnn.bin"), Some(0..bin.size)),
+            (
+                "PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/inference.yml".to_string(),
+                None
+            ),
         ]
     );
 
-    let installed = dir.path().join(&onnx.path);
-    let cut = onnx.size / 2 + 12_345;
+    let installed = dir.path().join(&bin.path);
+    let cut = bin.size / 2 + 12_345;
     let f = std::fs::OpenOptions::new()
         .write(true)
         .open(&installed)
         .unwrap();
     f.set_len(cut).unwrap();
     drop(f);
-    std::fs::rename(&installed, store.part_path(onnx)).unwrap();
+    std::fs::rename(&installed, store.part_path(bin)).unwrap();
     assert_eq!(store.state("rec-latin").unwrap(), InstallState::Corrupt);
 
     d.download_model_blocking("rec-latin", &cancel, |_| {})
         .unwrap();
     assert_eq!(
         rec.take(),
-        vec![("inference.onnx".to_string(), Some(cut..onnx.size))]
+        vec![(format!("{ncnn}/inference.ncnn.bin"), Some(cut..bin.size))]
     );
     assert_eq!(store.state("rec-latin").unwrap(), InstallState::Installed);
-    assert!(!store.part_path(onnx).exists());
+    assert!(!store.part_path(bin).exists());
 }
 
 /// Resumes pair-ja-en's model from a local copy missing its last 8 MiB, so only a range is
@@ -140,7 +146,10 @@ fn resumes_a_pair_model_tail_from_local_copy() {
         .unwrap();
     assert_eq!(
         rec.take(),
-        vec![(model.source_path.clone(), Some(keep..model.size))]
+        vec![(
+            format!("assafvayner/translatte-pair-models/{}", model.source_path),
+            Some(keep..model.size)
+        )]
     );
     assert_eq!(store.state("pair-ja-en").unwrap(), InstallState::Installed);
 }

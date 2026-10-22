@@ -86,7 +86,7 @@ final class LiveEventLog {
     static func updateJson(tMs: Int64, result: TranslationResult, seen: [Int], shown: Int, intervalMs: Int64?, ptsMs: Int64?) -> String {
         let t = result.timings
         var s = "{\"t_ms\":\(tMs),\"ev\":\"update\",\"regions\":\(result.regions.count),\"shown\":\(shown),\"seen\":[\(seen.map(String.init).joined(separator: ","))]"
-        s += ",\"det_ms\":\(t.detectMs),\"rec_ms\":\(t.recognizeMs),\"tr_ms\":\(t.translateMs),\"engine\":\"\(t.ocrEngine)\",\"reused\":\(t.reused)"
+        s += ",\"det_ms\":\(t.detectMs),\"rec_ms\":\(t.recognizeMs),\"tr_ms\":\(t.translateMs),\"precision\":\"\(t.precision)\",\"reused\":\(t.reused)"
         s += ",\"w\":\(result.imageWidth),\"h\":\(result.imageHeight)"
         if let intervalMs { s += ",\"interval_ms\":\(intervalMs)" }
         if let ptsMs { s += ",\"pts_ms\":\(ptsMs)" }

@@ -11,9 +11,22 @@
       },
       "files": [
         {
-          "path": "det/inference.onnx",
-          "size": 4826518,
-          "source_path": "inference.onnx"
+          "path": "det/inference.ncnn.param",
+          "size": 24256,
+          "source_path": "det/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "det/inference.ncnn.bin",
+          "size": 4685856,
+          "source_path": "det/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         }
       ]
     },
@@ -27,9 +40,22 @@
       },
       "files": [
         {
-          "path": "rec-cjk/inference.onnx",
-          "size": 16534782,
-          "source_path": "inference.onnx"
+          "path": "rec-cjk/inference.ncnn.param",
+          "size": 19632,
+          "source_path": "rec-cjk/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-cjk/inference.ncnn.bin",
+          "size": 16442228,
+          "source_path": "rec-cjk/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-cjk/dict.txt",
@@ -49,9 +75,22 @@
       },
       "files": [
         {
-          "path": "rec-latin/inference.onnx",
-          "size": 8042023,
-          "source_path": "inference.onnx"
+          "path": "rec-latin/inference.ncnn.param",
+          "size": 19648,
+          "source_path": "rec-latin/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-latin/inference.ncnn.bin",
+          "size": 7949480,
+          "source_path": "rec-latin/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-latin/dict.txt",
@@ -71,9 +110,22 @@
       },
       "files": [
         {
-          "path": "rec-eslav/inference.onnx",
-          "size": 7887627,
-          "source_path": "inference.onnx"
+          "path": "rec-eslav/inference.ncnn.param",
+          "size": 19655,
+          "source_path": "rec-eslav/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-eslav/inference.ncnn.bin",
+          "size": 7795084,
+          "source_path": "rec-eslav/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-eslav/dict.txt",
@@ -93,9 +145,22 @@
       },
       "files": [
         {
-          "path": "rec-korean/inference.onnx",
-          "size": 13418787,
-          "source_path": "inference.onnx"
+          "path": "rec-korean/inference.ncnn.param",
+          "size": 19652,
+          "source_path": "rec-korean/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-korean/inference.ncnn.bin",
+          "size": 13326236,
+          "source_path": "rec-korean/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-korean/dict.txt",
@@ -115,9 +180,22 @@
       },
       "files": [
         {
-          "path": "rec-arabic/inference.onnx",
-          "size": 7998947,
-          "source_path": "inference.onnx"
+          "path": "rec-arabic/inference.ncnn.param",
+          "size": 19639,
+          "source_path": "rec-arabic/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-arabic/inference.ncnn.bin",
+          "size": 7906404,
+          "source_path": "rec-arabic/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-arabic/dict.txt",
@@ -137,9 +215,22 @@
       },
       "files": [
         {
-          "path": "rec-devanagari/inference.onnx",
-          "size": 7912311,
-          "source_path": "inference.onnx"
+          "path": "rec-devanagari/inference.ncnn.param",
+          "size": 19655,
+          "source_path": "rec-devanagari/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-devanagari/inference.ncnn.bin",
+          "size": 7819768,
+          "source_path": "rec-devanagari/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-devanagari/dict.txt",
@@ -159,9 +250,22 @@
       },
       "files": [
         {
-          "path": "rec-th/inference.onnx",
-          "size": 7891015,
-          "source_path": "inference.onnx"
+          "path": "rec-th/inference.ncnn.param",
+          "size": 19634,
+          "source_path": "rec-th/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-th/inference.ncnn.bin",
+          "size": 7798472,
+          "source_path": "rec-th/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-th/dict.txt",
@@ -181,9 +285,22 @@
       },
       "files": [
         {
-          "path": "rec-ta/inference.onnx",
-          "size": 7885691,
-          "source_path": "inference.onnx"
+          "path": "rec-ta/inference.ncnn.param",
+          "size": 19655,
+          "source_path": "rec-ta/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-ta/inference.ncnn.bin",
+          "size": 7793148,
+          "source_path": "rec-ta/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-ta/dict.txt",
@@ -203,9 +320,22 @@
       },
       "files": [
         {
-          "path": "rec-te/inference.onnx",
-          "size": 7898759,
-          "source_path": "inference.onnx"
+          "path": "rec-te/inference.ncnn.param",
+          "size": 19650,
+          "source_path": "rec-te/inference.ncnn.param",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
+        },
+        {
+          "path": "rec-te/inference.ncnn.bin",
+          "size": 7806216,
+          "source_path": "rec-te/inference.ncnn.bin",
+          "source": {
+            "repo": "assafvayner/translatte-ocr-ncnn",
+            "revision": "cbb0b8d2265d44c08e0387ae637d612695afb5d8"
+          }
         },
         {
           "path": "rec-te/dict.txt",

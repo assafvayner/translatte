@@ -3,8 +3,6 @@ import SwiftUI
 struct SettingsScreen: View {
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
     @AppStorage(LiveRules.storageKey) private var live = true
-    @AppStorage(OcrEngineSetting.storageKey) private var ocrEngine = OcrEngineSetting.ort
-    @EnvironmentObject private var model: TranslatorModel
     @EnvironmentObject private var dialogs: DialogCenter
     @Environment(\.openURL) private var openURL
 
@@ -30,17 +28,6 @@ struct SettingsScreen: View {
                             .accessibilityIdentifier("live-translation")
                     }
                 }
-                #if DEBUG
-                Card(title: "OCR engine") {
-                    ForEach(OcrEngineSetting.allCases) { option in
-                        CheckRow(title: option.title, selected: option == ocrEngine) {
-                            ocrEngine = option
-                            model.setOcrEngine(option)
-                        }
-                        .accessibilityIdentifier("ocr-engine-\(option.rawValue)")
-                    }
-                }
-                #endif
                 Card(title: "About") {
                     ListRow(title: "Version", subtitle: Bundle.main.appVersion)
                         .accessibilityElement(children: .combine)

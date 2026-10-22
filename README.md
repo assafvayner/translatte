@@ -5,7 +5,7 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 
 ## Layout
 
-- `core/`: Rust pipeline (OCR via ONNX Runtime, translation via bergamot-translator, layout, style hints)
+- `core/`: Rust pipeline (OCR via NCNN, translation via bergamot-translator, layout, style hints)
 - `bergamot/`: bergamot-translator (Mozilla's translations engine on Marian, MPL-2.0) vendored in `vendor/` with our patches in `patches/` (regenerate with `bergamot/vendor.sh`), a C shim and a safe Rust wrapper
 - `cli/`: dev CLI (`translatte fetch|run|langs|eval`)
 - `ffi/`: UniFFI bindings over the core (`Engine`) for the native apps
@@ -23,6 +23,13 @@ cargo run -p translatte-cli --release -- fetch --langs fr,ja   # or --all (~1.8G
 ```
 
 `fetch` downloads the detector plus the language packs (OCR script pack and translation model) of the requested source languages (`--langs fr,ja` or `--all`) straight from the Hugging Face repos pinned in the manifest. Integrity is left to hf-hub (TLS, and hf-xet's chunk hashes for Xet-backed files); files are checked by size only. It skips files already installed (present with the expected size), and resumes interrupted downloads from their `.part` files (tagged with the upstream file, so a replaced model's partial download is never resumed). It first removes what the manifest no longer describes (dropped packs, wrong-size files such as a replaced model, stale `.part` files), as the apps do on launch (`Engine::prune_models`). `HF_ENDPOINT` and `HF_TOKEN` are honored. To bump an upstream revision, edit `REVISIONS` in `scripts/gen_manifest.py` and run `uv run scripts/gen_manifest.py`.
+
+OCR uses PaddleOCR's PP-OCRv5 mobile detector and per-script recognizers, run with NCNN. The models are converted
+from PaddlePaddle's ONNX files (at the revisions pinned in `scripts/gen_manifest.py`) by
+`uv run scripts/convert_ocr_ncnn.py` and published to
+[`assafvayner/translatte-ocr-ncnn`](https://huggingface.co/assafvayner/translatte-ocr-ncnn); each recognizer's
+`dict.txt` still comes from its PaddlePaddle repo. Photos run them at fp32 and live frames at fp16; the CLI's `run`,
+`eval` and `bench` take `--precision fp32|fp16` (default fp32).
 
 Translation uses Mozilla's [translations](https://github.com/mozilla/translations) models (MPL-2.0): one small
 int8 Marian model per source language into English, run with bergamot-translator. Every xx→en and en→xx pair is
@@ -80,8 +87,7 @@ scripts/ios/test-sim.sh                # XCTest on the simulator + one scripted 
 scripts/ios/test-sim.sh models-cache path/to/photo.jpg ja
 ```
 
-`scripts/ios/fetch-ort.sh` downloads the official ONNX Runtime iOS static build (pinned by sha256), which the
-Rust core links against for iOS. The simulator reads models straight from the host's `models-cache/`
+The simulator reads models straight from the host's `models-cache/`
 (`SIMCTL_CHILD_TRANSLATTE_MODELS_DIR`); otherwise the app downloads them into Documents/models from its setup
 and Languages screens, as on Android. `TRANSLATTE_E2E=1 TRANSLATTE_SIM_DEVICE=<erased simulator> scripts/ios/test-sim.sh`
 adds a UI test that does that whole setup over the network. Device builds need a development team and the `increased-memory-limit` entitlement
@@ -111,9 +117,13 @@ tag `translatte`).
 
 With "Live translation (experimental)" on in Settings (the default), the camera translates preview frames
 continuously and paints English over the preview; the shutter freezes the latest live result into the result
-viewer (or takes a photo when nothing has been translated yet). Frames go through `Engine::translate_frame`
-(raw RGBA plus a clockwise rotation, about 960x720), at most one at a time and at most one per second when the phone
-runs hot. A cache of recent translations, shared with photos, means only new text reaches the translation model.
+viewer (or takes a photo when nothing has been translated yet). Each frame (raw RGBA plus a clockwise rotation, about
+960x720) is read with `Engine::ocr_frame`, then translated with `Engine::translate_regions` while the next frame is
+read: OCR and translation sit behind separate locks, each stage holds at most one frame, and a frame read while the
+translator is busy waits for it (`LiveStages`), with at most one frame start per second when the phone runs hot. Live
+frames run OCR at fp16, photos at fp32. A cache of recent translations, shared with photos, means only new text
+reaches the translation model, and a block close to one of the last three frames' blocks in place (IoU ≥ 0.3) and
+text (≤ 20% of characters changed) reuses that block's translation, so OCR jitter doesn't cost a translation.
 Both apps keep the same rules in `LiveRules` and `LiveOverlayTracker`: a box matched to the same text stays and slides, an unmatched box disappears 500 ms after its last match (checked every 100 ms, so stalled updates don't leave it behind) or at once when a new box overlaps it, and a frame with no text clears the overlay. Debug builds show updates/s and per-stage
 milliseconds on the camera and log each update; on Android, `scripts/android/live-stats.sh [seconds]` summarizes
 them from logcat. The iOS simulator has no camera, so with `-mock-camera <image>` the still is fed as frames.
@@ -158,12 +168,12 @@ scripts/ios/test-sim.sh                                                   # ffi 
 Cross-compiles the CLI for `aarch64-linux-android` (API 31) and runs the full pipeline on a device over `adb`. Requires the Android NDK (found under `$ANDROID_HOME/ndk/`, or set `ANDROID_NDK_HOME`), `rustup target add aarch64-linux-android`, `cmake`, `ninja`, `sccache`, and `adb`.
 
 ```bash
-scripts/android/build.sh      # -> <target dir>/aarch64-linux-android/release/{translatte,libonnxruntime.so,libc++_shared.so}
+scripts/android/build.sh      # -> <target dir>/aarch64-linux-android/release/{translatte,libc++_shared.so}
 scripts/android/run.sh core/tests/data/bonjour.png fr     # <image> <from> [-] [name]; "-" = OCR only
 ```
 
-- ONNX Runtime: `ort`'s prebuilt binaries don't cover Android, so `build.sh` downloads the official `com.microsoft.onnxruntime:onnxruntime-android` 1.22.0 AAR from Maven Central (checked against a pinned sha256, cached in `target/android-deps/`) and links its `libonnxruntime.so` dynamically. Desktop builds are unchanged.
-- bergamot-translator builds via the NDK CMake toolchain with `c++_shared` (the same C++ runtime ONNX Runtime needs) for `armv8.2-a+dotprod` (`BERGAMOT_BUILD_ARCH` overrides).
+- NCNN builds from `ncnn/vendor/` via the NDK CMake toolchain with the NDK's OpenMP. On big.LITTLE phones OCR runs pinned to the big cores, one NCNN thread per big core (`TRANSLATTE_OCR_PIN=0` turns pinning off, `TRANSLATTE_OCR_THREADS` sets the thread count, `TRANSLATTE_OCR_LIVE_DET_SIDE` the detector size for live frames).
+- bergamot-translator builds via the NDK CMake toolchain with `c++_shared` for `armv8.2-a+dotprod` (`BERGAMOT_BUILD_ARCH` overrides).
 - `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and its translation model unless OCR-only; models whose size is unchanged are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
 - `run.sh` knobs: `TASKSET=<hex cpu mask>`, `RUN_TIMEOUT` (seconds, default 60).
 - Benchmarking on a phone: keep the screen on (`adb shell svc power stayon usb`) and the phone cool. A dozing or throttled Pixel 8 caps every cluster near 1.1GHz.
@@ -175,4 +185,4 @@ scripts/android/run.sh core/tests/data/bonjour.png fr     # <image> <from> [-] [
     ./translatte fetch --langs fr --models models --manifest manifest.json'
   ```
 
-- On Android the CLI loads fonts from `/system/fonts` and exits via `_exit` after flushing stdout/stderr, skipping C++ static destructors (bionic otherwise aborts in ONNX Runtime's).
+- On Android the CLI loads fonts from `/system/fonts` and exits via `_exit` after flushing stdout/stderr, skipping C++ static destructors.

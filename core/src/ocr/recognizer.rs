@@ -3,20 +3,13 @@ use std::path::Path;
 use image::RgbImage;
 use ndarray::{Axis, Ix3};
 
-use super::backend::{load_model, Infer, OcrEngine};
+use super::backend::{NcnnModel, Precision};
 use super::charset::Charset;
 use super::ctc::ctc_decode;
-use super::preprocess::{crop_quad, rec_input_width, rec_preprocess_batch};
+use super::preprocess::{crop_quad, rec_preprocess};
 use super::{Line, TextRecognizer};
 use crate::geometry::{Direction, Quad};
 use crate::{Result, TranslatteError};
-
-/// At most this many lines per inference call, as PaddleOCR's rec_batch_num. Overridable with
-/// `TRANSLATTE_OCR_REC_BATCH`.
-const BATCH: usize = 6;
-/// A line joins a batch only if it is at most this much wider than the batch's narrowest line,
-/// so little of the batch is padding.
-const BATCH_SLACK: f32 = 1.25;
 
 /// How much more confident the upward reading must be to beat the downward one, which is
 /// PaddleOCR's default for tall crops.
@@ -39,21 +32,21 @@ fn pick_direction(down: &(String, f32), up: &(String, f32)) -> Direction {
 }
 
 pub struct Recognizer {
-    model: Box<dyn Infer>,
+    model: NcnnModel,
     charset: Charset,
 }
 
 impl Recognizer {
-    /// Loads the recognizer whose ONNX file is `onnx` (the NCNN files sit next to it).
-    pub fn load(onnx: &Path, dict: &Path, engine: OcrEngine) -> Result<Self> {
+    /// Loads the recognizer whose NCNN parameter file is `param`, reading characters from `dict`.
+    pub fn load(param: &Path, dict: &Path, precision: Precision) -> Result<Self> {
         let _pin = super::affinity::pin();
-        let model = load_model(onnx, engine, true, 3)?;
+        let model = NcnnModel::load(param, precision, 3)?;
         let charset = Charset::from_dict_str(&std::fs::read_to_string(dict)?);
         Ok(Self { model, charset })
     }
 
-    fn run_batch(&mut self, crops: &[&RgbImage]) -> Result<Vec<(String, f32)>> {
-        let tensor = rec_preprocess_batch(crops);
+    fn read(&mut self, crop: &RgbImage) -> Result<(String, f32)> {
+        let tensor = rec_preprocess(crop);
         let _pin = super::affinity::pin();
         let out = self
             .model
@@ -69,50 +62,23 @@ impl Recognizer {
                 out.dim().2
             )));
         }
-        Ok(out
-            .axis_iter(Axis(0))
-            .map(|probs| ctc_decode(probs, &self.charset))
-            .collect())
+        Ok(ctc_decode(out.index_axis(Axis(0), 0), &self.charset))
     }
 
-    /// Reads each crop, batching crops of similar width; `on_progress(done)` gets the number of
-    /// crops read before each batch.
+    /// Reads each crop; `on_progress(done)` gets the number of crops read before each one.
     fn read_all(
         &mut self,
         crops: &[RgbImage],
         on_progress: &mut dyn FnMut(usize),
     ) -> Result<Vec<(String, f32)>> {
-        let mut order: Vec<usize> = (0..crops.len()).collect();
-        order.sort_by_key(|&i| rec_input_width(&crops[i]));
-        let max_batch = if self.model.batches() {
-            super::env_or("TRANSLATTE_OCR_REC_BATCH", BATCH)
-        } else {
-            1
-        };
-        let mut batches: Vec<Vec<usize>> = Vec::new();
-        for &i in &order {
-            let w = rec_input_width(&crops[i]) as f32;
-            match batches.last_mut() {
-                Some(b)
-                    if b.len() < max_batch
-                        && w <= rec_input_width(&crops[b[0]]) as f32 * BATCH_SLACK =>
-                {
-                    b.push(i)
-                }
-                _ => batches.push(vec![i]),
-            }
-        }
-        let mut reads = vec![(String::new(), 0.0); crops.len()];
-        let mut done = 0;
-        for chunk in batches {
-            on_progress(done);
-            done += chunk.len();
-            let batch: Vec<&RgbImage> = chunk.iter().map(|&i| &crops[i]).collect();
-            for (&i, read) in chunk.iter().zip(self.run_batch(&batch)?) {
-                reads[i] = read;
-            }
-        }
-        Ok(reads)
+        crops
+            .iter()
+            .enumerate()
+            .map(|(i, crop)| {
+                on_progress(i);
+                self.read(crop)
+            })
+            .collect()
     }
 }
 

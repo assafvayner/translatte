@@ -30,10 +30,14 @@ pub enum Derive {
 pub struct ModelFile {
     pub path: String,
     pub size: u64,
-    /// File name in the upstream repo (`ModelEntry::source`).
+    /// File name in the upstream repo (`source`, else `ModelEntry::source`).
     pub source_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derive: Option<Derive>,
+    /// The repo this file comes from when it isn't the model's: the OCR models' NCNN files, which
+    /// are converted from the model's ONNX file (see `scripts/convert_ocr_ncnn.py`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ModelSource>,
 }
 
 /// Upstream Hugging Face model repo pinned to a commit.
@@ -55,6 +59,11 @@ pub struct ModelEntry {
 impl ModelEntry {
     pub fn total_size(&self) -> u64 {
         self.files.iter().map(|f| f.size).sum()
+    }
+
+    /// The pinned repo `file` (one of this model's files) is downloaded from.
+    pub fn file_source<'a>(&'a self, file: &'a ModelFile) -> &'a ModelSource {
+        file.source.as_ref().unwrap_or(&self.source)
     }
 }
 
@@ -115,7 +124,7 @@ impl Manifest {
             }
         }
         for m in &self.models {
-            validate_source(m)?;
+            validate_source(&m.source, &format!("model {}", m.id))?;
             if m.files.is_empty() {
                 return Err(TranslatteError::Manifest(format!(
                     "model {} has no files",
@@ -133,6 +142,9 @@ impl Manifest {
                         "invalid file path {} for model {}",
                         f.path, m.id
                     )));
+                }
+                if let Some(source) = &f.source {
+                    validate_source(source, &f.path)?;
                 }
                 if !is_safe_repo_path(&f.source_path) {
                     return Err(TranslatteError::Manifest(format!(
@@ -207,8 +219,9 @@ fn is_safe_repo_path(p: &str) -> bool {
             .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
-fn validate_source(m: &ModelEntry) -> Result<()> {
-    let ModelSource { repo, revision } = &m.source;
+/// Checks a pinned repo; `of` names what it is the source of, for errors.
+fn validate_source(source: &ModelSource, of: &str) -> Result<()> {
+    let ModelSource { repo, revision } = source;
     let repo_ok = match repo.split_once('/') {
         Some((owner, name)) => {
             let ok = |s: &str| {
@@ -224,8 +237,7 @@ fn validate_source(m: &ModelEntry) -> Result<()> {
     };
     if !repo_ok {
         return Err(TranslatteError::Manifest(format!(
-            "invalid source repo {repo:?} for model {}",
-            m.id
+            "invalid source repo {repo:?} for {of}"
         )));
     }
     let rev_ok = revision.len() == 40
@@ -234,8 +246,7 @@ fn validate_source(m: &ModelEntry) -> Result<()> {
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
     if !rev_ok {
         return Err(TranslatteError::Manifest(format!(
-            "source revision for model {} must be a 40-hex commit sha, got {revision:?}",
-            m.id
+            "source revision for {of} must be a 40-hex commit sha, got {revision:?}"
         )));
     }
     Ok(())
@@ -389,6 +400,21 @@ pub(crate) mod tests {
             "0123456789abcdef0123456789abcdef0123456",
             1,
         ));
+    }
+
+    #[test]
+    fn a_file_can_come_from_another_repo() {
+        let json = SAMPLE.replace(
+            r#"{"path": "rec-latin/inference.onnx", "size": 3, "source_path": "inference.onnx"}"#,
+            r#"{"path": "rec-latin/inference.onnx", "size": 3, "source_path": "rec-latin/x.onnx",
+               "source": {"repo": "acme/converted", "revision": "fedcba9876543210fedcba9876543210fedcba98"}}"#,
+        );
+        let m = Manifest::from_json(&json).unwrap();
+        let latin = m.model("rec-latin").unwrap();
+        assert_eq!(latin.file_source(&latin.files[0]).repo, "acme/converted");
+        assert_eq!(latin.file_source(&latin.files[1]).repo, "acme/latin_rec");
+        assert_rejected(json.replace("fedcba9876543210fedcba9876543210fedcba98", "main"));
+        assert_rejected(json.replace("acme/converted", "converted"));
     }
 
     #[test]

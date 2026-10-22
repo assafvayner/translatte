@@ -306,7 +306,7 @@ impl<'a> Downloader<'a> {
         let opened = self
             .watch(
                 self.source
-                    .open(&entry.source, &f.source_path, Some(have..f.size)),
+                    .open(entry.file_source(f), &f.source_path, Some(have..f.size)),
                 cancel,
             )
             .await??;
@@ -383,7 +383,7 @@ impl<'a> Downloader<'a> {
     ) -> Result<()> {
         let opened = self
             .watch(
-                self.source.open(&entry.source, &f.source_path, None),
+                self.source.open(entry.file_source(f), &f.source_path, None),
                 cancel,
             )
             .await??;
@@ -737,7 +737,7 @@ PostProcess:
             )
         };
         let json = format!(
-            r#"{{"version": 1, "models": [{}, {}, {}], "languages": []}}"#,
+            r#"{{"version": 1, "models": [{}, {}, {}, {}], "languages": []}}"#,
             model(
                 "det",
                 "core",
@@ -759,6 +759,17 @@ PostProcess:
                     entry("rec-x/dict.txt", &dict, "inference.yml", true),
                 ]
             ),
+            model(
+                "rec-y",
+                "script_pack",
+                "o/rec",
+                vec![
+                    format!(
+                        r#"{{"path": "rec-y/inference.ncnn.bin", "size": 4, "source_path": "rec-y/inference.ncnn.bin", "source": {{"repo": "o/ncnn", "revision": "{REV}"}}}}"#
+                    ),
+                    entry("rec-y/dict.txt", &dict, "inference.yml", true),
+                ]
+            ),
         );
         let dir = tempfile::tempdir().unwrap();
         let store = ModelStore::new(Manifest::from_json(&json).unwrap(), dir.path().into());
@@ -767,6 +778,7 @@ PostProcess:
         files.insert("o/tr/up.gguf".into(), big);
         files.insert("o/rec/inference.onnx".into(), b"rec".to_vec());
         files.insert("o/rec/inference.yml".into(), YAML.as_bytes().to_vec());
+        files.insert("o/ncnn/rec-y/inference.ncnn.bin".into(), b"ncnn".to_vec());
         Fixture {
             _dir: dir,
             store,
@@ -812,6 +824,20 @@ PostProcess:
 
     fn translator(fx: &Fixture) -> &ModelFile {
         &fx.store.manifest().model("translator").unwrap().files[0]
+    }
+
+    #[test]
+    fn a_file_with_its_own_source_comes_from_that_repo() {
+        let fx = fixture();
+        run(&fx, "rec-y").0.unwrap();
+        assert_eq!(fx.store.state("rec-y").unwrap(), InstallState::Installed);
+        assert_eq!(
+            requests(&fx),
+            vec![
+                ("o/ncnn/rec-y/inference.ncnn.bin".into(), Some(0..4)),
+                ("o/rec/inference.yml".into(), None),
+            ]
+        );
     }
 
     #[test]

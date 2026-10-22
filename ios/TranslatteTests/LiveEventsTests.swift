@@ -56,9 +56,9 @@ final class LiveEventsTests: XCTestCase {
         log.update(nowMs: 1500, prev: first, next: first, result: result([region("a", x: 0)]), intervalMs: 250, ptsMs: nil)
         log.reset(nowMs: 1600, prev: first)
         XCTAssertEqual(lines, [
-            #"{"t_ms":250,"ev":"update","regions":1,"shown":1,"seen":[4],"det_ms":120,"rec_ms":85,"tr_ms":40,"engine":"ort","reused":0,"w":720,"h":1280,"pts_ms":3000,"blocks":[{"src":"a","box":[0,0,40,20]}]}"#,
+            #"{"t_ms":250,"ev":"update","regions":1,"shown":1,"seen":[4],"det_ms":120,"rec_ms":85,"tr_ms":40,"precision":"fp32","reused":0,"w":720,"h":1280,"pts_ms":3000,"blocks":[{"src":"a","box":[0,0,40,20]}]}"#,
             #"{"t_ms":250,"ev":"add","id":4,"src":"say \"hi\"\n","tr":null,"box":[0,0,40,20]}"#,
-            #"{"t_ms":500,"ev":"update","regions":1,"shown":1,"seen":[4],"det_ms":120,"rec_ms":85,"tr_ms":40,"engine":"ort","reused":0,"w":720,"h":1280,"interval_ms":250,"blocks":[{"src":"a","box":[0,0,40,20]}]}"#,
+            #"{"t_ms":500,"ev":"update","regions":1,"shown":1,"seen":[4],"det_ms":120,"rec_ms":85,"tr_ms":40,"precision":"fp32","reused":0,"w":720,"h":1280,"interval_ms":250,"blocks":[{"src":"a","box":[0,0,40,20]}]}"#,
             #"{"t_ms":600,"ev":"remove","id":4,"src":"say \"hi\"\n","tr":null,"box":[0,0,40,20],"reason":"reset"}"#,
         ])
     }

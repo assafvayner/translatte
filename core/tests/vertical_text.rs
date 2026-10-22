@@ -3,42 +3,26 @@ mod common;
 use common::store;
 use translatte_core::geometry::Direction;
 use translatte_core::manifest::Language;
-use translatte_core::ocr::detector::Detector;
-use translatte_core::ocr::recognizer::Recognizer;
-use translatte_core::ocr::{Line, OcrEngine, TextDetector, TextRecognizer};
+use translatte_core::ocr::{load_detector, load_recognizer};
+use translatte_core::ocr::{Line, Precision, TextDetector, TextRecognizer};
 use translatte_core::pipeline::Pipeline;
 use translatte_core::translate::Translator;
 use translatte_core::Result;
 
-/// The engines this build can run: ONNX Runtime, and NCNN with the `ncnn` feature.
-fn engines() -> Vec<OcrEngine> {
-    if cfg!(feature = "ncnn") {
-        OcrEngine::ALL.to_vec()
-    } else {
-        vec![OcrEngine::Ort]
-    }
-}
-
-fn read(image: &str, pack: &str, engine: OcrEngine) -> Option<Vec<Line>> {
+fn read(image: &str, pack: &str, precision: Precision) -> Option<Vec<Line>> {
     let store = store()?;
     let img = image::open(format!("{}/tests/data/{image}", env!("CARGO_MANIFEST_DIR")))
         .unwrap()
         .to_rgb8();
-    let mut det =
-        Detector::load(&store.model_file("det", "inference.onnx").unwrap(), engine).unwrap();
-    let mut rec = Recognizer::load(
-        &store.model_file(pack, "inference.onnx").unwrap(),
-        &store.model_file(pack, "dict.txt").unwrap(),
-        engine,
-    )
-    .unwrap();
+    let mut det = load_detector(&store, precision).unwrap();
+    let mut rec = load_recognizer(&store, pack, precision).unwrap();
     let quads = det.detect(&img).unwrap();
     Some(rec.recognize_all(&img, &quads, &mut |_| {}).unwrap())
 }
 
 fn assert_vertical(image: &str, pack: &str, want: &str, direction: Direction, angle: f32) {
-    for engine in engines() {
-        assert_vertical_on(image, pack, want, direction, angle, engine);
+    for precision in Precision::ALL {
+        assert_vertical_on(image, pack, want, direction, angle, precision);
     }
 }
 
@@ -48,9 +32,9 @@ fn assert_vertical_on(
     want: &str,
     direction: Direction,
     angle: f32,
-    engine: OcrEngine,
+    precision: Precision,
 ) {
-    let Some(lines) = read(image, pack, engine) else {
+    let Some(lines) = read(image, pack, precision) else {
         eprintln!("TRANSLATTE_MODELS not set; skipping");
         return;
     };
@@ -61,11 +45,11 @@ fn assert_vertical_on(
         .join(" ");
     assert!(
         text.to_uppercase().replace(' ', "").contains(want),
-        "{engine}: got {lines:?}"
+        "{precision}: got {lines:?}"
     );
     for l in &lines {
-        assert_eq!(l.direction, direction, "{engine}: {l:?}");
-        assert!((l.quad.angle() - angle).abs() < 0.2, "{engine}: {l:?}");
+        assert_eq!(l.direction, direction, "{precision}: {l:?}");
+        assert!((l.quad.angle() - angle).abs() < 0.2, "{precision}: {l:?}");
     }
 }
 
@@ -104,17 +88,17 @@ fn reads_japanese_columns_top_to_bottom() {
 
 #[test]
 fn lone_tall_glyph_stays_horizontal() {
-    for engine in engines() {
-        let Some(lines) = read("lone_glyph.png", "rec-latin", engine) else {
+    for precision in Precision::ALL {
+        let Some(lines) = read("lone_glyph.png", "rec-latin", precision) else {
             eprintln!("TRANSLATTE_MODELS not set; skipping");
             return;
         };
-        assert_eq!(lines.len(), 1, "{engine}: {lines:?}");
+        assert_eq!(lines.len(), 1, "{precision}: {lines:?}");
         let l = &lines[0];
-        assert!(l.quad.is_tall(), "{engine}: {l:?}");
-        assert_eq!(l.text, "1", "{engine}: {l:?}");
-        assert_eq!(l.direction, Direction::Horizontal, "{engine}: {l:?}");
-        assert!(l.quad.angle().abs() < 0.2, "{engine}: {l:?}");
+        assert!(l.quad.is_tall(), "{precision}: {l:?}");
+        assert_eq!(l.text, "1", "{precision}: {l:?}");
+        assert_eq!(l.direction, Direction::Horizontal, "{precision}: {l:?}");
+        assert!(l.quad.angle().abs() < 0.2, "{precision}: {l:?}");
     }
 }
 
@@ -146,33 +130,28 @@ fn japanese_columns_become_one_block_in_reading_order() {
     ))
     .unwrap()
     .to_rgb8();
-    for engine in engines() {
+    for precision in Precision::ALL {
         let pipeline: Pipeline<_, _, NoTranslator> = Pipeline::new(
-            Detector::load(&store.model_file("det", "inference.onnx").unwrap(), engine).unwrap(),
-            Recognizer::load(
-                &store.model_file(&pack, "inference.onnx").unwrap(),
-                &store.model_file(&pack, "dict.txt").unwrap(),
-                engine,
-            )
-            .unwrap(),
+            load_detector(&store, precision).unwrap(),
+            load_recognizer(&store, &pack, precision).unwrap(),
             None,
         );
         let regions = pipeline.run(&img, &ja, &en, &mut |_| {}).unwrap().regions;
-        assert_eq!(regions.len(), 1, "{engine}: {regions:?}");
+        assert_eq!(regions.len(), 1, "{precision}: {regions:?}");
         let r = &regions[0];
         // The recognizer drops the vertical long-vowel mark (ー) in rotated column crops.
         assert_eq!(
             r.source_text.replace('ー', ""),
             "本日のおすすめ醤油ラメン味噌ラメン",
-            "{engine}: {r:?}"
+            "{precision}: {r:?}"
         );
         assert!(
             (r.quad.angle() - std::f32::consts::FRAC_PI_2).abs() < 0.2,
-            "{engine}: {r:?}"
+            "{precision}: {r:?}"
         );
         assert!(
             (r.angle - std::f32::consts::FRAC_PI_2).abs() < 0.2,
-            "{engine}: {r:?}"
+            "{precision}: {r:?}"
         );
     }
 }
