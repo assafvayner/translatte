@@ -56,6 +56,9 @@ struct LiveStages<T> {
 enum LiveRules {
     /// UserDefaults key of the "Live translation (experimental)" setting; on by default.
     static let storageKey = "liveTranslation"
+    /// UserDefaults key of the debug "Live OCR precision" setting: fp32 reads live frames with the
+    /// photo models instead of the fp16 ones.
+    static let fp32StorageKey = "liveOcrFp32"
     /// Frames reach the engine at most this large on their long side.
     static let maxFrameSide = 1280
     /// Minimum time between frame starts while the device is hot.

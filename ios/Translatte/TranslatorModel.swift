@@ -83,6 +83,11 @@ final class TranslatorModel: ObservableObject {
                 if !usesHostModels {
                     worker.async { _ = try? engine.pruneModels() }
                 }
+                #if DEBUG
+                if UserDefaults.standard.bool(forKey: LiveRules.fp32StorageKey) {
+                    try? engine.setLivePrecision(precision: "fp32")
+                }
+                #endif
                 self.engine = engine
                 downloads.engine = engine
             }
@@ -238,6 +243,12 @@ final class TranslatorModel: ObservableObject {
 
     /// Loads the models for the picked source language on the worker queue and runs the translation
     /// model once, so a photo taken next skips that work.
+    /// Debug builds: reads live frames with the fp32 (photo) models instead of the fp16 ones.
+    func setLiveFp32(_ fp32: Bool) {
+        guard let engine else { return }
+        worker.async { try? engine.setLivePrecision(precision: fp32 ? "fp32" : "fp16") }
+    }
+
     func prepare() {
         guard let engine, modelsReady, !sourceCode.isEmpty else { return }
         let source = sourceCode

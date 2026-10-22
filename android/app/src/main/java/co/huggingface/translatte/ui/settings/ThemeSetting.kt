@@ -51,10 +51,16 @@ class UiPrefs(context: Context) {
         get() = prefs.getBoolean(LIVE_TRANSLATION, true)
         set(value) = prefs.edit().putBoolean(LIVE_TRANSLATION, value).apply()
 
+    /** Debug builds: live frames use the fp32 OCR models instead of fp16. */
+    var liveFp32: Boolean
+        get() = prefs.getBoolean(LIVE_FP32, false)
+        set(value) = prefs.edit().putBoolean(LIVE_FP32, value).apply()
+
     private companion object {
         const val THEME = "theme"
         const val RESULT_HINT_SEEN = "result_hint_seen"
         const val CAMERA_ASKED = "camera_asked"
         const val LIVE_TRANSLATION = "live_translation"
+        const val LIVE_FP32 = "live_fp32"
     }
 }

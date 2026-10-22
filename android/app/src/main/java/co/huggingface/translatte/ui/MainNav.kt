@@ -49,6 +49,7 @@ fun MainNav(
     var resultOrigin by rememberSaveable { mutableStateOf(Screen.Home) }
     var hintSeen by remember { mutableStateOf(prefs.resultHintSeen) }
     var live by remember { mutableStateOf(prefs.liveTranslation) }
+    var liveFp32 by remember { mutableStateOf(prefs.liveFp32) }
     LaunchedEffect(screen) { onScreenChange(screen) }
     val back: () -> Unit = { Nav.back(screen, resultOrigin)?.let { screen = it } }
 
@@ -138,6 +139,12 @@ fun MainNav(
             onLive = {
                 live = it
                 prefs.liveTranslation = it
+            },
+            liveFp32 = liveFp32,
+            onLiveFp32 = {
+                liveFp32 = it
+                prefs.liveFp32 = it
+                vm.setLiveFp32(it)
             },
         )
     }

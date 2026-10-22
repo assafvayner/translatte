@@ -44,6 +44,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     live: Boolean = true,
     onLive: (Boolean) -> Unit = {},
+    liveFp32: Boolean = false,
+    onLiveFp32: (Boolean) -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val uri = LocalUriHandler.current
@@ -67,6 +69,14 @@ fun SettingsScreen(
                     subtitle = "Translates what the camera sees as you point it. Off: translate when you take a photo.",
                     trailing = { Switch(checked = live, onCheckedChange = null) },
                 )
+            }
+            if (BuildConfig.DEBUG) {
+                SectionCard("Live OCR precision (debug)") {
+                    Column(Modifier.selectableGroup()) {
+                        CheckRow("fp16", selected = !liveFp32, onClick = { onLiveFp32(false) }, subtitle = "Live models, faster")
+                        CheckRow("fp32", selected = liveFp32, onClick = { onLiveFp32(true) }, subtitle = "The photo models")
+                    }
+                }
             }
             SectionCard("About") {
                 ListRow("Version", subtitle = BuildConfig.VERSION_NAME)

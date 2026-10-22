@@ -12,6 +12,7 @@ use translatte_core::geometry::{Pt, Quad};
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest, ModelEntry, ModelKind};
 use translatte_core::model_store::{InstallState, ModelStore};
+use translatte_core::ocr::Precision;
 use translatte_core::pipeline::{PipelineOutput, Stage, TranslatedRegion};
 use translatte_core::TranslatteError;
 
@@ -301,6 +302,7 @@ struct Cached {
 pub struct Engine {
     store: ModelStore,
     cached: Mutex<Option<Cached>>,
+    live_precision: Mutex<Precision>,
     #[cfg(feature = "download")]
     downloading: Mutex<()>,
 }
@@ -313,6 +315,7 @@ impl Engine {
         Ok(Arc::new(Self {
             store: ModelStore::new(manifest, PathBuf::from(models_dir)),
             cached: Mutex::new(None),
+            live_precision: Mutex::new(Precision::Fp16),
             #[cfg(feature = "download")]
             downloading: Mutex::new(()),
         }))
@@ -515,6 +518,20 @@ impl Engine {
         Ok(result)
     }
 
+    /// Sets the precision `ocr_frame` reads at, `fp16` (the default) or `fp32`; `fp32` reuses the
+    /// photo models rather than loading a second set.
+    pub fn set_live_precision(&self, precision: String) -> Result<(), FfiError> {
+        let precision: Precision = precision.parse()?;
+        *self
+            .live_precision
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = precision;
+        if let Some(c) = self.lock_cached().as_ref() {
+            c.pipeline.set_live_precision(precision);
+        }
+        Ok(())
+    }
+
     /// Frees loaded models (e.g. when the app is backgrounded). Calls still running keep the
     /// models they use until they finish, but load no more for live frames.
     pub fn unload(&self) {
@@ -566,6 +583,12 @@ impl Engine {
         if !reusable {
             drop_cached(&mut cached);
             let pipeline = load_pipeline(&self.store, src, translate, None)?;
+            pipeline.set_live_precision(
+                *self
+                    .live_precision
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
+            );
             *cached = Some(Cached {
                 script_pack: src.script_pack.clone().unwrap_or_default(),
                 translate,

@@ -118,6 +118,7 @@ struct Translation<T> {
 pub struct Pipeline<D, R, T> {
     ocr: Mutex<Ocr<D, R>>,
     live_ocr: Option<LiveOcr<D, R>>,
+    live_on_photo_ocr: AtomicBool,
     translation: Option<Mutex<Translation<T>>>,
     script_pack: Option<String>,
     retired: AtomicBool,
@@ -137,6 +138,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
                 precision: Precision::default(),
             }),
             live_ocr: None,
+            live_on_photo_ocr: AtomicBool::new(false),
             translation: translator.map(|translator| {
                 Mutex::new(Translation {
                     translator,
@@ -176,6 +178,21 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         self
     }
 
+    /// Picks the precision live frames are read at: the photo models' precision reads them with
+    /// the photo models (freeing the live ones), any other the live models'. Ignored when no live
+    /// models were set up or neither runs at `precision`.
+    pub fn set_live_precision(&self, precision: Precision) {
+        let Some(live_ocr) = &self.live_ocr else {
+            return;
+        };
+        if precision == lock(&self.ocr).precision {
+            self.live_on_photo_ocr.store(true, Ordering::Relaxed);
+            *lock(&live_ocr.ocr) = None;
+        } else if precision == live_ocr.precision {
+            self.live_on_photo_ocr.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// Stops live frames from loading models, for a pipeline its owner is done with but that calls
     /// still in flight may use: from now on a live frame whose OCR models aren't loaded yet fails
     /// with [`TranslatteError::Unloaded`], and live frames are no longer translated (which could load
@@ -209,7 +226,11 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<(Vec<Line>, StageTimings)> {
         self.check_source(src)?;
-        let Some(live_ocr) = self.live_ocr.as_ref().filter(|_| live) else {
+        let Some(live_ocr) = self
+            .live_ocr
+            .as_ref()
+            .filter(|_| live && !self.live_on_photo_ocr.load(Ordering::Relaxed))
+        else {
             return lock(&self.ocr).read(img, on_stage);
         };
         let mut ocr = lock(&live_ocr.ocr);
@@ -468,6 +489,40 @@ mod tests {
         assert_eq!(out.regions[0].translated_text.as_deref(), Some("ENTRÉE"));
         frame(&p, &img);
         assert_eq!(loads.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn live_frames_can_use_the_photo_models() {
+        let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
+        let loads = Arc::new(AtomicUsize::new(0));
+        let p = Pipeline::new(
+            FakeDet(vec![quad(10.0)]),
+            FakeRec(vec![("sortie", 0.9); 3], 0),
+            Some(Upper),
+        )
+        .with_precision(Precision::Fp32)
+        .with_live_ocr(Precision::Fp16, {
+            let loads = loads.clone();
+            move || {
+                loads.fetch_add(1, Ordering::Relaxed);
+                Ok((
+                    FakeDet(vec![quad(10.0)]),
+                    FakeRec(vec![("entrée", 0.9); 2], 0),
+                ))
+            }
+        });
+        assert_eq!(frame(&p, &img).timings.precision, Precision::Fp16);
+        p.set_live_precision(Precision::Fp32);
+        let out = frame(&p, &img);
+        assert_eq!(out.timings.precision, Precision::Fp32);
+        assert_eq!(out.regions[0].translated_text.as_deref(), Some("SORTIE"));
+        p.set_live_precision(Precision::Fp16);
+        assert_eq!(frame(&p, &img).timings.precision, Precision::Fp16);
+        assert_eq!(
+            loads.load(Ordering::Relaxed),
+            2,
+            "fp32 freed the live models"
+        );
     }
 
     #[test]
