@@ -448,35 +448,11 @@ impl Engine {
         ))
     }
 
-    /// Runs the same pipeline as `translate_image` on a camera frame: tightly packed RGBA rows of
-    /// `width` x `height`, turned upright by rotating clockwise by `rotation_degrees` (0, 90, 180 or
-    /// 270). Region coordinates, `image_width` and `image_height` are in the upright frame. Always
-    /// translates; shares the pipeline and translation cache with `translate_image`. Blocking; call
-    /// it off the main thread.
-    pub fn translate_frame(
-        &self,
-        rgba: Vec<u8>,
-        width: u32,
-        height: u32,
-        rotation_degrees: u32,
-        source: String,
-    ) -> Result<TranslationResult, FfiError> {
-        let src = self.store.manifest().language(&source)?;
-        let tgt = self.store.target_language()?;
-        let img = upright_rgb(rgba, width, height, rotation_degrees)?;
-
-        let out = self.pipeline(src, true)?.run_frame(&img, src, tgt)?;
-        Ok(TranslationResult::from_output(
-            out,
-            img.width(),
-            img.height(),
-        ))
-    }
-
-    /// The first half of `translate_frame`: reads the frame's text without translating it
-    /// (`translated_text` is `None`, `translate_ms` 0). Pass the result to `translate_regions`;
-    /// that may run on another thread while the next frame is read. Blocking; call it off the main
-    /// thread.
+    /// Reads the text of a camera frame without translating it (`translated_text` is `None`,
+    /// `translate_ms` 0): tightly packed RGBA rows of `width` x `height`, turned upright by rotating
+    /// clockwise by `rotation_degrees` (0, 90, 180 or 270). Region coordinates, `image_width` and
+    /// `image_height` are in the upright frame. Pass the result to `translate_regions`; that may run
+    /// on another thread while the next frame is read. Blocking; call it off the main thread.
     pub fn ocr_frame(
         &self,
         rgba: Vec<u8>,
@@ -495,7 +471,7 @@ impl Engine {
         ))
     }
 
-    /// The second half of `translate_frame`: translates the regions `ocr_frame` read from
+    /// Translates the regions `ocr_frame` read from
     /// `source`, reusing the last frames' translations of blocks that barely changed, and fills in
     /// `translate_ms`. Blocking; call it off the main thread.
     pub fn translate_regions(
@@ -725,21 +701,21 @@ mod tests {
         let dir = tempfile_dir().join("frames");
         let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
         let err = engine
-            .translate_frame(vec![0; 3], 1, 1, 0, "fr".into())
+            .ocr_frame(vec![0; 3], 1, 1, 0, "fr".into())
             .unwrap_err();
         assert!(err.to_string().contains("expected 4"), "{err}");
         let err = engine
-            .translate_frame(vec![0; 4], 1, 1, 45, "fr".into())
+            .ocr_frame(vec![0; 4], 1, 1, 45, "fr".into())
             .unwrap_err();
         assert!(err.to_string().contains("rotation"), "{err}");
         let err = engine
-            .translate_frame(vec![0; 4], 1, 1, 0, "xx".into())
+            .ocr_frame(vec![0; 4], 1, 1, 0, "xx".into())
             .unwrap_err();
         assert!(err.to_string().contains("unknown language"), "{err}");
     }
 
     #[test]
-    fn translate_frame_matches_translate_image_with_real_models() {
+    fn live_frames_match_translate_image_with_real_models() {
         let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
             eprintln!("TRANSLATTE_MODELS not set; skipping");
             return;
@@ -756,48 +732,26 @@ mod tests {
             .translate_image(png, "fr".into(), true, None)
             .unwrap();
 
-        let frame = engine
-            .translate_frame(rgba.clone().into_raw(), w, h, 0, "fr".into())
+        let read = engine
+            .ocr_frame(rgba.clone().into_raw(), w, h, 0, "fr".into())
             .unwrap();
-        assert_eq!((frame.image_width, frame.image_height), (w, h));
+        assert_eq!((read.image_width, read.image_height), (w, h));
+        assert!(read.regions.iter().all(|r| r.translated_text.is_none()));
+        assert!(read.timings.detect_ms + read.timings.recognize_ms > 0);
+        assert_eq!(read.timings.translate_ms, 0);
+        let frame = engine.translate_regions(read, "fr".into()).unwrap();
         assert_eq!(frame.regions, photo.regions);
-        assert!(frame.timings.detect_ms + frame.timings.recognize_ms > 0);
+        assert_eq!(frame.timings.reused, 0);
 
         // A sensor-landscape frame that needs a clockwise quarter turn to be upright.
         let sideways = image::imageops::rotate270(&rgba);
-        let turned = engine
-            .translate_frame(sideways.into_raw(), h, w, 90, "fr".into())
-            .unwrap();
-        assert_eq!((turned.image_width, turned.image_height), (w, h));
-        assert_eq!(turned.regions, photo.regions);
-    }
-
-    #[test]
-    fn ocr_frame_then_translate_regions_matches_translate_frame_with_real_models() {
-        let Some(models) = std::env::var_os("TRANSLATTE_MODELS") else {
-            eprintln!("TRANSLATTE_MODELS not set; skipping");
-            return;
-        };
-        let engine = Engine::new(models.to_string_lossy().into(), manifest_json()).unwrap();
-        let png = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../core/tests/data/bonjour.png"
-        ))
-        .unwrap();
-        let rgba = image::load_from_memory(&png).unwrap().to_rgba8();
-        let (w, h) = rgba.dimensions();
-        let whole = engine
-            .translate_frame(rgba.clone().into_raw(), w, h, 0, "fr".into())
-            .unwrap();
-
         let read = engine
-            .ocr_frame(rgba.into_raw(), w, h, 0, "fr".into())
+            .ocr_frame(sideways.into_raw(), h, w, 90, "fr".into())
             .unwrap();
-        assert!(read.regions.iter().all(|r| r.translated_text.is_none()));
-        assert_eq!(read.timings.translate_ms, 0);
-        let split = engine.translate_regions(read, "fr".into()).unwrap();
-        assert_eq!(split.regions, whole.regions);
-        assert_eq!(split.timings.reused as usize, split.regions.len());
+        assert_eq!((read.image_width, read.image_height), (w, h));
+        let turned = engine.translate_regions(read, "fr".into()).unwrap();
+        assert_eq!(turned.regions, photo.regions);
+        assert_eq!(turned.timings.reused as usize, turned.regions.len());
     }
 
     #[test]

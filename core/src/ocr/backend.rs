@@ -5,7 +5,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use ndarray::{ArrayD, ArrayView4, Axis, IxDyn};
+use ndarray::{ArrayD, ArrayView3, IxDyn};
 use serde::{Deserialize, Serialize};
 
 use crate::{Result, TranslatteError};
@@ -69,18 +69,18 @@ impl From<ncnn::Error> for TranslatteError {
     }
 }
 
-/// One OCR model, fed `[batch, 3, height, width]` tensors. NCNN has no batch dimension, so a batch
-/// runs one input at a time.
+/// One OCR model, fed one `[3, height, width]` image at a time.
 pub struct NcnnModel {
     net: ncnn::Net,
-    out_rank: usize,
+    rank: usize,
 }
 
 impl NcnnModel {
-    /// Loads the model whose parameter file is `param`. `out_rank` is the rank of the original
-    /// ONNX model's output, which outputs are reshaped to. One NCNN thread per big core when OCR
-    /// is pinned to them (see [`super::affinity`]), else 4; `TRANSLATTE_OCR_THREADS` overrides it.
-    pub fn load(param: &Path, precision: Precision, out_rank: usize) -> Result<Self> {
+    /// Loads the model whose parameter file is `param`. `rank` is the rank of the original ONNX
+    /// model's output without its batch dimension, which outputs are reshaped to. One NCNN thread
+    /// per big core when OCR is pinned to them (see [`super::affinity`]), else 4;
+    /// `TRANSLATTE_OCR_THREADS` overrides it.
+    pub fn load(param: &Path, precision: Precision, rank: usize) -> Result<Self> {
         let opts = ncnn::Options {
             threads: super::env_or(
                 "TRANSLATTE_OCR_THREADS",
@@ -90,39 +90,26 @@ impl NcnnModel {
         };
         Ok(Self {
             net: ncnn::Net::load(param, &weights_file(param), &opts)?,
-            out_rank,
+            rank,
         })
     }
 
-    pub fn run(&mut self, input: ArrayView4<f32>) -> Result<ArrayD<f32>> {
-        let (_, c, h, w) = input.dim();
-        let mut items = Vec::with_capacity(input.len_of(Axis(0)));
-        for item in input.axis_iter(Axis(0)) {
-            let item = item.as_standard_layout();
-            let data = item.as_slice().expect("standard layout");
-            let out = self.net.run(INPUT, data, (c, h, w), OUTPUT)?;
-            let mut shape = out.shape;
-            if shape.len() >= self.out_rank {
-                return Err(TranslatteError::Inference(format!(
-                    "ncnn output has shape {shape:?}, expected rank {}",
-                    self.out_rank - 1
-                )));
-            }
-            while shape.len() < self.out_rank - 1 {
-                shape.insert(0, 1);
-            }
+    pub fn run(&mut self, input: ArrayView3<f32>) -> Result<ArrayD<f32>> {
+        let input = input.as_standard_layout();
+        let data = input.as_slice().expect("standard layout");
+        let out = self.net.run(INPUT, data, input.dim(), OUTPUT)?;
+        let mut shape = out.shape;
+        if shape.len() > self.rank {
+            return Err(TranslatteError::Inference(format!(
+                "ncnn output has shape {shape:?}, expected rank {}",
+                self.rank
+            )));
+        }
+        while shape.len() < self.rank {
             shape.insert(0, 1);
-            items.push(
-                ArrayD::from_shape_vec(IxDyn(&shape), out.data)
-                    .map_err(|e| TranslatteError::Inference(e.to_string()))?,
-            );
         }
-        if items.len() == 1 {
-            return Ok(items.pop().expect("one item"));
-        }
-        let views: Vec<_> = items.iter().map(|a| a.view()).collect();
-        ndarray::concatenate(Axis(0), &views)
-            .map_err(|e| TranslatteError::Inference(format!("ncnn outputs differ in shape: {e}")))
+        ArrayD::from_shape_vec(IxDyn(&shape), out.data)
+            .map_err(|e| TranslatteError::Inference(e.to_string()))
     }
 }
 

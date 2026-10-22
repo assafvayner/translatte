@@ -7,16 +7,13 @@ use serde::Serialize;
 use crate::geometry::Quad;
 use crate::layout::group_lines;
 use crate::manifest::Language;
-use crate::ocr::{env_or, Line, Precision, TextDetector, TextRecognizer};
+use crate::ocr::{Line, Precision, TextDetector, TextRecognizer};
 use crate::render::style_hints;
 use crate::translate::reuse::FrameReuse;
 use crate::translate::Translator;
 use crate::{Result, TranslatteError};
 
 const MIN_LINE_CONFIDENCE: f32 = 0.5;
-/// Long side camera frames are detected at (photos use the detector's default, 960). Overridable
-/// with `TRANSLATTE_OCR_LIVE_DET_SIDE`.
-const LIVE_DET_SIDE: usize = 960;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TranslatedRegion {
@@ -136,10 +133,6 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         self
     }
 
-    pub fn script_pack(&self) -> Option<&str> {
-        self.script_pack.as_deref()
-    }
-
     fn check_source(&self, src: &Language) -> Result<()> {
         match (&self.script_pack, &src.script_pack) {
             (Some(own), got) if got.as_ref() != Some(own) => {
@@ -152,21 +145,8 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         }
     }
 
+    /// The lines OCR reads in `img`, with the live models when `live` is set, and its timings.
     pub fn ocr(
-        &self,
-        img: &RgbImage,
-        src: &Language,
-        on_stage: &mut dyn FnMut(Stage),
-    ) -> Result<Vec<Line>> {
-        Ok(self.timed_ocr(img, src, false, on_stage)?.0)
-    }
-
-    /// OCR of a live camera frame as `run_frame` does it, with its timings.
-    pub fn ocr_frame(&self, img: &RgbImage, src: &Language) -> Result<(Vec<Line>, StageTimings)> {
-        self.timed_ocr(img, src, true, &mut |_| {})
-    }
-
-    fn timed_ocr(
         &self,
         img: &RgbImage,
         src: &Language,
@@ -180,12 +160,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         };
         on_stage(Stage::Detecting);
         let start = Instant::now();
-        let quads = if live {
-            let side = env_or("TRANSLATTE_OCR_LIVE_DET_SIDE", LIVE_DET_SIDE) as u32;
-            ocr.detector.detect_at(img, side)?
-        } else {
-            ocr.detector.detect(img)?
-        };
+        let quads = ocr.detector.detect(img)?;
         let detected = Instant::now();
         let total = quads.len();
         let mut lines = ocr.recognizer.recognize_all(img, &quads, &mut |done| {
@@ -221,18 +196,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         Ok(self.translate(out, src, tgt, false, on_stage))
     }
 
-    /// `run` for a live camera frame: [`Self::read_frame`], then [`Self::translate_frame`].
-    pub fn run_frame(
-        &self,
-        img: &RgbImage,
-        src: &Language,
-        tgt: &Language,
-    ) -> Result<PipelineOutput> {
-        let out = self.read_frame(img, src)?;
-        Ok(self.translate_frame(out, src, tgt))
-    }
-
-    /// The untranslated regions of a live camera frame, detected at `LIVE_DET_SIDE`.
+    /// The untranslated regions of a live camera frame.
     pub fn read_frame(&self, img: &RgbImage, src: &Language) -> Result<PipelineOutput> {
         self.read(img, src, true, &mut |_| {})
     }
@@ -255,7 +219,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         live: bool,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<PipelineOutput> {
-        let (lines, timings) = self.timed_ocr(img, src, live, on_stage)?;
+        let (lines, timings) = self.ocr(img, src, live, on_stage)?;
         let mut blocks = group_lines(lines, src);
         blocks.retain(|b| !b.text.trim().is_empty());
         let regions = blocks
@@ -387,6 +351,14 @@ mod tests {
         }
     }
 
+    fn frame<D: TextDetector, R: TextRecognizer, T: Translator>(
+        p: &Pipeline<D, R, T>,
+        img: &RgbImage,
+    ) -> PipelineOutput {
+        let out = p.read_frame(img, &lang()).unwrap();
+        p.translate_frame(out, &lang(), &lang())
+    }
+
     fn lang() -> Language {
         Language {
             code: "fr".into(),
@@ -417,19 +389,13 @@ mod tests {
         );
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
         assert_eq!(out.timings.precision, Precision::Fp32);
-        assert_eq!(
-            p.run_frame(&img, &lang(), &lang())
-                .unwrap()
-                .timings
-                .precision,
-            Precision::Fp32
-        );
+        assert_eq!(frame(&p, &img).timings.precision, Precision::Fp32);
         let p = p.with_live_ocr(
             FakeDet(vec![quad(10.0)]),
             FakeRec(vec![("entrée", 0.9)], 0),
             Precision::Fp16,
         );
-        let out = p.run_frame(&img, &lang(), &lang()).unwrap();
+        let out = frame(&p, &img);
         assert_eq!(out.timings.precision, Precision::Fp16);
         assert_eq!(out.regions[0].translated_text.as_deref(), Some("ENTRÉE"));
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
@@ -508,12 +474,12 @@ mod tests {
             Err(TranslatteError::ScriptPackMismatch { .. })
         ));
         assert!(matches!(
-            p.ocr(&img, &lang(), &mut |_| {}),
+            p.ocr(&img, &lang(), false, &mut |_| {}),
             Err(TranslatteError::ScriptPackMismatch { .. })
         ));
         let mut latin = lang();
         latin.script_pack = Some("rec-latin".into());
-        assert_eq!(p.ocr(&img, &latin, &mut |_| {}).unwrap().len(), 1);
+        assert_eq!(p.ocr(&img, &latin, false, &mut |_| {}).unwrap().0.len(), 1);
     }
 
     struct Failing;
@@ -607,8 +573,8 @@ mod tests {
     fn live_frames_reuse_the_translation_of_a_jittered_block() {
         let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
         let p = jittered_pipeline();
-        p.run_frame(&img, &lang(), &lang()).unwrap();
-        let out = p.run_frame(&img, &lang(), &lang()).unwrap();
+        frame(&p, &img);
+        let out = frame(&p, &img);
         assert_eq!(
             p.translator().translator.0,
             vec![
@@ -635,7 +601,7 @@ mod tests {
             Some(Recording::default()),
         );
         for _ in drifting {
-            p.run_frame(&img, &lang(), &lang()).unwrap();
+            frame(&p, &img);
         }
         assert_eq!(
             p.translator().translator.0,
@@ -650,7 +616,7 @@ mod tests {
     fn photos_always_translate() {
         let img = RgbImage::from_pixel(200, 400, Rgb([255, 255, 255]));
         let p = jittered_pipeline();
-        p.run_frame(&img, &lang(), &lang()).unwrap();
+        frame(&p, &img);
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
         assert_eq!(p.translator().translator.0.len(), 2);
         assert_eq!(p.translator().translator.0[1].len(), 2);

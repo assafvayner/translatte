@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use image::RgbImage;
-use ndarray::{Axis, Ix3};
+use ndarray::Ix2;
 
 use super::backend::{NcnnModel, Precision};
 use super::charset::Charset;
@@ -40,7 +40,7 @@ impl Recognizer {
     /// Loads the recognizer whose NCNN parameter file is `param`, reading characters from `dict`.
     pub fn load(param: &Path, dict: &Path, precision: Precision) -> Result<Self> {
         let _pin = super::affinity::pin();
-        let model = NcnnModel::load(param, precision, 3)?;
+        let model = NcnnModel::load(param, precision, 2)?;
         let charset = Charset::from_dict_str(&std::fs::read_to_string(dict)?);
         Ok(Self { model, charset })
     }
@@ -51,18 +51,18 @@ impl Recognizer {
         let out = self
             .model
             .run(tensor.view())?
-            .into_dimensionality::<Ix3>()
+            .into_dimensionality::<Ix2>()
             .map_err(|e| {
                 TranslatteError::Inference(format!("unexpected recognizer output shape: {e}"))
             })?;
-        if out.dim().2 != self.charset.len() {
+        if out.dim().1 != self.charset.len() {
             return Err(TranslatteError::Inference(format!(
                 "charset has {} classes but model outputs {}",
                 self.charset.len(),
-                out.dim().2
+                out.dim().1
             )));
         }
-        Ok(ctc_decode(out.index_axis(Axis(0), 0), &self.charset))
+        Ok(ctc_decode(out.view(), &self.charset))
     }
 
     /// Reads each crop; `on_progress(done)` gets the number of crops read before each one.

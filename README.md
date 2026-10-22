@@ -172,7 +172,7 @@ scripts/android/build.sh      # -> <target dir>/aarch64-linux-android/release/{t
 scripts/android/run.sh core/tests/data/bonjour.png fr     # <image> <from> [-] [name]; "-" = OCR only
 ```
 
-- NCNN builds from `ncnn/vendor/` via the NDK CMake toolchain with the NDK's OpenMP. On big.LITTLE phones OCR runs pinned to the big cores, one NCNN thread per big core (`TRANSLATTE_OCR_PIN=0` turns pinning off, `TRANSLATTE_OCR_THREADS` sets the thread count, `TRANSLATTE_OCR_LIVE_DET_SIDE` the detector size for live frames).
+- NCNN builds from `ncnn/vendor/` via the NDK CMake toolchain with the NDK's OpenMP. On big.LITTLE phones OCR runs pinned to the big cores, one NCNN thread per big core (`TRANSLATTE_OCR_PIN=0` turns pinning off, `TRANSLATTE_OCR_THREADS` sets the thread count).
 - bergamot-translator builds via the NDK CMake toolchain with `c++_shared` for `armv8.2-a+dotprod` (`BERGAMOT_BUILD_ARCH` overrides).
 - `run.sh` pushes the binary, shared libs, manifest and the needed models (detector, the source language's recognizer pack, and its translation model unless OCR-only; models whose size is unchanged are skipped) to `/data/local/tmp/translatte/`, runs under `/system/bin/time -v`, and pulls `out/android/<name>.{png,json,log}`.
 - `run.sh` knobs: `TASKSET=<hex cpu mask>`, `RUN_TIMEOUT` (seconds, default 60).

@@ -88,13 +88,14 @@ pub fn run_eval(
                 setup::build_pipeline(&store, src, false, precision)?,
             );
         }
-        let pipeline = pipelines.get_mut(&key).expect("inserted above");
+        let pipeline = &pipelines[&key];
         let image_path = dir.join(image_name);
         let img = image::open(&image_path)
             .with_context(|| format!("opening {}", image_path.display()))?
             .to_rgb8();
         let got: Vec<String> = pipeline
-            .ocr(&img, src, &mut |_| {})?
+            .ocr(&img, src, false, &mut |_| {})?
+            .0
             .into_iter()
             .map(|l| l.text)
             .collect();

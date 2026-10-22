@@ -25,7 +25,7 @@ impl Detector {
     pub fn load(param: &Path, precision: Precision) -> Result<Self> {
         let _pin = super::affinity::pin();
         Ok(Self {
-            model: NcnnModel::load(param, precision, 4)?,
+            model: NcnnModel::load(param, precision, 3)?,
             params: DbParams::default(),
         })
     }
@@ -33,25 +33,20 @@ impl Detector {
 
 impl TextDetector for Detector {
     fn detect(&mut self, img: &RgbImage) -> Result<Vec<Quad>> {
-        self.detect_at(img, RESIZE_LONG)
-    }
-
-    fn detect_at(&mut self, img: &RgbImage, long_side: u32) -> Result<Vec<Quad>> {
         if img.width() == 0 || img.height() == 0 {
             return Ok(Vec::new());
         }
-        let input = det_preprocess(img, long_side.min(RESIZE_LONG));
+        let input = det_preprocess(img, RESIZE_LONG);
         let _pin = super::affinity::pin();
         let out = self.model.run(input.tensor.view())?;
         let prob = out
-            .index_axis(Axis(0), 0)
             .index_axis_move(Axis(0), 0)
             .into_dimensionality::<Ix2>()
             .map_err(|e| {
                 TranslatteError::Inference(format!("unexpected detector output shape: {e}"))
             })?;
         let (w, h) = (img.width() as f32, img.height() as f32);
-        Ok(db_postprocess(prob, &self.params)
+        Ok(db_postprocess(prob.view(), &self.params)
             .into_iter()
             .map(|(q, _)| {
                 q.scale(input.scale_x, input.scale_y)

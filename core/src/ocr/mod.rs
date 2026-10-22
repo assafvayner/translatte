@@ -30,12 +30,6 @@ pub struct Line {
 
 pub trait TextDetector {
     fn detect(&mut self, img: &RgbImage) -> Result<Vec<Quad>>;
-
-    /// Detects with the image's long side scaled to at most `long_side` instead of the default.
-    fn detect_at(&mut self, img: &RgbImage, long_side: u32) -> Result<Vec<Quad>> {
-        let _ = long_side;
-        self.detect(img)
-    }
 }
 
 pub trait TextRecognizer {

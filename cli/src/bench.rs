@@ -18,7 +18,8 @@ pub struct BenchArgs {
     pub translate: bool,
     pub only: Vec<String>,
     pub text: Option<PathBuf>,
-    /// Treat the fixtures, in name order, as consecutive camera frames: one `ocr_frame` each.
+    /// Treat the fixtures, in name order, as consecutive camera frames: one live OCR run each, after
+    /// one warm-up run per pipeline.
     pub live: bool,
     pub precision: Precision,
 }
@@ -39,7 +40,8 @@ fn stats(name: &str, mut v: Vec<u32>) {
 }
 
 /// Times the pipeline stages over the fixtures in `dir` (see fixtures/README.md), `iters` times
-/// each after one warm-up run, and reports the OCR CER and recognized lines.
+/// each after one warm-up run (once each with `live`), and reports the OCR CER and recognized
+/// lines.
 pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()> {
     let store = setup::load_store(manifest, models)?;
     let tgt = store.target_language()?;
@@ -78,13 +80,14 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
         let Some(key) = src.script_pack.clone() else {
             continue;
         };
-        if !pipelines.contains_key(&key) {
+        let fresh = !pipelines.contains_key(&key);
+        if fresh {
             pipelines.insert(
                 key.clone(),
                 setup::build_pipeline(&store, src, args.translate, args.precision)?,
             );
         }
-        let pipeline = pipelines.get_mut(&key).expect("inserted above");
+        let pipeline = &pipelines[&key];
         if args.translate {
             pipeline.warm(src, tgt)?;
         }
@@ -109,16 +112,16 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
             reused: 0,
         };
         let lines = if args.live {
-            if samples.is_empty() {
-                pipeline.ocr(&img, src, &mut |_| {})?;
+            if fresh {
+                pipeline.ocr(&img, src, true, &mut |_| {})?;
             }
-            let (lines, t) = pipeline.ocr_frame(&img, src)?;
+            let (lines, t) = pipeline.ocr(&img, src, true, &mut |_| {})?;
             rec.push(t.recognize_ms);
             min = t;
             samples.push(t);
             lines
         } else {
-            pipeline.ocr(&img, src, &mut |_| {})?
+            pipeline.ocr(&img, src, false, &mut |_| {})?.0
         };
         for _ in 0..if args.live { 0 } else { args.iters } {
             let t = pipeline.run(&img, src, tgt, &mut |_| {})?.timings;
@@ -153,10 +156,10 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
         println!("0 fixtures found in {}", args.dir.display());
         return Ok(());
     }
+    let iters = if args.live { 1 } else { args.iters };
     println!(
-        "{} fixtures x {} iters ({}), {:.1} lines/image, mean CER {:.4}",
+        "{} fixtures x {iters} iters ({}), {:.1} lines/image, mean CER {:.4}",
         cers.len(),
-        args.iters,
         args.precision,
         line_counts.iter().sum::<usize>() as f64 / line_counts.len() as f64,
         cers.iter().sum::<f64>() / cers.len() as f64
@@ -182,9 +185,13 @@ pub fn run_bench(args: &BenchArgs, manifest: &Path, models: &Path) -> Result<()>
     let mean = |f: fn(&StageTimings) -> u32| {
         best.iter().map(|t| f(t) as f64).sum::<f64>() / best.len() as f64
     };
+    let per_image = if args.live {
+        "per-frame".to_string()
+    } else {
+        format!("per-image best of {iters}")
+    };
     println!(
-        "  per-image best of {}: detect {:.1}ms  recognize {:.1}ms  translate {:.1}ms",
-        args.iters,
+        "  {per_image}: detect {:.1}ms  recognize {:.1}ms  translate {:.1}ms",
         mean(|t| t.detect_ms),
         mean(|t| t.recognize_ms),
         if args.translate {
