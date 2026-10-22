@@ -75,16 +75,20 @@ pub struct NcnnModel {
     rank: usize,
 }
 
+/// More threads than this were slower on an 8-performance-core Mac (iOS simulator replays).
+const MAX_UNPINNED_THREADS: usize = 4;
+
 impl NcnnModel {
     /// Loads the model whose parameter file is `param`. `rank` is the rank of the original ONNX
     /// model's output without its batch dimension, which outputs are reshaped to. One NCNN thread
     /// per big core, as [`super::affinity`] finds them when OCR is pinned to them, else as NCNN
-    /// finds them; `TRANSLATTE_OCR_THREADS` overrides it.
+    /// finds them, up to [`MAX_UNPINNED_THREADS`]; `TRANSLATTE_OCR_THREADS` overrides it.
     pub fn load(param: &Path, precision: Precision, rank: usize) -> Result<Self> {
         let opts = ncnn::Options {
             threads: super::env_or(
                 "TRANSLATTE_OCR_THREADS",
-                super::affinity::big_core_count().unwrap_or_else(ncnn::big_cpu_count),
+                super::affinity::big_core_count()
+                    .unwrap_or_else(|| ncnn::big_cpu_count().min(MAX_UNPINNED_THREADS)),
             ),
             fp16: precision == Precision::Fp16,
         };
