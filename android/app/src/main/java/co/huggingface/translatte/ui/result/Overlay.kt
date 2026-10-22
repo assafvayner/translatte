@@ -169,19 +169,20 @@ internal class RegionBox(val region: Region, previous: RegionBox? = null) {
         return fitText(region.translatedText.orEmpty(), region.foreground.argb(), w, h).also { layout = (w to h) to it }
     }
 
-    /** Draws at image-to-view [scale] and offset ([left], [top]), shifted by ([dx], [dy]) image pixels. */
-    fun draw(canvas: Canvas, scale: Float, left: Float, top: Float, dx: Float = 0f, dy: Float = 0f) {
+    /** Draws at image-to-view [scale] and offset ([left], [top]), shifted by ([dx], [dy]) image pixels, at [alpha]. */
+    fun draw(canvas: Canvas, scale: Float, left: Float, top: Float, dx: Float = 0f, dy: Float = 0f, alpha: Float = 1f) {
         val w = width * scale
         val h = height * scale
         val pad = max(1f, h * 0.05f)
-        canvas.save()
+        val saved = canvas.save()
         canvas.translate(left + (cx + dx) * scale, top + (cy + dy) * scale)
         canvas.rotate(Math.toDegrees(region.angle.toDouble()).toFloat())
+        if (alpha < 1f) canvas.saveLayerAlpha(-w / 2, -h / 2, w / 2, h / 2, (alpha * 255).roundToInt())
         canvas.drawRect(-w / 2, -h / 2, w / 2, h / 2, background)
         val layout = layoutFor(w - 2 * pad, h - 2 * pad)
         canvas.translate(-w / 2 + pad, -layout.height / 2f)
         layout.draw(canvas)
-        canvas.restore()
+        canvas.restoreToCount(saved)
     }
 }
 

@@ -219,6 +219,7 @@ class LiveTranslator(
     }
 
     private fun publish(frame: LiveFrame, result: TranslationResult) {
+        if (LiveRules.skipped(result)) return
         val now = SystemClock.elapsedRealtime()
         val prev = overlay
         val moved = motion.rebase(frame.thumb?.let { Thumb(it, result.imageWidth.toInt(), result.imageHeight.toInt()) })

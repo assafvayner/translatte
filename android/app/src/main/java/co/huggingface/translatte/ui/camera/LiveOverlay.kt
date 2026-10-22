@@ -23,7 +23,8 @@ import uniffi.translatte_ffi.Point
 /**
  * Paints live regions over the camera preview in the result viewer's style, placed with
  * [LiveRules.fill] from the upright frame size [imageSize] and moved with the camera by the
- * translator's shift. Each update slides kept boxes from their previous position over [LiveRules.MOVE_MS].
+ * translator's shift. Each update slides kept boxes from their previous position, and fades in a
+ * changed translation, over [LiveRules.MOVE_MS].
  */
 @Composable
 fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
@@ -31,7 +32,10 @@ fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
     val imageSize = translator.imageSize
     val cache = remember { HashMap<Long, RegionBox>() }
     val boxes = remember(tracked) {
-        val next = tracked.map { RegionBox(it.region, cache[it.id]) to center(it.from) }
+        val next = tracked.map { t ->
+            val old = cache[t.id]
+            Triple(RegionBox(t.region, old), center(t.from), t.fadeFrom?.let { RegionBox(t.region.copy(translatedText = it), old) })
+        }
         cache.clear()
         tracked.forEachIndexed { i, t -> cache[t.id] = next[i].first }
         next
@@ -47,8 +51,11 @@ fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
         val rest = 1f - progress.value
         val shift = translator.shift
         drawIntoCanvas { c ->
-            boxes.forEach { (box, from) ->
-                box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, (from.x - box.cx) * rest + shift.x, (from.y - box.cy) * rest + shift.y)
+            boxes.forEach { (box, from, fade) ->
+                val dx = (from.x - box.cx) * rest + shift.x
+                val dy = (from.y - box.cy) * rest + shift.y
+                box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, dx, dy)
+                if (fade != null && rest > 0f) fade.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, dx, dy, rest)
             }
         }
     }

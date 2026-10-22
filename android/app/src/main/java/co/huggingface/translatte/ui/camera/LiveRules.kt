@@ -113,6 +113,13 @@ object LiveRules {
     fun downscaleFactor(width: Int, height: Int): Int =
         max(1, (max(width, height) + MAX_FRAME_SIDE - 1) / MAX_FRAME_SIDE)
 
+    /**
+     * Whether the engine skipped [result]'s frame as too blurred to read: no update rather than an
+     * empty one. Always false until the engine reports skipped frames.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun skipped(result: TranslationResult): Boolean = false
+
     /** Snap freezes the live result only when it translated something; otherwise the photo pipeline runs. */
     fun snapUsesLive(result: TranslationResult?): Boolean =
         result != null && result.translationError == null && result.regions.any { it.translatedText != null }

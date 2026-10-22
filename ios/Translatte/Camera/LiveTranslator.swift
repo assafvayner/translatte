@@ -230,6 +230,7 @@ final class LiveTranslator: ObservableObject {
     }
 
     private func publish(_ frame: LiveFrame, _ result: TranslationResult) {
+        guard !LiveRules.skipped(result) else { return }
         let now = Self.nowMs()
         let prev = overlay
         let moved = motion.rebase(frame.thumb.map { Thumb(pixels: $0, width: Int(result.imageWidth), height: Int(result.imageHeight)) })
