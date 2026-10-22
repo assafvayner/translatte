@@ -24,6 +24,8 @@ pub struct TranslatedRegion {
     pub bg_rgb: [u8; 3],
     pub fg_rgb: [u8; 3],
     pub angle: f32,
+    /// The block's typical line height in image pixels: the median of its lines' short sides.
+    pub line_height: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -298,6 +300,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             .into_iter()
             .map(|b| {
                 let hints = style_hints(img, &b.quad);
+                let line_height = line_height(&b.lines);
                 TranslatedRegion {
                     quad: b.quad,
                     source_text: b.text,
@@ -305,6 +308,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
                     bg_rgb: hints.bg,
                     fg_rgb: hints.fg,
                     angle: hints.angle,
+                    line_height,
                 }
             })
             .collect();
@@ -379,6 +383,16 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
     }
 }
 
+/// The median of the lines' short sides: the glyph size of horizontal and vertical lines alike.
+fn line_height(lines: &[Line]) -> f32 {
+    let mut sides: Vec<f32> = lines
+        .iter()
+        .map(|l| l.quad.width().min(l.quad.height()))
+        .collect();
+    sides.sort_by(f32::total_cmp);
+    sides.get(sides.len() / 2).copied().unwrap_or(0.0)
+}
+
 #[cfg(test)]
 impl<D, R, T> Pipeline<D, R, T> {
     fn translator(&self) -> MutexGuard<'_, Translation<T>> {
@@ -444,6 +458,26 @@ mod tests {
             rtl: false,
             spaced: true,
         }
+    }
+
+    #[test]
+    fn line_height_is_the_median_short_side() {
+        let line = |x1: f32, y1: f32| Line {
+            quad: Quad::from_bbox(BBox {
+                x0: 0.0,
+                y0: 0.0,
+                x1,
+                y1,
+            }),
+            text: "x".into(),
+            confidence: 1.0,
+            direction: Direction::Horizontal,
+        };
+        assert_eq!(line_height(&[]), 0.0);
+        assert_eq!(
+            line_height(&[line(200.0, 20.0), line(18.0, 300.0), line(90.0, 40.0)]),
+            20.0
+        );
     }
 
     fn quad(y: f32) -> Quad {
@@ -812,6 +846,7 @@ mod tests {
                 bg_rgb: [255; 3],
                 fg_rgb: [0; 3],
                 angle: 0.0,
+                line_height: 0.0,
             }],
             translation_error: None,
             timings: StageTimings::default(),

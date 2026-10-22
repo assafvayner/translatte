@@ -141,6 +141,9 @@ pub struct Region {
     pub background: Rgb,
     pub foreground: Rgb,
     pub angle: f32,
+    /// The block's typical line height in image pixels; 0 when unknown.
+    #[uniffi(default = 0.0)]
+    pub line_height: f32,
 }
 
 impl Region {
@@ -159,6 +162,7 @@ impl Region {
             bg_rgb: [self.background.r, self.background.g, self.background.b],
             fg_rgb: [self.foreground.r, self.foreground.g, self.foreground.b],
             angle: self.angle,
+            line_height: self.line_height,
         })
     }
 }
@@ -213,6 +217,7 @@ impl TranslationResult {
                 background: r.bg_rgb.into(),
                 foreground: r.fg_rgb.into(),
                 angle: r.angle,
+                line_height: r.line_height,
             })
             .collect();
         Self {
@@ -748,6 +753,7 @@ mod tests {
                 bg_rgb: [1, 2, 3],
                 fg_rgb: [4, 5, 6],
                 angle: 0.5,
+                line_height: 7.0,
             }],
             translation_error: None,
             timings: translatte_core::pipeline::StageTimings {
@@ -774,6 +780,8 @@ mod tests {
         assert_eq!(region.background, Rgb { r: 1, g: 2, b: 3 });
         assert_eq!(region.foreground, Rgb { r: 4, g: 5, b: 6 });
         assert_eq!(region.translated_text.as_deref(), Some("Exit"));
+        assert_eq!(region.line_height, 7.0);
+        assert_eq!(region.to_core().unwrap().line_height, 7.0);
         assert_eq!(
             r.timings,
             StageTimings {
@@ -861,6 +869,7 @@ mod tests {
                 background: Rgb { r: 0, g: 0, b: 0 },
                 foreground: Rgb { r: 0, g: 0, b: 0 },
                 angle: 0.0,
+                line_height: 0.0,
             }],
             translation_error: None,
             timings: StageTimings {

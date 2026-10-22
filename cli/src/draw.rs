@@ -164,6 +164,7 @@ mod tests {
             bg_rgb: [255, 255, 0],
             fg_rgb: [0, 0, 0],
             angle: 0.0,
+            line_height: 0.0,
         }
     }
 
