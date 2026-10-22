@@ -222,13 +222,12 @@ final class TranslatorModel: ObservableObject {
         }
     }
 
-    /// Translates the regions `readFrame` read, on its own queue while the worker reads the next frame.
+    /// Translates the regions `readFrame` read from their source language, on its own queue while the worker reads the next frame.
     func translateRegions(_ read: TranslationResult) async throws -> TranslationResult {
         guard let engine else { throw AppError(errorDescription: "The engine isn't ready") }
-        let source = sourceCode
         return try await withCheckedThrowingContinuation { continuation in
             liveTranslateQueue.async {
-                continuation.resume(with: Result { try engine.translateRegions(frame: read, source: source) })
+                continuation.resume(with: Result { try engine.translateRegions(frame: read) })
             }
         }
     }

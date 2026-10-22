@@ -158,22 +158,24 @@ class LiveTranslator(
         translateFrom(next)
     }
 
-    /** Translates [first], then each frame read meanwhile, until none waits. */
+    /** Translates [first], then each frame read meanwhile, until none waits; skips frames read before a reset. */
     private suspend fun translateFrom(first: ReadFrame) {
         var item: ReadFrame? = first
         while (item != null) {
-            try {
-                val result = translate(item.result)
-                synchronized(lock) { failures = 0 }
-                if (item.generation == generation) publish(item.frame, result)
-            } catch (e: CancellationException) {
-                synchronized(lock) {
-                    stages.translateDone()
-                    translating = null
+            if (item.generation == generation) {
+                try {
+                    val result = translate(item.result)
+                    synchronized(lock) { failures = 0 }
+                    if (item.generation == generation) publish(item.frame, result)
+                } catch (e: CancellationException) {
+                    synchronized(lock) {
+                        stages.translateDone()
+                        translating = null
+                    }
+                    throw e
+                } catch (e: Exception) {
+                    fail(e)
                 }
-                throw e
-            } catch (e: Exception) {
-                fail(e)
             }
             item = synchronized(lock) { stages.translateDone().also { translating = it?.frame } }
         }

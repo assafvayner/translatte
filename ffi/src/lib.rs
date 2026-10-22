@@ -195,10 +195,13 @@ pub struct TranslationResult {
     pub regions: Vec<Region>,
     pub translation_error: Option<String>,
     pub timings: StageTimings,
+    /// The language code the text was read as; `translate_regions` translates from it.
+    #[uniffi(default = "")]
+    pub source: String,
 }
 
 impl TranslationResult {
-    fn from_output(out: PipelineOutput, width: u32, height: u32) -> Self {
+    fn from_output(out: PipelineOutput, width: u32, height: u32, source: &str) -> Self {
         let regions = out
             .regions
             .into_iter()
@@ -217,6 +220,7 @@ impl TranslationResult {
             regions,
             translation_error: out.translation_error,
             timings: out.timings.into(),
+            source: source.to_string(),
         }
     }
 }
@@ -371,7 +375,7 @@ impl Engine {
 
     /// Deletes a language pack: its translation model, and its script pack unless another
     /// installed language reads with it. If that script is the one loaded, all loaded models are
-    /// freed first and this returns true. Fails while a download is running, which could otherwise
+    /// freed first (as `unload` frees them) and this returns true. Fails while a download is running, which could otherwise
     /// write the files again.
     pub fn delete_language(&self, code: String) -> Result<bool, FfiError> {
         #[cfg(feature = "download")]
@@ -390,7 +394,7 @@ impl Engine {
             .as_ref()
             .is_some_and(|c| Some(&c.script_pack) == language.script_pack.as_ref());
         if unloaded {
-            *cached = None;
+            drop_cached(&mut cached);
         }
         self.store.delete_language(&code)?;
         Ok(unloaded)
@@ -445,6 +449,7 @@ impl Engine {
             out,
             img.width(),
             img.height(),
+            &source,
         ))
     }
 
@@ -468,25 +473,30 @@ impl Engine {
             out,
             img.width(),
             img.height(),
+            &source,
         ))
     }
 
-    /// Translates the regions `ocr_frame` read from
-    /// `source`, reusing the last frames' translations of blocks that barely changed, and fills in
-    /// `translate_ms`. Blocking; call it off the main thread.
+    /// Translates the regions `ocr_frame` read from the frame's `source`, reusing the last frames'
+    /// translations of blocks that barely changed, and fills in `translate_ms`. Never loads models:
+    /// unless the loaded pipeline translates from that source's script pack (e.g. after `unload`,
+    /// or once another source was picked), the regions come back untranslated. Blocking; call it
+    /// off the main thread.
     pub fn translate_regions(
         &self,
         frame: TranslationResult,
-        source: String,
     ) -> Result<TranslationResult, FfiError> {
-        let src = self.store.manifest().language(&source)?;
+        let src = self.store.manifest().language(&frame.source)?;
         let tgt = self.store.target_language()?;
         let regions = frame
             .regions
             .iter()
             .map(Region::to_core)
             .collect::<Result<Vec<_>, _>>()?;
-        let out = self.pipeline(src, true)?.translate_frame(
+        let Some(pipeline) = self.cached_pipeline(src) else {
+            return Ok(frame);
+        };
+        let out = pipeline.translate_frame(
             PipelineOutput {
                 regions,
                 translation_error: None,
@@ -505,9 +515,10 @@ impl Engine {
         Ok(result)
     }
 
-    /// Frees loaded models (e.g. when the app is backgrounded).
+    /// Frees loaded models (e.g. when the app is backgrounded). Calls still running keep the
+    /// models they use until they finish, but load no more for live frames.
     pub fn unload(&self) {
-        *self.lock_cached() = None;
+        drop_cached(&mut self.lock_cached());
     }
 }
 
@@ -539,7 +550,7 @@ impl Engine {
     fn lock_cached(&self) -> MutexGuard<'_, Option<Cached>> {
         self.cached.lock().unwrap_or_else(|poisoned| {
             let mut cached = poisoned.into_inner();
-            *cached = None;
+            drop_cached(&mut cached);
             self.cached.clear_poison();
             cached
         })
@@ -553,7 +564,7 @@ impl Engine {
             Some(&c.script_pack) == src.script_pack.as_ref() && c.translate == translate
         });
         if !reusable {
-            *cached = None;
+            drop_cached(&mut cached);
             let pipeline = load_pipeline(&self.store, src, translate, None)?;
             *cached = Some(Cached {
                 script_pack: src.script_pack.clone().unwrap_or_default(),
@@ -566,6 +577,21 @@ impl Engine {
             .expect("pipeline loaded above")
             .pipeline
             .clone())
+    }
+
+    /// The loaded pipeline if it translates from `src`'s script pack.
+    fn cached_pipeline(&self, src: &Language) -> Option<Arc<LoadedPipeline>> {
+        self.lock_cached()
+            .as_ref()
+            .filter(|c| c.translate && Some(&c.script_pack) == src.script_pack.as_ref())
+            .map(|c| c.pipeline.clone())
+    }
+}
+
+/// Empties the cache, retiring the pipeline so calls still using it load no more models.
+fn drop_cached(cached: &mut Option<Cached>) {
+    if let Some(c) = cached.take() {
+        c.pipeline.retire();
     }
 }
 
@@ -669,7 +695,8 @@ mod tests {
                 ..Default::default()
             },
         };
-        let r = TranslationResult::from_output(out, 10, 20);
+        let r = TranslationResult::from_output(out, 10, 20, "fr");
+        assert_eq!(r.source, "fr");
         assert_eq!((r.image_width, r.image_height), (10, 20));
         let region = &r.regions[0];
         assert_eq!(
@@ -739,7 +766,8 @@ mod tests {
         assert!(read.regions.iter().all(|r| r.translated_text.is_none()));
         assert!(read.timings.detect_ms + read.timings.recognize_ms > 0);
         assert_eq!(read.timings.translate_ms, 0);
-        let frame = engine.translate_regions(read, "fr".into()).unwrap();
+        assert_eq!(read.source, "fr");
+        let frame = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(frame.regions, photo.regions);
         assert_eq!(frame.timings.reused, 0);
 
@@ -749,21 +777,23 @@ mod tests {
             .ocr_frame(sideways.into_raw(), h, w, 90, "fr".into())
             .unwrap();
         assert_eq!((read.image_width, read.image_height), (w, h));
-        let turned = engine.translate_regions(read, "fr".into()).unwrap();
+        let turned = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(turned.regions, photo.regions);
         assert_eq!(turned.timings.reused as usize, turned.regions.len());
+
+        engine.unload();
+        let unloaded = engine.translate_regions(read).unwrap();
+        assert!(unloaded.regions.iter().all(|r| r.translated_text.is_none()));
+        assert!(engine.lock_cached().is_none(), "nothing was loaded");
     }
 
-    #[test]
-    fn translate_regions_rejects_a_region_without_four_corners() {
-        let dir = tempfile_dir().join("corners");
-        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
-        let frame = TranslationResult {
+    fn read_frame(corners: Vec<Point>) -> TranslationResult {
+        TranslationResult {
             image_width: 1,
             image_height: 1,
             regions: vec![Region {
-                corners: vec![Point { x: 0.0, y: 0.0 }],
-                source_text: "a".into(),
+                corners,
+                source_text: "sortie".into(),
                 translated_text: None,
                 background: Rgb { r: 0, g: 0, b: 0 },
                 foreground: Rgb { r: 0, g: 0, b: 0 },
@@ -777,9 +807,30 @@ mod tests {
                 precision: "fp32".into(),
                 reused: 0,
             },
-        };
-        let err = engine.translate_regions(frame, "fr".into()).unwrap_err();
+            source: "fr".into(),
+        }
+    }
+
+    #[test]
+    fn translate_regions_rejects_a_region_without_four_corners() {
+        let dir = tempfile_dir().join("corners");
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let err = engine
+            .translate_regions(read_frame(vec![Point { x: 0.0, y: 0.0 }]))
+            .unwrap_err();
         assert!(err.to_string().contains("corners"), "{err}");
+    }
+
+    #[test]
+    fn translate_regions_without_a_loaded_pipeline_leaves_the_regions_untranslated() {
+        let dir = tempfile_dir().join("unloaded");
+        let engine = Engine::new(dir.to_string_lossy().into(), manifest_json()).unwrap();
+        let frame = read_frame(vec![Point { x: 0.0, y: 0.0 }; 4]);
+        assert_eq!(engine.translate_regions(frame.clone()).unwrap(), frame);
+        let mut unknown = frame;
+        unknown.source = "xx".into();
+        let err = engine.translate_regions(unknown).unwrap_err();
+        assert!(err.to_string().contains("unknown language"), "{err}");
     }
 
     #[test]

@@ -177,6 +177,10 @@ final class LiveTranslator: ObservableObject {
         }
         var next = gate.readDone(ReadFrame(frame: frame, result: result, generation: run))
         while let item = next {
+            if item.generation != generation {
+                next = gate.translateDone()
+                continue
+            }
             do {
                 let translated = try await translate(item.result)
                 gate.succeeded()

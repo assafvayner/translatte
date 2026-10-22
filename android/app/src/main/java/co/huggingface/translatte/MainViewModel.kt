@@ -195,11 +195,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Translates the regions [readFrame] read, while the engine dispatcher reads the next frame. */
-    suspend fun translateRegions(read: TranslationResult): TranslationResult {
-        val source = sourceCode
-        return withContext(translatte.liveTranslateDispatcher) { engine.translateRegions(read, source) }
-    }
+    /** Translates the regions [readFrame] read from their source language, while the engine dispatcher reads the next frame. */
+    suspend fun translateRegions(read: TranslationResult): TranslationResult =
+        withContext(translatte.liveTranslateDispatcher) { engine.translateRegions(read) }
 
     private suspend fun translateOnEngine(bitmap: Bitmap, onStage: (String) -> Unit): TranslationResult {
         val source = sourceCode
