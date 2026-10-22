@@ -12,9 +12,9 @@ use crate::{Result, TranslatteError};
 
 /// PP-OCRv5_mobile_det inference.yml uses resize_long: 960.
 const RESIZE_LONG: u32 = 960;
-/// Live frames detect at their own size up to this, which finds more of the small text a camera
-/// frame holds than 960 for about a quarter more detection time.
-const LIVE_MAX_LONG: u32 = 1280;
+/// Live frames detect at their own size up to this. On camera frames 1120 finds most of the extra
+/// text 1280 does for half its added detection time, with fewer overlapping blocks.
+const LIVE_MAX_LONG: u32 = 1120;
 /// Matches PaddleOCR filter_tag_det_res.
 const MIN_SIDE: f32 = 3.0;
 
@@ -84,9 +84,10 @@ mod tests {
     #[test]
     fn live_frames_detect_at_their_own_size_within_bounds() {
         let size = |w, h| live_resize_long(&RgbImage::new(w, h));
-        assert_eq!(size(720, 1280), 1280);
-        assert_eq!(size(1080, 1920), 1280);
+        assert_eq!(size(720, 1280), 1120);
+        assert_eq!(size(1080, 1920), 1120);
         assert_eq!(size(1088, 816), 1088);
+        assert_eq!(size(1024, 768), 1024);
         assert_eq!(size(480, 640), RESIZE_LONG);
     }
 }
