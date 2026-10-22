@@ -166,4 +166,18 @@ final class LiveRulesTests: XCTestCase {
     func testThumbnailsWeighGreenTwice() {
         XCTAssertEqual(corners(of: [40, 80, 120, 0], width: 1, rotation: 0), [80, 80, 80, 80])
     }
+
+    func testANewBoxShowsItsTextAtOnceAndARetextFadesItIn() {
+        var tracker = LiveOverlayTracker()
+        let first = result("hello").regions
+        let added = tracker.update(first, nowMs: 0)
+        XCTAssertNil(LiveRules.textFadeInDelayMs(added[0]))
+        var changed = first
+        changed[0].translatedText = "goodbye"
+        changed[0].sourceText = "t"
+        let retexted = tracker.update(changed, nowMs: 100)
+        XCTAssertEqual(retexted[0].id, added[0].id)
+        XCTAssertEqual(LiveRules.textFadeInDelayMs(retexted[0]), LiveRules.moveMs / 2)
+        XCTAssertNil(LiveRules.textFadeInDelayMs(tracker.update(changed, nowMs: 200)[0]))
+    }
 }

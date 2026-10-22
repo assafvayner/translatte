@@ -22,7 +22,7 @@ struct LiveOverlay: View {
                         LiveRegion(region: t.region, scale: fill.scale, rtl: rtl)
                             .equatable()
                             .id(t.region.translatedText)
-                            .transition(Self.retext)
+                            .transition(Self.text(fadeInAfterMs: LiveRules.textFadeInDelayMs(t)))
                     }
                     .animation(.easeOut(duration: Double(LiveRules.moveMs) / 1000), value: t.region.translatedText)
                     .offset(x: fill.left + live.shift.x * fill.scale, y: fill.top + live.shift.y * fill.scale)
@@ -34,11 +34,15 @@ struct LiveOverlay: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// A changed translation's old text fades out before the new fades in, so the two never show together.
-    private static let retext = AnyTransition.asymmetric(
-        insertion: .opacity.animation(.easeIn(duration: Double(LiveRules.moveMs) / 2000).delay(Double(LiveRules.moveMs) / 2000)),
-        removal: .opacity.animation(.easeOut(duration: Double(LiveRules.moveMs) / 2000))
-    )
+    /// A changed translation's old text fades out before the new fades in, so the two never show
+    /// together; a new box's text shows at once.
+    private static func text(fadeInAfterMs delayMs: Int?) -> AnyTransition {
+        let half = Double(LiveRules.moveMs) / 2000
+        return .asymmetric(
+            insertion: delayMs.map { .opacity.animation(.easeIn(duration: half).delay(Double($0) / 1000)) } ?? .identity,
+            removal: .opacity.animation(.easeOut(duration: half))
+        )
+    }
 }
 
 /// The region's box, kept opaque while its text changes.

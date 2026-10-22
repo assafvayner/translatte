@@ -69,6 +69,12 @@ enum LiveRules {
     static let backoffMaxMs: Int64 = 8000
     /// How long a tracked box takes to slide to its new place.
     static let moveMs = 150
+    /// How long after an update `t`'s text starts fading in, once a retext's old text is out; nil
+    /// when the text shows at once, as in a new box.
+    static func textFadeInDelayMs(_ t: TrackedRegion) -> Int? {
+        t.fadeFrom == nil ? nil : moveMs / 2
+    }
+
     /// How often stale boxes are pruned while updates stall.
     static let pruneIntervalMs: Int64 = 100
     /// Live translations shrink to fit their box down to this text size, then cut off.
