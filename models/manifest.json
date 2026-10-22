@@ -64,7 +64,7 @@
     {
       "id": "rec-eslav",
       "kind": "script_pack",
-      "display_name": "Cyrillic (Russian, Ukrainian, Belarusian)",
+      "display_name": "Cyrillic script",
       "source": {
         "repo": "PaddlePaddle/eslav_PP-OCRv5_mobile_rec_onnx",
         "revision": "9a32171fc5718746875e1a261818884517975013"
@@ -221,7 +221,7 @@
       "display_name": "French → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -247,7 +247,7 @@
       "display_name": "German → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -273,7 +273,7 @@
       "display_name": "Spanish → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -299,7 +299,7 @@
       "display_name": "Italian → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -325,7 +325,7 @@
       "display_name": "Portuguese → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -351,7 +351,7 @@
       "display_name": "Dutch → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -377,7 +377,7 @@
       "display_name": "Polish → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -403,7 +403,7 @@
       "display_name": "Czech → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -429,7 +429,7 @@
       "display_name": "Turkish → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -455,7 +455,7 @@
       "display_name": "Indonesian → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -481,7 +481,7 @@
       "display_name": "Malay → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -507,7 +507,7 @@
       "display_name": "Filipino → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -528,12 +528,584 @@
       ]
     },
     {
+      "id": "pair-af-en",
+      "kind": "pair_model",
+      "display_name": "Afrikaans → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-af-en/lex.bin",
+          "size": 4082680,
+          "source_path": "af-en/lex.50.50.afen.s2t.bin"
+        },
+        {
+          "path": "pair-af-en/model.bin",
+          "size": 31561787,
+          "source_path": "af-en/model.afen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-af-en/vocab.spm",
+          "size": 809319,
+          "source_path": "af-en/vocab.afen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-bs-en",
+      "kind": "pair_model",
+      "display_name": "Bosnian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-bs-en/lex.bin",
+          "size": 5155408,
+          "source_path": "bs-en/lex.50.50.bsen.s2t.bin"
+        },
+        {
+          "path": "pair-bs-en/model.bin",
+          "size": 31561787,
+          "source_path": "bs-en/model.bsen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-bs-en/vocab.spm",
+          "size": 817335,
+          "source_path": "bs-en/vocab.bsen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ca-en",
+      "kind": "pair_model",
+      "display_name": "Catalan → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-ca-en/lex.bin",
+          "size": 4359552,
+          "source_path": "ca-en/lex.50.50.caen.s2t.bin"
+        },
+        {
+          "path": "pair-ca-en/model.bin",
+          "size": 31561787,
+          "source_path": "ca-en/model.caen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ca-en/vocab.spm",
+          "size": 810273,
+          "source_path": "ca-en/vocab.caen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-da-en",
+      "kind": "pair_model",
+      "display_name": "Danish → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-da-en/lex.bin",
+          "size": 4489412,
+          "source_path": "da-en/lex.50.50.daen.s2t.bin"
+        },
+        {
+          "path": "pair-da-en/model.bin",
+          "size": 17141051,
+          "source_path": "da-en/model.daen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-da-en/vocab.spm",
+          "size": 796018,
+          "source_path": "da-en/vocab.daen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-et-en",
+      "kind": "pair_model",
+      "display_name": "Estonian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-et-en/lex.bin",
+          "size": 4625968,
+          "source_path": "et-en/lex.50.50.eten.s2t.bin"
+        },
+        {
+          "path": "pair-et-en/model.bin",
+          "size": 31561787,
+          "source_path": "et-en/model.eten.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-et-en/vocab.spm",
+          "size": 817574,
+          "source_path": "et-en/vocab.eten.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-eu-en",
+      "kind": "pair_model",
+      "display_name": "Basque → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-eu-en/lex.bin",
+          "size": 3738856,
+          "source_path": "eu-en/lex.50.50.euen.s2t.bin"
+        },
+        {
+          "path": "pair-eu-en/model.bin",
+          "size": 31561787,
+          "source_path": "eu-en/model.euen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-eu-en/vocab.spm",
+          "size": 826064,
+          "source_path": "eu-en/vocab.euen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-fi-en",
+      "kind": "pair_model",
+      "display_name": "Finnish → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-fi-en/lex.bin",
+          "size": 5195132,
+          "source_path": "fi-en/lex.50.50.fien.s2t.bin"
+        },
+        {
+          "path": "pair-fi-en/model.bin",
+          "size": 31561787,
+          "source_path": "fi-en/model.fien.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-fi-en/vocab.spm",
+          "size": 818770,
+          "source_path": "fi-en/vocab.fien.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-gl-en",
+      "kind": "pair_model",
+      "display_name": "Galician → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-gl-en/lex.bin",
+          "size": 4367596,
+          "source_path": "gl-en/lex.50.50.glen.s2t.bin"
+        },
+        {
+          "path": "pair-gl-en/model.bin",
+          "size": 31561787,
+          "source_path": "gl-en/model.glen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-gl-en/vocab.spm",
+          "size": 827023,
+          "source_path": "gl-en/vocab.glen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-hr-en",
+      "kind": "pair_model",
+      "display_name": "Croatian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-hr-en/lex.bin",
+          "size": 3860080,
+          "source_path": "hr-en/lex.50.50.hren.s2t.bin"
+        },
+        {
+          "path": "pair-hr-en/model.bin",
+          "size": 17141051,
+          "source_path": "hr-en/model.hren.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-hr-en/vocab.spm",
+          "size": 796159,
+          "source_path": "hr-en/vocab.hren.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-hu-en",
+      "kind": "pair_model",
+      "display_name": "Hungarian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-hu-en/lex.bin",
+          "size": 4847184,
+          "source_path": "hu-en/lex.50.50.huen.s2t.bin"
+        },
+        {
+          "path": "pair-hu-en/model.bin",
+          "size": 31561787,
+          "source_path": "hu-en/model.huen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-hu-en/vocab.spm",
+          "size": 832895,
+          "source_path": "hu-en/vocab.huen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-is-en",
+      "kind": "pair_model",
+      "display_name": "Icelandic → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-is-en/lex.bin",
+          "size": 3951884,
+          "source_path": "is-en/lex.50.50.isen.s2t.bin"
+        },
+        {
+          "path": "pair-is-en/model.bin",
+          "size": 31561787,
+          "source_path": "is-en/model.isen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-is-en/vocab.spm",
+          "size": 808315,
+          "source_path": "is-en/vocab.isen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-lt-en",
+      "kind": "pair_model",
+      "display_name": "Lithuanian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-lt-en/lex.bin",
+          "size": 4724124,
+          "source_path": "lt-en/lex.50.50.lten.s2t.bin"
+        },
+        {
+          "path": "pair-lt-en/model.bin",
+          "size": 17141051,
+          "source_path": "lt-en/model.lten.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-lt-en/vocab.spm",
+          "size": 807623,
+          "source_path": "lt-en/vocab.lten.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-lv-en",
+      "kind": "pair_model",
+      "display_name": "Latvian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-lv-en/lex.bin",
+          "size": 4214476,
+          "source_path": "lv-en/lex.50.50.lven.s2t.bin"
+        },
+        {
+          "path": "pair-lv-en/model.bin",
+          "size": 17141051,
+          "source_path": "lv-en/model.lven.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-lv-en/vocab.spm",
+          "size": 815278,
+          "source_path": "lv-en/vocab.lven.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-mt-en",
+      "kind": "pair_model",
+      "display_name": "Maltese → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-mt-en/lex.bin",
+          "size": 3000868,
+          "source_path": "mt-en/lex.50.50.mten.s2t.bin"
+        },
+        {
+          "path": "pair-mt-en/model.bin",
+          "size": 17140836,
+          "source_path": "mt-en/model.mten.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-mt-en/vocab.spm",
+          "size": 817199,
+          "source_path": "mt-en/vocab.mten.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-nb-en",
+      "kind": "pair_model",
+      "display_name": "Norwegian Bokmål → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-nb-en/lex.bin",
+          "size": 4517876,
+          "source_path": "nb-en/lex.50.50.nben.s2t.bin"
+        },
+        {
+          "path": "pair-nb-en/model.bin",
+          "size": 17141051,
+          "source_path": "nb-en/model.nben.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-nb-en/vocab.spm",
+          "size": 802367,
+          "source_path": "nb-en/vocab.nben.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-nn-en",
+      "kind": "pair_model",
+      "display_name": "Norwegian Nynorsk → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-nn-en/lex.bin",
+          "size": 1506236,
+          "source_path": "nn-en/lex.50.50.nnen.s2t.bin"
+        },
+        {
+          "path": "pair-nn-en/model.bin",
+          "size": 12980780,
+          "source_path": "nn-en/model.nnen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-nn-en/vocab.spm",
+          "size": 510942,
+          "source_path": "nn-en/vocab.nnen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-ro-en",
+      "kind": "pair_model",
+      "display_name": "Romanian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-ro-en/lex.bin",
+          "size": 4691708,
+          "source_path": "ro-en/lex.50.50.roen.s2t.bin"
+        },
+        {
+          "path": "pair-ro-en/model.bin",
+          "size": 17141051,
+          "source_path": "ro-en/model.roen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-ro-en/vocab.spm",
+          "size": 800832,
+          "source_path": "ro-en/vocab.roen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-sk-en",
+      "kind": "pair_model",
+      "display_name": "Slovak → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-sk-en/lex.bin",
+          "size": 4913324,
+          "source_path": "sk-en/lex.50.50.sken.s2t.bin"
+        },
+        {
+          "path": "pair-sk-en/model.bin",
+          "size": 17141051,
+          "source_path": "sk-en/model.sken.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-sk-en/vocab.spm",
+          "size": 808082,
+          "source_path": "sk-en/vocab.sken.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-sl-en",
+      "kind": "pair_model",
+      "display_name": "Slovenian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-sl-en/lex.bin",
+          "size": 4320484,
+          "source_path": "sl-en/lex.50.50.slen.s2t.bin"
+        },
+        {
+          "path": "pair-sl-en/model.bin",
+          "size": 31561787,
+          "source_path": "sl-en/model.slen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-sl-en/vocab.spm",
+          "size": 803078,
+          "source_path": "sl-en/vocab.slen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-sq-en",
+      "kind": "pair_model",
+      "display_name": "Albanian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-sq-en/lex.bin",
+          "size": 4256516,
+          "source_path": "sq-en/lex.50.50.sqen.s2t.bin"
+        },
+        {
+          "path": "pair-sq-en/model.bin",
+          "size": 17141051,
+          "source_path": "sq-en/model.sqen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-sq-en/vocab.spm",
+          "size": 820200,
+          "source_path": "sq-en/vocab.sqen.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-sr-en",
+      "kind": "pair_model",
+      "display_name": "Serbian (Latin script) → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-sr-en/lex.bin",
+          "size": 4628048,
+          "source_path": "sr-en/lex.50.50.sren.s2t.bin"
+        },
+        {
+          "path": "pair-sr-en/model.bin",
+          "size": 17141051,
+          "source_path": "sr-en/model.sren.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-sr-en/vocab.spm",
+          "size": 822509,
+          "source_path": "sr-en/vocab.sren.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-sv-en",
+      "kind": "pair_model",
+      "display_name": "Swedish → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-sv-en/lex.bin",
+          "size": 4645680,
+          "source_path": "sv-en/lex.50.50.sven.s2t.bin"
+        },
+        {
+          "path": "pair-sv-en/model.bin",
+          "size": 17141051,
+          "source_path": "sv-en/model.sven.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-sv-en/vocab.spm",
+          "size": 793049,
+          "source_path": "sv-en/vocab.sven.spm"
+        }
+      ]
+    },
+    {
       "id": "pair-zh-en",
       "kind": "pair_model",
       "display_name": "Chinese → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -559,7 +1131,7 @@
       "display_name": "Chinese (Traditional) → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -590,7 +1162,7 @@
       "display_name": "Japanese → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -616,7 +1188,7 @@
       "display_name": "Korean → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -642,7 +1214,7 @@
       "display_name": "Russian → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -668,7 +1240,7 @@
       "display_name": "Ukrainian → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -689,12 +1261,64 @@
       ]
     },
     {
+      "id": "pair-be-en",
+      "kind": "pair_model",
+      "display_name": "Belarusian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-be-en/lex.bin",
+          "size": 4484400,
+          "source_path": "be-en/lex.50.50.been.s2t.bin"
+        },
+        {
+          "path": "pair-be-en/model.bin",
+          "size": 31561787,
+          "source_path": "be-en/model.been.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-be-en/vocab.spm",
+          "size": 937488,
+          "source_path": "be-en/vocab.been.spm"
+        }
+      ]
+    },
+    {
+      "id": "pair-bg-en",
+      "kind": "pair_model",
+      "display_name": "Bulgarian → English",
+      "source": {
+        "repo": "assafvayner/translatte-pair-models",
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
+      },
+      "files": [
+        {
+          "path": "pair-bg-en/lex.bin",
+          "size": 4355920,
+          "source_path": "bg-en/lex.50.50.bgen.s2t.bin"
+        },
+        {
+          "path": "pair-bg-en/model.bin",
+          "size": 31561787,
+          "source_path": "bg-en/model.bgen.intgemm.alphas.bin"
+        },
+        {
+          "path": "pair-bg-en/vocab.spm",
+          "size": 922482,
+          "source_path": "bg-en/vocab.bgen.spm"
+        }
+      ]
+    },
+    {
       "id": "pair-ar-en",
       "kind": "pair_model",
       "display_name": "Arabic → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -720,7 +1344,7 @@
       "display_name": "Persian → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -746,7 +1370,7 @@
       "display_name": "Urdu → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -772,7 +1396,7 @@
       "display_name": "Uyghur → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -798,7 +1422,7 @@
       "display_name": "Hindi → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -824,7 +1448,7 @@
       "display_name": "Marathi → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -850,7 +1474,7 @@
       "display_name": "Thai → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -876,7 +1500,7 @@
       "display_name": "Tamil → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -902,7 +1526,7 @@
       "display_name": "Telugu → English",
       "source": {
         "repo": "assafvayner/translatte-pair-models",
-        "revision": "c6ad4168eec59c8d123a3246ceaa11adce0ea8ce"
+        "revision": "6b248f2c3d44fdb7f9febcc9ca8e1adbd3cb781f"
       },
       "files": [
         {
@@ -1028,6 +1652,182 @@
       "spaced": true
     },
     {
+      "code": "af",
+      "name": "Afrikaans",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-af-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "bs",
+      "name": "Bosnian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-bs-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "ca",
+      "name": "Catalan",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-ca-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "da",
+      "name": "Danish",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-da-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "et",
+      "name": "Estonian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-et-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "eu",
+      "name": "Basque",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-eu-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "fi",
+      "name": "Finnish",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-fi-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "gl",
+      "name": "Galician",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-gl-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "hr",
+      "name": "Croatian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-hr-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "hu",
+      "name": "Hungarian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-hu-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "is",
+      "name": "Icelandic",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-is-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "lt",
+      "name": "Lithuanian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-lt-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "lv",
+      "name": "Latvian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-lv-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "mt",
+      "name": "Maltese",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-mt-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "nb",
+      "name": "Norwegian Bokmål",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-nb-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "nn",
+      "name": "Norwegian Nynorsk",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-nn-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "ro",
+      "name": "Romanian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-ro-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sk",
+      "name": "Slovak",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-sk-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sl",
+      "name": "Slovenian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-sl-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sq",
+      "name": "Albanian",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-sq-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sr",
+      "name": "Serbian (Latin script)",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-sr-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "sv",
+      "name": "Swedish",
+      "script_pack": "rec-latin",
+      "pair_model": "pair-sv-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
       "code": "zh",
       "name": "Chinese",
       "script_pack": "rec-cjk",
@@ -1080,6 +1880,22 @@
       "name": "Ukrainian",
       "script_pack": "rec-eslav",
       "pair_model": "pair-uk-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "be",
+      "name": "Belarusian",
+      "script_pack": "rec-eslav",
+      "pair_model": "pair-be-en",
+      "rtl": false,
+      "spaced": true
+    },
+    {
+      "code": "bg",
+      "name": "Bulgarian",
+      "script_pack": "rec-eslav",
+      "pair_model": "pair-bg-en",
       "rtl": false,
       "spaced": true
     },

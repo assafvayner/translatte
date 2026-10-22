@@ -19,16 +19,19 @@ Design: `docs/superpowers/specs/2026-10-19-translatte-design.md`.
 Requires Rust (stable + nightly for fmt), `cmake`, `ninja` and `sccache` (`brew install cmake ninja sccache`); `uv` for the scripts. bergamot-translator builds from source through CMake (a few minutes the first time); `.cargo/config.toml` routes it through Ninja and sccache.
 
 ```bash
-cargo run -p translatte-cli --release -- fetch --langs fr,ja   # or --all (~1.1GB) into models-cache/
+cargo run -p translatte-cli --release -- fetch --langs fr,ja   # or --all (~1.8GB) into models-cache/
 ```
 
 `fetch` downloads the detector plus the language packs (OCR script pack and translation model) of the requested source languages (`--langs fr,ja` or `--all`) straight from the Hugging Face repos pinned in the manifest. Integrity is left to hf-hub (TLS, and hf-xet's chunk hashes for Xet-backed files); files are checked by size only. It skips files already installed (present with the expected size), and resumes interrupted downloads from their `.part` files (tagged with the upstream file, so a replaced model's partial download is never resumed). It first removes what the manifest no longer describes (dropped packs, wrong-size files such as a replaced model, stale `.part` files), as the apps do on launch (`Engine::prune_models`). `HF_ENDPOINT` and `HF_TOKEN` are honored. To bump an upstream revision, edit `REVISIONS` in `scripts/gen_manifest.py` and run `uv run scripts/gen_manifest.py`.
 
 Translation uses Mozilla's [translations](https://github.com/mozilla/translations) models (MPL-2.0): one small
-int8 Marian model per source language into English, run with bergamot-translator. They are mirrored unmodified to
-[`assafvayner/translatte-pair-models`](https://huggingface.co/assafvayner/translatte-pair-models)
-(`scripts/mirror_pair_models.py`). The manifest lists the 28 languages that PP-OCRv5 can read and that have a model
-(Traditional Chinese and Cantonese share the zh-Hant one); everything is translated into English.
+int8 Marian model per source language into English, run with bergamot-translator. Every xx→en and en→xx pair is
+mirrored unmodified to [`assafvayner/translatte-pair-models`](https://huggingface.co/assafvayner/translatte-pair-models)
+(`scripts/build_pair_models_upstream.py` picks the releases, `scripts/mirror_pair_models.py` stages them). The
+manifest lists the 52 languages that a PP-OCRv5 script pack can read and that have a model (Traditional Chinese and
+Cantonese share the zh-Hant one; Serbian is Latin script only); everything is translated into English. Adding a
+language or swapping a script pack is a data change in `scripts/gen_manifest.py`; check a recognizer's alphabet
+coverage first with `scripts/ocr_coverage.py`.
 
 ## Usage
 

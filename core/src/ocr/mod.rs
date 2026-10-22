@@ -12,7 +12,7 @@ use serde::Serialize;
 
 pub use backend::OcrEngine;
 
-use crate::geometry::Quad;
+use crate::geometry::{Direction, Quad};
 use crate::Result;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -20,6 +20,7 @@ pub struct Line {
     pub quad: Quad,
     pub text: String,
     pub confidence: f32,
+    pub direction: Direction,
 }
 
 pub trait TextDetector {

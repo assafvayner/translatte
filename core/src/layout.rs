@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::geometry::{BBox, Quad};
+use crate::geometry::{BBox, Direction, Quad};
 use crate::manifest::Language;
 use crate::ocr::Line;
 
@@ -158,7 +158,33 @@ fn build_rows(lines: Vec<Line>, rtl: bool) -> Vec<Row> {
     rows
 }
 
+/// Groups each direction's lines in its reading frame, so vertical columns stack like rows.
 pub fn group_lines(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
+    let mut by_direction: [Vec<Line>; 3] = Default::default();
+    for mut line in lines {
+        let i = match line.direction {
+            Direction::Horizontal => 0,
+            Direction::TopToBottom => 1,
+            Direction::BottomToTop => 2,
+        };
+        line.quad = line.quad.to_reading_frame(line.direction);
+        by_direction[i].push(line);
+    }
+    let mut blocks = Vec::new();
+    for framed in by_direction.into_iter().filter(|f| !f.is_empty()) {
+        let direction = framed[0].direction;
+        blocks.extend(group_frame(framed, lang).into_iter().map(|mut b| {
+            b.quad = b.quad.from_reading_frame(direction);
+            for l in &mut b.lines {
+                l.quad = l.quad.from_reading_frame(direction);
+            }
+            b
+        }));
+    }
+    blocks
+}
+
+fn group_frame(lines: Vec<Line>, lang: &Language) -> Vec<Block> {
     let mut rows = build_rows(lines, lang.rtl);
     rows.sort_by(|a, b| a.bbox.y0.total_cmp(&b.bbox.y0));
     let mut groups: Vec<Group> = Vec::new();
@@ -243,6 +269,16 @@ mod tests {
             quad: Quad::from_bbox(BBox { x0, y0, x1, y1 }),
             text: text.into(),
             confidence: 0.9,
+            direction: Direction::Horizontal,
+        }
+    }
+
+    fn vline(x0: f32, y0: f32, x1: f32, y1: f32, text: &str, direction: Direction) -> Line {
+        Line {
+            quad: Quad::from_bbox(BBox { x0, y0, x1, y1 }).turned(direction),
+            text: text.into(),
+            confidence: 0.9,
+            direction,
         }
     }
 
@@ -487,8 +523,65 @@ mod tests {
             ]),
             text: "tilted".into(),
             confidence: 0.9,
+            direction: Direction::Horizontal,
         };
         let blocks = group_lines(vec![rotated.clone()], &lang(false, true));
         assert_eq!(blocks[0].quad, rotated.quad);
+    }
+
+    #[test]
+    fn cjk_columns_merge_right_to_left() {
+        let d = Direction::TopToBottom;
+        let lines = vec![
+            vline(10.0, 10.0, 40.0, 300.0, "左", d),
+            vline(60.0, 10.0, 90.0, 300.0, "中", d),
+            vline(110.0, 10.0, 140.0, 300.0, "右", d),
+        ];
+        let blocks = group_lines(lines, &lang(false, false));
+        assert_eq!(texts(&blocks), vec!["右中左"]);
+        let q = blocks[0].quad;
+        assert!((q.angle() - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        assert_eq!(
+            q.bbox(),
+            BBox {
+                x0: 10.0,
+                y0: 10.0,
+                x1: 140.0,
+                y1: 300.0
+            }
+        );
+        assert_eq!(q.0[0], Pt::new(140.0, 10.0));
+    }
+
+    #[test]
+    fn upward_lines_merge_left_to_right() {
+        let d = Direction::BottomToTop;
+        let lines = vec![
+            vline(40.0, 10.0, 60.0, 300.0, "second", d),
+            vline(10.0, 10.0, 30.0, 300.0, "first", d),
+        ];
+        let blocks = group_lines(lines, &lang(false, true));
+        assert_eq!(texts(&blocks), vec!["first second"]);
+        assert!((blocks[0].quad.angle() + std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn vertical_and_horizontal_lines_never_merge() {
+        let lines = vec![
+            line(50.0, 10.0, 200.0, 30.0, "row"),
+            vline(10.0, 10.0, 30.0, 200.0, "col", Direction::TopToBottom),
+        ];
+        let blocks = group_lines(lines, &lang(false, true));
+        let mut got = texts(&blocks);
+        got.sort();
+        assert_eq!(got, vec!["col", "row"]);
+    }
+
+    #[test]
+    fn single_vertical_line_keeps_its_turned_quad() {
+        let l = vline(10.0, 10.0, 30.0, 200.0, "col", Direction::BottomToTop);
+        let blocks = group_lines(vec![l.clone()], &lang(false, true));
+        assert_eq!(blocks[0].quad, l.quad);
+        assert_eq!(blocks[0].lines[0].quad, l.quad);
     }
 }

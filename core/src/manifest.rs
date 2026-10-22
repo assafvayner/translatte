@@ -491,7 +491,7 @@ pub(crate) mod tests {
             .iter()
             .filter(|l| l.code != TARGET_LANGUAGE)
             .collect();
-        assert_eq!(sources.len(), 28);
+        assert_eq!(sources.len(), 52);
         for l in &sources {
             assert!(
                 l.script_pack.is_some() && l.pair_model.is_some(),
@@ -499,7 +499,9 @@ pub(crate) mod tests {
                 l.code
             );
         }
-        for gone in ["he", "vi", "kk", "mn", "bo", "km", "my", "bn", "gu"] {
+        for gone in [
+            "he", "vi", "az", "el", "kk", "mn", "bo", "km", "my", "bn", "gu",
+        ] {
             assert!(m.language(gone).is_err(), "{gone} has no OCR script pack");
         }
         assert_eq!(

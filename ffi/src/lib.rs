@@ -803,7 +803,7 @@ mod tests {
         assert!(engine.source_languages().unwrap().is_empty());
         assert_eq!(engine.target_language().unwrap().code, "en");
         let packs = engine.language_packs().unwrap();
-        assert_eq!(packs.len(), 28);
+        assert_eq!(packs.len(), 52);
         assert!(packs
             .iter()
             .all(|p| p.state == ModelState::NotInstalled && !p.deletable));

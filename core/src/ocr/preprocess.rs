@@ -60,8 +60,7 @@ pub fn det_preprocess(img: &RgbImage, resize_long: u32) -> DetInput {
     }
 }
 
-/// Perspective-rectifies the quad. Crops at least 1.5x taller than wide are treated as vertical text
-/// and rotated 90° counter-clockwise, matching PaddleOCR's get_rotate_crop_image.
+/// Perspective-rectifies the quad so its TL→TR edge becomes the crop's top edge.
 pub fn crop_quad(img: &RgbImage, quad: &Quad) -> RgbImage {
     let w = quad.width().round().max(1.0) as u32;
     let h = quad.height().round().max(1.0) as u32;
@@ -87,11 +86,7 @@ pub fn crop_quad(img: &RgbImage, quad: &Quad) -> RgbImage {
                 .to_image();
         }
     }
-    if h as f32 / w as f32 >= 1.5 {
-        imageops::rotate270(&out)
-    } else {
-        out
-    }
+    out
 }
 
 /// Width of `crop` scaled to the recognizer's input height.
@@ -175,18 +170,6 @@ mod tests {
         let crop = crop_quad(&img, &q);
         assert_eq!(crop.dimensions(), (60, 20));
         assert_eq!(*crop.get_pixel(30, 10), Rgb([200, 100, 50]));
-    }
-
-    #[test]
-    fn crop_quad_rotates_tall_crops() {
-        let img = RgbImage::from_pixel(100, 100, Rgb([0, 0, 0]));
-        let q = Quad::from_bbox(BBox {
-            x0: 10.0,
-            y0: 10.0,
-            x1: 20.0,
-            y1: 60.0,
-        });
-        assert_eq!(crop_quad(&img, &q).dimensions(), (50, 10));
     }
 
     #[test]
