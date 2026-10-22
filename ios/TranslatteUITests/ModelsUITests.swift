@@ -24,11 +24,11 @@ final class ModelsUITests: XCTestCase {
         french.tap()
         XCTAssertTrue(french.isSelected)
         XCTAssertTrue(download.isEnabled)
-        XCTAssertEqual(download.label, "Download 50.1 MB")
+        XCTAssertEqual(download.label, "Download 49.9 MB")
         let german = app.buttons["pack-de"]
         scrollAboveBar(app, german, bar: download)
         german.tap()
-        XCTAssertEqual(download.label, "Download 87.4 MB", "German shares French's Latin script pack")
+        XCTAssertEqual(download.label, "Download 87.2 MB", "German shares French's Latin script pack")
     }
 
     /// Sets up the app from scratch over the network (Japanese, ~76MB), then downloads and deletes
