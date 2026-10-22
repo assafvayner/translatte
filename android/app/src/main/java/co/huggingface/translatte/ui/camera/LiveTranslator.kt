@@ -63,7 +63,7 @@ class LiveTranslator(
     private var latest: Pair<LiveFrame, TranslationResult>? = null
     private var failures = 0
     private var lastFailMs: Long? = null
-    /** Frame buffers, reused once neither [latest] nor the frame being translated holds them. */
+    /** Frame buffers, reused once neither [latest] nor the frame being translated holds them; both are set under [lock]. */
     private val buffers = arrayOfNulls<ByteArray>(3)
     @Volatile
     private var translating: LiveFrame? = null
@@ -104,7 +104,7 @@ class LiveTranslator(
             val plane = it.planes[0]
             val crop = it.cropRect
             val factor = LiveRules.downscaleFactor(crop.width(), crop.height())
-            val held = listOf(latest?.first?.rgba, translating?.rgba)
+            val held = synchronized(lock) { listOf(latest?.first?.rgba, translating?.rgba) }
             val free = buffers.indices.first { i -> held.none { it != null && it === buffers[i] } }
             val rgba = LiveRules.packRgba(
                 plane.buffer, crop.width(), crop.height(), plane.rowStride, factor, swapRedBlue = false,
@@ -195,7 +195,7 @@ class LiveTranslator(
         overlay = tracker.update(result.regions, now)
         if (overlay.isNotEmpty() && pruner == null) pruner = scope.launch { prune() }
         imageSize = IntSize(result.imageWidth.toInt(), result.imageHeight.toInt())
-        latest = frame to result
+        synchronized(lock) { latest = frame to result }
         if (BuildConfig.DEBUG) {
             val line = LiveRules.readout(lastDoneMs?.let { now - it }, result.timings)
             readout = line
