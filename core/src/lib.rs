@@ -8,6 +8,7 @@ pub mod layout;
 pub mod loader;
 pub mod manifest;
 pub mod model_store;
+pub mod motion;
 pub mod ocr;
 pub mod pipeline;
 pub mod render;

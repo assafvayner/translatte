@@ -290,6 +290,46 @@ impl DownloadToken {
     }
 }
 
+/// How far the image moved from a [`MotionReference`] to a later frame, in thumbnail pixels: a
+/// feature at (x, y) in the reference is at (x + dx, y + dy) in the later frame.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct FrameShift {
+    pub dx: f32,
+    pub dy: f32,
+    /// The correlation peak's share of the energy, 0 to 1.
+    pub peak: f32,
+}
+
+/// A live frame's grayscale thumbnail that later thumbnails of the same size are compared to, to
+/// follow camera motion (translation only).
+#[derive(uniffi::Object)]
+pub struct MotionReference(translatte_core::motion::Reference);
+
+/// A reference for `thumbnail`, row-major 8-bit grayscale of `width` x `height` (powers of two),
+/// or `None` when the size is wrong or the image too flat to match.
+#[uniffi::export]
+pub fn motion_reference(
+    thumbnail: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Option<Arc<MotionReference>> {
+    translatte_core::motion::Reference::new(&thumbnail, width as usize, height as usize)
+        .map(|r| Arc::new(MotionReference(r)))
+}
+
+#[uniffi::export]
+impl MotionReference {
+    /// The translation from this reference to `thumbnail` (the same size), or `None` when it can't
+    /// be trusted. About a millisecond for 128 x 128; call it off the main thread.
+    pub fn shift_to(&self, thumbnail: Vec<u8>) -> Option<FrameShift> {
+        self.0.shift_to(&thumbnail).map(|s| FrameShift {
+            dx: s.dx,
+            dy: s.dy,
+            peak: s.peak,
+        })
+    }
+}
+
 struct Cached {
     script_pack: String,
     translate: bool,
