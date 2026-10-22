@@ -114,6 +114,23 @@ class LiveRulesTest {
     }
 
     @Test
+    fun retextFadesTheOldTextOutBeforeTheNewIn() {
+        assertEquals(1f, LiveRules.textOut(0f))
+        assertEquals(0f, LiveRules.textIn(0f))
+        assertEquals(0.5f, LiveRules.textOut(0.25f))
+        assertEquals(0f, LiveRules.textIn(0.25f))
+        assertEquals(0f, LiveRules.textOut(0.5f))
+        assertEquals(0f, LiveRules.textIn(0.5f))
+        assertEquals(0f, LiveRules.textOut(0.75f))
+        assertEquals(0.5f, LiveRules.textIn(0.75f))
+        assertEquals(1f, LiveRules.textIn(1f))
+        for (i in 0..20) {
+            val p = i / 20f
+            assertTrue(LiveRules.textOut(p) == 0f || LiveRules.textIn(p) == 0f)
+        }
+    }
+
+    @Test
     fun skippedFollowsTheEngine() {
         assertFalse(LiveRules.skipped(result("t")))
         assertTrue(LiveRules.skipped(result(null).copy(regions = emptyList(), skipped = true)))

@@ -81,6 +81,12 @@ object LiveRules {
     /** How long a tracked box takes to slide to its new place. */
     const val MOVE_MS = 150
 
+    /** The old text's opacity [progress] of the way through a retext: gone by halfway, so it never shows with the new. */
+    fun textOut(progress: Float): Float = (1f - 2f * progress).coerceIn(0f, 1f)
+
+    /** The new text's opacity [progress] of the way through a retext: in from halfway. */
+    fun textIn(progress: Float): Float = (2f * progress - 1f).coerceIn(0f, 1f)
+
     /** How often stale boxes are pruned while updates stall. */
     const val PRUNE_INTERVAL_MS = 100L
 

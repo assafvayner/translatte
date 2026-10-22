@@ -176,17 +176,33 @@ internal class RegionBox(val region: Region, previous: RegionBox? = null, privat
         return fitText(region.translatedText.orEmpty(), region.foreground.argb(), w, h, maxSize, minTextPx).also { layout = (w to h) to it }
     }
 
-    /** Draws at image-to-view [scale] and offset ([left], [top]), shifted by ([dx], [dy]) image pixels, at [alpha]. */
-    fun draw(canvas: Canvas, scale: Float, left: Float, top: Float, dx: Float = 0f, dy: Float = 0f, alpha: Float = 1f) {
+    /**
+     * Draws at image-to-view [scale] and offset ([left], [top]), shifted by ([dx], [dy]) image pixels,
+     * with the text at [textAlpha] over an opaque background, or over nothing without [fill].
+     */
+    fun draw(
+        canvas: Canvas,
+        scale: Float,
+        left: Float,
+        top: Float,
+        dx: Float = 0f,
+        dy: Float = 0f,
+        textAlpha: Float = 1f,
+        fill: Boolean = true,
+    ) {
         val w = width * scale
         val h = height * scale
         val pad = max(1f, h * 0.05f)
         val saved = canvas.save()
         canvas.translate(left + (cx + dx) * scale, top + (cy + dy) * scale)
         canvas.rotate(Math.toDegrees(region.angle.toDouble()).toFloat())
-        if (alpha < 1f) canvas.saveLayerAlpha(-w / 2, -h / 2, w / 2, h / 2, (alpha * 255).roundToInt())
-        canvas.drawRect(-w / 2, -h / 2, w / 2, h / 2, background)
+        if (fill) canvas.drawRect(-w / 2, -h / 2, w / 2, h / 2, background)
+        if (textAlpha <= 0f) {
+            canvas.restoreToCount(saved)
+            return
+        }
         canvas.clipRect(-w / 2, -h / 2, w / 2, h / 2)
+        if (textAlpha < 1f) canvas.saveLayerAlpha(-w / 2, -h / 2, w / 2, h / 2, (textAlpha * 255).roundToInt())
         val layout = layoutFor(w - 2 * pad, h - 2 * pad, lineTextSize * scale)
         canvas.translate(-w / 2 + pad, -layout.height / 2f)
         layout.draw(canvas)

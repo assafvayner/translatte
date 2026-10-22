@@ -57,7 +57,7 @@ struct PhotoFit {
 }
 
 /// A region's placement in the fitted photo.
-private struct RegionBox {
+struct RegionBox {
     let width: CGFloat
     let height: CGFloat
     let center: CGPoint
@@ -104,6 +104,8 @@ struct RegionLabel: View {
     let showOriginal: Bool
     /// The result viewer can zoom in on small text; the live overlay can't.
     var minFontSize: CGFloat = 1
+    /// Without it the text is drawn over nothing, for the live overlay to swap text over a steady box.
+    var fillsBackground = true
 
     var body: some View {
         let box = RegionBox(region, scale: scale)
@@ -120,7 +122,7 @@ struct RegionLabel: View {
             .foregroundStyle(Color(region.foreground))
             .padding(1)
             .frame(width: box.width, height: box.height, alignment: rightToLeft ? .trailing : .leading)
-            .background(Color(region.background))
+            .background(fillsBackground ? Color(region.background) : .clear)
             .clipped()
             .rotationEffect(.radians(Double(region.angle)))
             .position(box.center)
@@ -131,7 +133,7 @@ struct RegionLabel: View {
     }
 }
 
-private extension Color {
+extension Color {
     init(_ rgb: Rgb) {
         self.init(red: Double(rgb.r) / 255, green: Double(rgb.g) / 255, blue: Double(rgb.b) / 255)
     }
