@@ -313,7 +313,10 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
     ) -> Result<PipelineOutput> {
         let (lines, timings) = self.ocr(img, src, live, on_stage)?;
         let mut blocks = group_lines(lines, src);
-        blocks.retain(|b| !b.text.trim().is_empty());
+        let latin_source = src.script_pack.as_deref().is_none_or(|p| p == "rec-latin");
+        blocks.retain(|b| {
+            !b.text.trim().is_empty() && (latin_source || b.text.chars().any(non_latin_letter))
+        });
         let regions = blocks
             .into_iter()
             .map(|b| {
@@ -400,6 +403,14 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
         }
         out
     }
+}
+
+/// Blocks of a source language written in another script are only translated when they have a
+/// letter of a non-Latin script: Latin-only text there is usually English already, a brand name or
+/// a number.
+fn non_latin_letter(c: char) -> bool {
+    c.is_alphabetic()
+        && !matches!(c, 'A'..='Z' | 'a'..='z' | '\u{c0}'..='\u{24f}' | 'Ａ'..='Ｚ' | 'ａ'..='ｚ')
 }
 
 /// The median of the lines' short sides: the glyph size of horizontal and vertical lines alike.
@@ -676,6 +687,45 @@ mod tests {
         let out = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap().regions;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].source_text, "sortie");
+    }
+
+    #[test]
+    fn latin_only_blocks_of_other_scripts_are_not_translated() {
+        let img = RgbImage::from_pixel(200, 200, Rgb([255, 255, 255]));
+        let det = || FakeDet(vec![quad(10.0), quad(50.0), quad(90.0), quad(130.0)]);
+        let rec = || {
+            FakeRec(
+                vec![
+                    ("出口", 0.9),
+                    ("EXIT 100ml", 0.9),
+                    ("2026", 0.9),
+                    ("Café", 0.9),
+                ],
+                0,
+            )
+        };
+        let ja = Language {
+            code: "ja".into(),
+            script_pack: Some("rec-cjk".into()),
+            ..lang()
+        };
+        let p = Pipeline::new(det(), rec(), Some(Upper));
+        let out = p.run(&img, &ja, &lang(), &mut |_| {}).unwrap().regions;
+        let texts: Vec<_> = out.iter().map(|r| r.source_text.as_str()).collect();
+        assert_eq!(texts, ["出口"]);
+
+        let fr = Language {
+            script_pack: Some("rec-latin".into()),
+            ..lang()
+        };
+        let p = Pipeline::new(det(), rec(), Some(Upper));
+        assert_eq!(
+            p.run(&img, &fr, &lang(), &mut |_| {})
+                .unwrap()
+                .regions
+                .len(),
+            4
+        );
     }
 
     #[test]
