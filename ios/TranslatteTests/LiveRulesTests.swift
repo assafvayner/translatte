@@ -55,6 +55,14 @@ final class LiveRulesTests: XCTestCase {
         XCTAssertTrue(LiveRules.snapUsesLive(result("t")))
     }
 
+    func testSkippedFollowsTheEngine() {
+        XCTAssertFalse(LiveRules.skipped(result("t")))
+        var skipped = result(nil)
+        skipped.regions = []
+        skipped.skipped = true
+        XCTAssertTrue(LiveRules.skipped(skipped))
+    }
+
     func testReadoutShowsTheRateAndStageTimes() {
         XCTAssertEqual(
             LiveRules.readout(intervalMs: 400, timings: StageTimings(detectMs: 120, recognizeMs: 85, translateMs: 40, precision: "fp16")),
@@ -136,5 +144,40 @@ final class LiveRulesTests: XCTestCase {
         stages.startRead()
         stages.readFailed()
         XCTAssertFalse(stages.readBusy)
+    }
+
+    private func corners(of frame: [UInt8], width: Int, rotation: Int) -> [UInt8] {
+        let thumb = frame.withUnsafeBytes {
+            LiveRules.thumbnail($0, width: width, height: frame.count / 4 / width, rowStride: width * 4, rotation: rotation)
+        }
+        let s = LiveRules.thumbSide
+        XCTAssertEqual(thumb.count, s * s)
+        return [thumb[0], thumb[s - 1], thumb[s * (s - 1)], thumb[s * s - 1]]
+    }
+
+    func testThumbnailsAreUprightGrayscaleSquares() {
+        let frame: [UInt8] = [10, 10, 10, 0, 20, 20, 20, 0, 30, 30, 30, 0, 40, 40, 40, 0]
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 0), [10, 20, 30, 40])
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 90), [30, 10, 40, 20])
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 180), [40, 30, 20, 10])
+        XCTAssertEqual(corners(of: frame, width: 2, rotation: 270), [20, 40, 10, 30])
+    }
+
+    func testThumbnailsWeighGreenTwice() {
+        XCTAssertEqual(corners(of: [40, 80, 120, 0], width: 1, rotation: 0), [80, 80, 80, 80])
+    }
+
+    func testANewBoxShowsItsTextAtOnceAndARetextFadesItIn() {
+        var tracker = LiveOverlayTracker()
+        let first = result("hello").regions
+        let added = tracker.update(first, nowMs: 0)
+        XCTAssertNil(LiveRules.textFadeInDelayMs(added[0]))
+        var changed = first
+        changed[0].translatedText = "goodbye"
+        changed[0].sourceText = "t"
+        let retexted = tracker.update(changed, nowMs: 100)
+        XCTAssertEqual(retexted[0].id, added[0].id)
+        XCTAssertEqual(LiveRules.textFadeInDelayMs(retexted[0]), LiveRules.moveMs / 2)
+        XCTAssertNil(LiveRules.textFadeInDelayMs(tracker.update(changed, nowMs: 200)[0]))
     }
 }

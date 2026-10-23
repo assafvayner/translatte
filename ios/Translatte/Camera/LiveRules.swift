@@ -56,6 +56,9 @@ struct LiveStages<T> {
 enum LiveRules {
     /// UserDefaults key of the "Live translation (experimental)" setting; on by default.
     static let storageKey = "liveTranslation"
+    /// UserDefaults key of the debug "Live OCR precision" setting: fp32 reads live frames with the
+    /// photo models instead of the fp16 ones.
+    static let fp32StorageKey = "liveOcrFp32"
     /// Frames reach the engine at most this large on their long side.
     static let maxFrameSide = 1280
     /// Minimum time between frame starts while the device is hot.
@@ -66,8 +69,18 @@ enum LiveRules {
     static let backoffMaxMs: Int64 = 8000
     /// How long a tracked box takes to slide to its new place.
     static let moveMs = 150
+    /// How long after an update `t`'s text starts fading in, once a retext's old text is out; nil
+    /// when the text shows at once, as in a new box.
+    static func textFadeInDelayMs(_ t: TrackedRegion) -> Int? {
+        t.fadeFrom == nil ? nil : moveMs / 2
+    }
+
     /// How often stale boxes are pruned while updates stall.
     static let pruneIntervalMs: Int64 = 100
+    /// Live translations shrink to fit their box down to this text size, then cut off.
+    static let minTextSize: CGFloat = 9
+    /// Motion thumbnails are this many pixels on each side, whatever the frame's aspect.
+    static let thumbSide = 128
 
     static func isActive(enabled: Bool, sourceInstalled: Bool) -> Bool {
         enabled && sourceInstalled
@@ -92,6 +105,12 @@ enum LiveRules {
     /// The pixel step that brings the long side within `maxFrameSide`.
     static func downscaleFactor(width: Int, height: Int) -> Int {
         max(1, (max(width, height) + maxFrameSide - 1) / maxFrameSide)
+    }
+
+    /// Whether the engine skipped `result`'s frame as too blurred to read: no update rather than an
+    /// empty one.
+    static func skipped(_ result: TranslationResult) -> Bool {
+        result.skipped
     }
 
     /// Snap freezes the live result only when it translated something; otherwise the photo pipeline runs.
@@ -135,6 +154,41 @@ enum LiveRules {
                     dst[o + 2] = src[i + b]
                     dst[o + 3] = src[i + 3]
                     o += 4
+                }
+            }
+        }
+        return out
+    }
+
+    /// A `thumbSide`-square grayscale thumbnail of the upright frame, to follow camera motion: a
+    /// `width` x `height` frame of 4 bytes per pixel (RGBA or BGRA) whose rows are `rowStride` bytes
+    /// apart, turned clockwise by `rotation` degrees. Each pixel averages four samples of its cell.
+    static func thumbnail(_ src: UnsafeRawBufferPointer, width: Int, height: Int, rowStride: Int, rotation: Int) -> Data {
+        let side = thumbSide
+        let turned = rotation % 180 != 0
+        let uprightWidth = turned ? height : width
+        let uprightHeight = turned ? width : height
+        var out = Data(count: side * side)
+        out.withUnsafeMutableBytes { dst in
+            var o = 0
+            for v in 0..<side {
+                for u in 0..<side {
+                    var sum = 0
+                    for k in 0..<4 {
+                        let ux = (u * 4 + 1 + 2 * (k & 1)) * uprightWidth / (side * 4)
+                        let uy = (v * 4 + 1 + 2 * (k >> 1)) * uprightHeight / (side * 4)
+                        let x: Int, y: Int
+                        switch rotation {
+                        case 90: (x, y) = (uy, height - 1 - ux)
+                        case 180: (x, y) = (width - 1 - ux, height - 1 - uy)
+                        case 270: (x, y) = (width - 1 - uy, ux)
+                        default: (x, y) = (ux, uy)
+                        }
+                        let i = y * rowStride + x * 4
+                        sum += Int(src[i]) + 2 * Int(src[i + 1]) + Int(src[i + 2])
+                    }
+                    dst[o] = UInt8(sum / 16)
+                    o += 1
                 }
             }
         }

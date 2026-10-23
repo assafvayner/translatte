@@ -13,8 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import co.huggingface.translatte.ui.theme.AppType
 import co.huggingface.translatte.ui.theme.InnerShape
 import co.huggingface.translatte.ui.result.RegionBox
@@ -22,16 +24,25 @@ import uniffi.translatte_ffi.Point
 
 /**
  * Paints live regions over the camera preview in the result viewer's style, placed with
- * [LiveRules.fill] from the upright frame size [imageSize]. Each update slides kept boxes from
- * their previous position over [LiveRules.MOVE_MS].
+ * [LiveRules.fill] from the upright frame size [imageSize] and moved with the camera by the
+ * translator's shift. Each update slides kept boxes from their previous position, and swaps a
+ * changed translation's text (fading the old out, then the new in) over [LiveRules.MOVE_MS].
  */
 @Composable
 fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
     val tracked = translator.overlay
     val imageSize = translator.imageSize
     val cache = remember { HashMap<Long, RegionBox>() }
-    val boxes = remember(tracked) {
-        val next = tracked.map { RegionBox(it.region, cache[it.id]) to center(it.from) }
+    val minText = with(LocalDensity.current) { LiveRules.MIN_TEXT_SP.sp.toPx() }
+    val boxes = remember(tracked, minText) {
+        val next = tracked.map { t ->
+            val old = cache[t.id]
+            Triple(
+                RegionBox(t.region, old, minText),
+                center(t.from),
+                t.fadeFrom?.let { RegionBox(t.region.copy(translatedText = it), old, minText) },
+            )
+        }
         cache.clear()
         tracked.forEachIndexed { i, t -> cache[t.id] = next[i].first }
         next
@@ -45,9 +56,17 @@ fun LiveOverlay(translator: LiveTranslator, modifier: Modifier = Modifier) {
         if (imageSize == IntSize.Zero) return@Canvas
         val fill = LiveRules.fill(imageSize.width.toFloat(), imageSize.height.toFloat(), size.width, size.height)
         val rest = 1f - progress.value
+        val shift = translator.shift
         drawIntoCanvas { c ->
-            boxes.forEach { (box, from) ->
-                box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, (from.x - box.cx) * rest, (from.y - box.cy) * rest)
+            boxes.forEach { (box, from, fade) ->
+                val dx = (from.x - box.cx) * rest + shift.x
+                val dy = (from.y - box.cy) * rest + shift.y
+                if (fade == null || rest <= 0f) {
+                    box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, dx, dy)
+                } else {
+                    box.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, dx, dy, LiveRules.textIn(progress.value))
+                    fade.draw(c.nativeCanvas, fill.scale, fill.left, fill.top, dx, dy, LiveRules.textOut(progress.value), fill = false)
+                }
             }
         }
     }

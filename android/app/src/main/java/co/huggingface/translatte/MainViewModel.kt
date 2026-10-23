@@ -105,6 +105,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prepare()
     }
 
+    /** Debug builds: reads live frames with the fp32 (photo) models instead of the fp16 ones. */
+    fun setLiveFp32(fp32: Boolean) {
+        viewModelScope.launch(translatte.engineDispatcher) { engine.setLivePrecision(if (fp32) "fp32" else "fp16") }
+    }
+
     /**
      * Loads the models for the picked source language and runs the translation model once, so a photo
      * taken next skips that work. Called when the source changes and when the app returns to the

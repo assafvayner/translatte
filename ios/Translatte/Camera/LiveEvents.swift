@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// One change to the live overlay: "add", "move", "retext" or "remove" (with a `reason`) of `tracked`.
@@ -32,6 +33,11 @@ final class LiveEventLog {
     func prune(nowMs: Int64, prev: [TrackedRegion], next: [TrackedRegion]) {
         let t = elapsed(nowMs)
         Self.diff(prev: prev, next: next, incoming: nil).forEach { emit(Self.json(tMs: t, $0)) }
+    }
+
+    /// The overlay now moves by `shift` frame pixels to follow the camera.
+    func shift(nowMs: Int64, shift: CGPoint) {
+        emit(String(format: "{\"t_ms\":%lld,\"ev\":\"shift\",\"dx\":%.1f,\"dy\":%.1f}", elapsed(nowMs), shift.x, shift.y))
     }
 
     func reset(nowMs: Int64, prev: [TrackedRegion]) {
@@ -91,7 +97,7 @@ final class LiveEventLog {
         if let intervalMs { s += ",\"interval_ms\":\(intervalMs)" }
         if let ptsMs { s += ",\"pts_ms\":\(ptsMs)" }
         let blocks = result.regions.map { r in
-            "{\"src\":\(quoted(r.sourceText)),\"box\":[\(box(r.corners).map(String.init).joined(separator: ","))]}"
+            "{\"src\":\(quoted(r.sourceText)),\"box\":[\(box(r.corners).map(String.init).joined(separator: ","))],\"quad\":[\(quad(r.corners).map(String.init).joined(separator: ","))]}"
         }
         return s + ",\"blocks\":[\(blocks.joined(separator: ","))]}"
     }
@@ -101,6 +107,7 @@ final class LiveEventLog {
         var s = "{\"t_ms\":\(tMs),\"ev\":\"\(e.ev)\",\"id\":\(e.tracked.id),\"src\":\(quoted(r.sourceText))"
         s += ",\"tr\":\(r.translatedText.map(quoted) ?? "null")"
         s += ",\"box\":[\(box(r.corners).map(String.init).joined(separator: ","))]"
+        s += ",\"quad\":[\(quad(r.corners).map(String.init).joined(separator: ","))]"
         if let reason = e.reason { s += ",\"reason\":\"\(reason)\"" }
         return s + "}"
     }
@@ -109,6 +116,11 @@ final class LiveEventLog {
     static func box(_ corners: [Point]) -> [Int] {
         let xs = corners.map(\.x), ys = corners.map(\.y)
         return [xs.min() ?? 0, ys.min() ?? 0, xs.max() ?? 0, ys.max() ?? 0].map { Int($0.rounded()) }
+    }
+
+    /// The quad's corners, [x0, y0, x1, y1, ...], rounded to whole pixels.
+    static func quad(_ corners: [Point]) -> [Int] {
+        corners.flatMap { [Int($0.x.rounded()), Int($0.y.rounded())] }
     }
 
     private static func intersects(_ a: [Point], _ b: [Point]) -> Bool {

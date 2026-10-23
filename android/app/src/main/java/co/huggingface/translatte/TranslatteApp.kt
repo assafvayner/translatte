@@ -19,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import co.huggingface.translatte.ui.settings.UiPrefs
 import uniffi.translatte_ffi.Engine
 import uniffi.translatte_ffi.configureDownloads
 import java.io.File
@@ -30,7 +31,9 @@ class TranslatteApp : Application() {
     val engine: Engine by lazy {
         val modelsDir = File(filesDir, "models").apply { mkdirs() }
         val manifest = assets.open("manifest.json").bufferedReader().use { it.readText() }
-        Engine(modelsDir.path, manifest)
+        Engine(modelsDir.path, manifest).apply {
+            if (BuildConfig.DEBUG && UiPrefs(this@TranslatteApp).liveFp32) setLivePrecision("fp32")
+        }
     }
 
     /**

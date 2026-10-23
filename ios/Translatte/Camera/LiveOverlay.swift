@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Paints live regions over the camera preview in the result viewer's style, placed with
-/// `LiveRules.fill` from the upright frame size (the preview aspect-fills the same way). Kept boxes
-/// slide to their new place. Reads the translator here so the rest of the camera screen doesn't
+/// `LiveRules.fill` from the upright frame size (the preview aspect-fills the same way) and moved
+/// with the camera by the translator's shift. Kept boxes slide to their new place and swap a changed
+/// translation's text over a steady background. Reads the translator here so the rest of the camera screen doesn't
 /// re-render with each update.
 struct LiveOverlay: View {
     @ObservedObject var live: LiveTranslator
@@ -16,15 +17,47 @@ struct LiveOverlay: View {
             )
             ZStack(alignment: .topLeading) {
                 ForEach(live.overlay, id: \.id) { t in
-                    LiveRegion(region: t.region, scale: fill.scale, rtl: rtl)
-                        .equatable()
-                        .offset(x: fill.left, y: fill.top)
-                        .animation(.easeOut(duration: Double(LiveRules.moveMs) / 1000), value: t.region.corners)
-                        .accessibilityIdentifier("live-region-\(t.id)")
+                    ZStack(alignment: .topLeading) {
+                        LiveBackground(region: t.region, scale: fill.scale)
+                        LiveRegion(region: t.region, scale: fill.scale, rtl: rtl)
+                            .equatable()
+                            .id(t.region.translatedText)
+                            .transition(Self.text(fadeInAfterMs: LiveRules.textFadeInDelayMs(t)))
+                    }
+                    .animation(.easeOut(duration: Double(LiveRules.moveMs) / 1000), value: t.region.translatedText)
+                    .offset(x: fill.left + live.shift.x * fill.scale, y: fill.top + live.shift.y * fill.scale)
+                    .animation(.easeOut(duration: Double(LiveRules.moveMs) / 1000), value: t.region.corners)
+                    .accessibilityIdentifier("live-region-\(t.id)")
                 }
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    /// A changed translation's old text fades out before the new fades in, so the two never show
+    /// together; a new box's text shows at once.
+    private static func text(fadeInAfterMs delayMs: Int?) -> AnyTransition {
+        let half = Double(LiveRules.moveMs) / 2000
+        return .asymmetric(
+            insertion: delayMs.map { .opacity.animation(.easeIn(duration: half).delay(Double($0) / 1000)) } ?? .identity,
+            removal: .opacity.animation(.easeOut(duration: half))
+        )
+    }
+}
+
+/// The region's box, kept opaque while its text changes.
+private struct LiveBackground: View {
+    let region: Region
+    let scale: CGFloat
+
+    var body: some View {
+        let box = RegionBox(region, scale: scale)
+        Rectangle()
+            .fill(Color(region.background))
+            .frame(width: box.width, height: box.height)
+            .rotationEffect(.radians(Double(region.angle)))
+            .position(box.center)
+            .accessibilityHidden(true)
     }
 }
 
@@ -35,7 +68,7 @@ private struct LiveRegion: View, Equatable {
     let rtl: Bool
 
     var body: some View {
-        RegionLabel(region: region, scale: scale, rtl: rtl, showOriginal: false)
+        RegionLabel(region: region, scale: scale, rtl: rtl, showOriginal: false, minFontSize: LiveRules.minTextSize, fillsBackground: false)
     }
 }
 

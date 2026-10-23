@@ -70,6 +70,38 @@ pub enum Direction {
 /// Crops at least this much taller than wide are read as vertical text, as in PaddleOCR.
 pub const TALL_RATIO: f32 = 1.5;
 
+/// Cosine and sine of `angle`, exact at multiples of 90° so axis-aligned quads stay exact.
+fn rotation(angle: f32) -> (f32, f32) {
+    let snap = |v: f32| {
+        if v.abs() < 1e-6 {
+            0.0
+        } else if (v.abs() - 1.0).abs() < 1e-6 {
+            v.signum()
+        } else {
+            v
+        }
+    };
+    (snap(angle.cos()), snap(angle.sin()))
+}
+
+/// Shoelace area, positive when the corners run clockwise on screen (y down).
+fn signed_area(pts: &[Pt]) -> f32 {
+    let n = pts.len();
+    (0..n)
+        .map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            a.x * b.y - b.x * a.y
+        })
+        .sum::<f32>()
+        / 2.0
+}
+
+/// Absolute difference of two angles, wrapped to [0, π].
+pub fn angle_between(a: f32, b: f32) -> f32 {
+    let d = (a - b).rem_euclid(std::f32::consts::TAU);
+    d.min(std::f32::consts::TAU - d)
+}
+
 /// Corners in order: top-left, top-right, bottom-right, bottom-left.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Quad(pub [Pt; 4]);
@@ -128,21 +160,39 @@ impl Quad {
         }
     }
 
-    /// Maps into a frame where `direction`'s reading direction is +x and following lines are +y.
-    pub fn to_reading_frame(&self, direction: Direction) -> Quad {
-        Quad(self.0.map(|p| match direction {
-            Direction::Horizontal => p,
-            Direction::TopToBottom => Pt::new(p.y, -p.x),
-            Direction::BottomToTop => Pt::new(-p.y, p.x),
-        }))
+    /// The quad relabeled as a tall crop when it may hold vertical text: already tall, or long
+    /// along an axis closer to vertical than horizontal.
+    pub fn vertical_candidate(&self) -> Option<Quad> {
+        if self.is_tall() {
+            return Some(*self);
+        }
+        let angle = self.angle();
+        if angle.sin().abs() < std::f32::consts::FRAC_1_SQRT_2 {
+            return None;
+        }
+        let direction = if angle < 0.0 {
+            Direction::TopToBottom
+        } else {
+            Direction::BottomToTop
+        };
+        Some(self.turned(direction)).filter(Quad::is_tall)
     }
 
-    pub fn from_reading_frame(&self, direction: Direction) -> Quad {
-        Quad(self.0.map(|p| match direction {
-            Direction::Horizontal => p,
-            Direction::TopToBottom => Pt::new(-p.y, p.x),
-            Direction::BottomToTop => Pt::new(p.y, -p.x),
-        }))
+    /// Maps into a frame where a line reading at `angle` reads along +x and following lines are +y.
+    pub fn to_reading_frame(&self, angle: f32) -> Quad {
+        let (c, s) = rotation(angle);
+        Quad(
+            self.0
+                .map(|p| Pt::new(p.x * c + p.y * s, p.y * c - p.x * s)),
+        )
+    }
+
+    pub fn from_reading_frame(&self, angle: f32) -> Quad {
+        let (c, s) = rotation(angle);
+        Quad(
+            self.0
+                .map(|p| Pt::new(p.x * c - p.y * s, p.x * s + p.y * c)),
+        )
     }
 
     pub fn bbox(&self) -> BBox {
@@ -166,6 +216,37 @@ impl Quad {
             self.0
                 .map(|p| Pt::new(p.x.clamp(0.0, max_x), p.y.clamp(0.0, max_y))),
         )
+    }
+
+    pub fn area(&self) -> f32 {
+        signed_area(&self.0).abs()
+    }
+
+    /// Area shared with `other`; both convex with corners in order.
+    pub fn intersection_area(&self, other: &Quad) -> f32 {
+        let orientation = signed_area(&other.0).signum();
+        let mut poly: Vec<Pt> = self.0.to_vec();
+        for i in 0..4 {
+            let (a, b) = (other.0[i], other.0[(i + 1) % 4]);
+            let side =
+                |p: Pt| orientation * ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x));
+            let input = std::mem::take(&mut poly);
+            for (j, &p) in input.iter().enumerate() {
+                let q = input[(j + 1) % input.len()];
+                let (sp, sq) = (side(p), side(q));
+                if sp >= 0.0 {
+                    poly.push(p);
+                }
+                if (sp >= 0.0) != (sq >= 0.0) {
+                    let t = sp / (sp - sq);
+                    poly.push(Pt::new(p.x + t * (q.x - p.x), p.y + t * (q.y - p.y)));
+                }
+            }
+            if poly.is_empty() {
+                return 0.0;
+            }
+        }
+        signed_area(&poly).abs()
     }
 
     /// Assumes a convex quad with corners in order.
@@ -375,8 +456,96 @@ mod tests {
             Direction::TopToBottom,
             Direction::BottomToTop,
         ] {
-            assert_eq!(tall.to_reading_frame(d).from_reading_frame(d), tall);
-            assert!(tall.turned(d).to_reading_frame(d).angle().abs() < 1e-6);
+            let angle = tall.turned(d).angle();
+            assert_eq!(tall.to_reading_frame(angle).from_reading_frame(angle), tall);
+            assert!(tall.turned(d).to_reading_frame(angle).angle().abs() < 1e-6);
         }
+    }
+
+    fn rotated(q: Quad, degrees: f32) -> Quad {
+        q.from_reading_frame(degrees.to_radians())
+    }
+
+    fn close(a: Quad, b: Quad) -> bool {
+        a.0.iter().zip(b.0).all(|(p, q)| p.dist(q) < 1e-3)
+    }
+
+    #[test]
+    fn reading_frame_levels_and_round_trips_any_angle() {
+        let line = rect(100.0, 200.0, 400.0, 240.0);
+        for degrees in [
+            -60.0f32, -45.0, -30.0, -15.0, 7.0, 15.0, 30.0, 45.0, 60.0, 135.0,
+        ] {
+            let angle = degrees.to_radians();
+            let tilted = rotated(line, degrees);
+            assert!(angle_between(tilted.angle(), angle) < 1e-4, "{degrees}");
+            let level = tilted.to_reading_frame(angle);
+            assert!(close(level, line), "{degrees}: {level:?}");
+            assert!(close(level.from_reading_frame(angle), tilted), "{degrees}");
+        }
+    }
+
+    #[test]
+    fn angles_compare_across_the_wrap() {
+        let deg = |d: f32| d.to_radians();
+        assert!((angle_between(deg(175.0), deg(-175.0)) - deg(10.0)).abs() < 1e-5);
+        assert!((angle_between(deg(-8.0), deg(8.0)) - deg(16.0)).abs() < 1e-5);
+        assert_eq!(angle_between(1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn intersection_area_of_rotated_quads() {
+        let a = rect(0.0, 0.0, 10.0, 10.0);
+        assert_eq!(a.area(), 100.0);
+        assert_eq!(a.intersection_area(&a), 100.0);
+        assert_eq!(a.intersection_area(&rect(5.0, 0.0, 15.0, 10.0)), 50.0);
+        assert_eq!(a.intersection_area(&rect(20.0, 0.0, 30.0, 10.0)), 0.0);
+        let reversed = Quad([a.0[0], a.0[3], a.0[2], a.0[1]]);
+        assert_eq!(
+            reversed.intersection_area(&rect(5.0, 0.0, 15.0, 10.0)),
+            50.0
+        );
+        assert_eq!(a.intersection_area(&reversed), 100.0);
+
+        let line = rect(0.0, 0.0, 300.0, 20.0);
+        let upper = rotated(line, 45.0);
+        let lower = rotated(rect(0.0, 24.0, 300.0, 44.0), 45.0);
+        assert!((upper.area() - 6000.0).abs() < 0.5);
+        assert!(upper.bbox().iou(&lower.bbox()) > 0.7);
+        assert!(upper.intersection_area(&lower) < 1e-3);
+        let diamond = rotated(rect(-10.0, -10.0, 10.0, 10.0), 45.0);
+        let square = rect(-10.0, -10.0, 10.0, 10.0);
+        let want = 800.0 * (std::f32::consts::SQRT_2 - 1.0);
+        assert!((diamond.intersection_area(&square) - want).abs() < 0.1);
+    }
+
+    #[test]
+    fn steep_wide_quads_are_vertical_candidates() {
+        let column = rect(0.0, 0.0, 200.0, 30.0);
+        for degrees in [-84.0, -60.0, 60.0, 84.0, 96.0, -96.0] {
+            let q = rotated(column, degrees);
+            let tall = q
+                .vertical_candidate()
+                .unwrap_or_else(|| panic!("{degrees}"));
+            assert!(tall.is_tall(), "{degrees}: {tall:?}");
+            assert!(
+                tall.angle().abs() < std::f32::consts::FRAC_PI_4,
+                "{degrees}"
+            );
+            assert!(
+                [Direction::TopToBottom, Direction::BottomToTop]
+                    .iter()
+                    .any(|&d| tall.turned(d) == q),
+                "{degrees}: one reading is the quad as detected"
+            );
+        }
+        for degrees in [0.0, 15.0, -30.0, -44.0] {
+            assert!(rotated(column, degrees).vertical_candidate().is_none());
+        }
+        assert!(rotated(rect(0.0, 0.0, 40.0, 30.0), 80.0)
+            .vertical_candidate()
+            .is_none());
+        let tall = rect(0.0, 0.0, 20.0, 100.0);
+        assert_eq!(tall.vertical_candidate(), Some(tall));
     }
 }

@@ -1,8 +1,10 @@
 package co.huggingface.translatte.ui.camera
 
+import androidx.compose.ui.geometry.Offset
 import uniffi.translatte_ffi.Point
 import uniffi.translatte_ffi.Region
 import uniffi.translatte_ffi.TranslationResult
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /** One change to the live overlay: "add", "move", "retext" or "remove" (with a [reason]) of [tracked]. */
@@ -29,6 +31,11 @@ class LiveEventLog(private val emit: (String) -> Unit) {
     fun prune(nowMs: Long, prev: List<TrackedRegion>, next: List<TrackedRegion>) {
         val t = elapsed(nowMs)
         diff(prev, next, null).forEach { emit(json(t, it)) }
+    }
+
+    /** The overlay now moves by [shift] frame pixels to follow the camera. */
+    fun shift(nowMs: Long, shift: Offset) {
+        emit(String.format(Locale.US, "{\"t_ms\":%d,\"ev\":\"shift\",\"dx\":%.1f,\"dy\":%.1f}", elapsed(nowMs), shift.x, shift.y))
     }
 
     fun reset(nowMs: Long, prev: List<TrackedRegion>) {
@@ -87,7 +94,7 @@ class LiveEventLog(private val emit: (String) -> Unit) {
                     if (i > 0) append(",")
                     append("{\"src\":")
                     appendString(r.sourceText)
-                    append(",\"box\":[${box(r.corners).joinToString(",")}]}")
+                    append(",\"box\":[${box(r.corners).joinToString(",")}],\"quad\":[${quad(r.corners).joinToString(",")}]}")
                 }
                 append("]}")
             }
@@ -100,6 +107,7 @@ class LiveEventLog(private val emit: (String) -> Unit) {
             append(",\"tr\":")
             r.translatedText?.let { appendString(it) } ?: append("null")
             append(",\"box\":[${box(r.corners).joinToString(",")}]")
+            append(",\"quad\":[${quad(r.corners).joinToString(",")}]")
             e.reason?.let { append(",\"reason\":\"$it\"") }
             append("}")
         }
@@ -111,6 +119,9 @@ class LiveEventLog(private val emit: (String) -> Unit) {
             corners.maxOf { it.x }.roundToInt(),
             corners.maxOf { it.y }.roundToInt(),
         )
+
+        /** The quad's corners, [x0, y0, x1, y1, ...], rounded to whole pixels. */
+        fun quad(corners: List<Point>): List<Int> = corners.flatMap { listOf(it.x.roundToInt(), it.y.roundToInt()) }
 
         private fun intersects(a: List<Point>, b: List<Point>): Boolean =
             minOf(a.maxOf { it.x }, b.maxOf { it.x }) > maxOf(a.minOf { it.x }, b.minOf { it.x }) &&

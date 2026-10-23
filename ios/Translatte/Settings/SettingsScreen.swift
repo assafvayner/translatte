@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsScreen: View {
     @AppStorage(AppTheme.storageKey) private var theme = AppTheme.system
     @AppStorage(LiveRules.storageKey) private var live = true
+    @AppStorage(LiveRules.fp32StorageKey) private var liveFp32 = false
+    @EnvironmentObject private var model: TranslatorModel
     @EnvironmentObject private var dialogs: DialogCenter
     @Environment(\.openURL) private var openURL
 
@@ -28,6 +30,20 @@ struct SettingsScreen: View {
                             .accessibilityIdentifier("live-translation")
                     }
                 }
+                #if DEBUG
+                Card(title: "Live OCR precision (debug)") {
+                    CheckRow(title: "fp16", subtitle: "Live models, faster", selected: !liveFp32) {
+                        liveFp32 = false
+                        model.setLiveFp32(false)
+                    }
+                    .accessibilityIdentifier("live-precision-fp16")
+                    CheckRow(title: "fp32", subtitle: "The photo models", selected: liveFp32) {
+                        liveFp32 = true
+                        model.setLiveFp32(true)
+                    }
+                    .accessibilityIdentifier("live-precision-fp32")
+                }
+                #endif
                 Card(title: "About") {
                     ListRow(title: "Version", subtitle: Bundle.main.appVersion)
                         .accessibilityElement(children: .combine)

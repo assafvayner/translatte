@@ -10,6 +10,8 @@ struct LiveFrame {
     let rotation: Int
     /// A replayed video frame's position.
     var ptsMs: Int64?
+    /// The frame's `LiveRules.thumbnail`.
+    var thumb: Data?
 
     init(rgba: Data, width: Int, height: Int, rotation: Int) {
         self.rgba = rgba
@@ -50,6 +52,21 @@ struct LiveFrame {
         }
         guard drawn else { return nil }
         self.init(rgba: bytes, width: width, height: height, rotation: 0)
+        thumb = bytes.withUnsafeBytes { LiveRules.thumbnail($0, width: width, height: height, rowStride: width * 4, rotation: 0) }
+    }
+
+    /// The `LiveRules.thumbnail` of a BGRA camera buffer.
+    static func thumbnail(_ pixelBuffer: CVPixelBuffer, rotation: Int) -> Data? {
+        guard CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else { return nil }
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let stride = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        return LiveRules.thumbnail(
+            UnsafeRawBufferPointer(start: base, count: stride * height),
+            width: CVPixelBufferGetWidth(pixelBuffer), height: height, rowStride: stride, rotation: rotation
+        )
     }
 
     /// The frame as an upright photo for the result viewer.
@@ -85,6 +102,8 @@ private struct ReadFrame {
 final class LiveTranslator: ObservableObject {
     @Published private(set) var overlay: [TrackedRegion] = []
     @Published private(set) var imageSize: CGSize = .zero
+    /// How far the image moved, in frame pixels, from the frame `overlay` was read from to the latest frame.
+    @Published private(set) var shift: CGPoint = .zero
     /// Debug builds: updates/s and stage times of the latest update.
     @Published private(set) var readout: String?
 
@@ -92,6 +111,7 @@ final class LiveTranslator: ObservableObject {
     private let translate: (TranslationResult) async throws -> TranslationResult
     private let gate = LiveGate()
     private var tracker = LiveOverlayTracker()
+    private let motion = LiveMotion()
     private var latest: (frame: LiveFrame, result: TranslationResult)?
     private var lastDoneMs: Int64?
     private var generation = 0
@@ -124,7 +144,9 @@ final class LiveTranslator: ObservableObject {
         gate.reset()
         events?.reset(nowMs: Self.nowMs(), prev: overlay)
         tracker.reset()
+        motion.reset()
         overlay = []
+        shift = .zero
         latest = nil
         lastDoneMs = nil
         readout = nil
@@ -140,10 +162,24 @@ final class LiveTranslator: ObservableObject {
     /// Runs on the camera's frame queue for every frame; converts and translates only those `LiveRules` lets through.
     /// The UI is portrait-only, so back-camera buffers need a clockwise quarter turn.
     nonisolated func offer(_ pixelBuffer: CVPixelBuffer, rotation: Int = 90, ptsMs: Int64? = nil) {
+        guard gate.enabled else { return }
+        let thumb = LiveFrame.thumbnail(pixelBuffer, rotation: rotation)
+        if let thumb { track(thumb) }
         guard gate.tryTake(nowMs: Self.nowMs(), hot: ThermalMonitor.shared.hot) else { return }
         guard var frame = LiveFrame(pixelBuffer: pixelBuffer, rotation: rotation) else { return gate.readFailed(nowMs: Self.nowMs()) }
         frame.ptsMs = ptsMs
+        frame.thumb = thumb
         Task { @MainActor in await self.run(frame) }
+    }
+
+    /// Measures camera motion on a new preview frame's `LiveRules.thumbnail`.
+    private nonisolated func track(_ thumb: Data) {
+        guard motion.frame(thumb) else { return }
+        Task { @MainActor in
+            let s = self.motion.shift
+            self.shift = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
+            self.events?.shift(nowMs: Self.nowMs(), shift: self.shift)
+        }
     }
 
     /// Debug builds: plays `replay` in place of the camera, offering its frames, until cancelled.
@@ -194,9 +230,13 @@ final class LiveTranslator: ObservableObject {
     }
 
     private func publish(_ frame: LiveFrame, _ result: TranslationResult) {
+        guard !LiveRules.skipped(result) else { return }
         let now = Self.nowMs()
         let prev = overlay
-        overlay = tracker.update(result.regions, nowMs: now)
+        let moved = motion.rebase(frame.thumb.map { Thumb(pixels: $0, width: Int(result.imageWidth), height: Int(result.imageHeight)) })
+        overlay = tracker.update(result.regions, nowMs: now, shift: moved)
+        let s = motion.shift
+        shift = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
         if !overlay.isEmpty, pruner == nil { pruner = Task { await self.prune() } }
         imageSize = CGSize(width: Int(result.imageWidth), height: Int(result.imageHeight))
         latest = (frame, result)
@@ -205,6 +245,7 @@ final class LiveTranslator: ObservableObject {
         readout = line
         NSLog("translatte: live %@ regions %d", line, result.regions.count)
         events?.update(nowMs: now, prev: prev, next: overlay, result: result, intervalMs: lastDoneMs.map { now - $0 }, ptsMs: frame.ptsMs)
+        events?.shift(nowMs: now, shift: shift)
         #endif
         lastDoneMs = now
     }

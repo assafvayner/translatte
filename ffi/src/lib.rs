@@ -12,6 +12,7 @@ use translatte_core::geometry::{Pt, Quad};
 use translatte_core::loader::{load_pipeline, LoadedPipeline};
 use translatte_core::manifest::{Language, Manifest, ModelEntry, ModelKind};
 use translatte_core::model_store::{InstallState, ModelStore};
+use translatte_core::ocr::Precision;
 use translatte_core::pipeline::{PipelineOutput, Stage, TranslatedRegion};
 use translatte_core::TranslatteError;
 
@@ -140,6 +141,9 @@ pub struct Region {
     pub background: Rgb,
     pub foreground: Rgb,
     pub angle: f32,
+    /// The block's typical line height in image pixels; 0 when unknown.
+    #[uniffi(default = 0.0)]
+    pub line_height: f32,
 }
 
 impl Region {
@@ -158,6 +162,7 @@ impl Region {
             bg_rgb: [self.background.r, self.background.g, self.background.b],
             fg_rgb: [self.foreground.r, self.foreground.g, self.foreground.b],
             angle: self.angle,
+            line_height: self.line_height,
         })
     }
 }
@@ -198,6 +203,10 @@ pub struct TranslationResult {
     /// The language code the text was read as; `translate_regions` translates from it.
     #[uniffi(default = "")]
     pub source: String,
+    /// `ocr_frame` found the frame too blurry to read and returned no regions: keep showing the
+    /// last frame's rather than clearing them. `translate_regions` passes it through.
+    #[uniffi(default = false)]
+    pub skipped: bool,
 }
 
 impl TranslationResult {
@@ -212,6 +221,7 @@ impl TranslationResult {
                 background: r.bg_rgb.into(),
                 foreground: r.fg_rgb.into(),
                 angle: r.angle,
+                line_height: r.line_height,
             })
             .collect();
         Self {
@@ -221,6 +231,7 @@ impl TranslationResult {
             translation_error: out.translation_error,
             timings: out.timings.into(),
             source: source.to_string(),
+            skipped: out.skipped,
         }
     }
 }
@@ -289,6 +300,46 @@ impl DownloadToken {
     }
 }
 
+/// How far the image moved from a [`MotionReference`] to a later frame, in thumbnail pixels: a
+/// feature at (x, y) in the reference is at (x + dx, y + dy) in the later frame.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct FrameShift {
+    pub dx: f32,
+    pub dy: f32,
+    /// The correlation peak's share of the energy, 0 to 1.
+    pub peak: f32,
+}
+
+/// A live frame's grayscale thumbnail that later thumbnails of the same size are compared to, to
+/// follow camera motion (translation only).
+#[derive(uniffi::Object)]
+pub struct MotionReference(translatte_core::motion::Reference);
+
+/// A reference for `thumbnail`, row-major 8-bit grayscale of `width` x `height` (powers of two),
+/// or `None` when the size is wrong or the image too flat to match.
+#[uniffi::export]
+pub fn motion_reference(
+    thumbnail: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Option<Arc<MotionReference>> {
+    translatte_core::motion::Reference::new(&thumbnail, width as usize, height as usize)
+        .map(|r| Arc::new(MotionReference(r)))
+}
+
+#[uniffi::export]
+impl MotionReference {
+    /// The translation from this reference to `thumbnail` (the same size), or `None` when it can't
+    /// be trusted. About a millisecond for 128 x 128; call it off the main thread.
+    pub fn shift_to(&self, thumbnail: Vec<u8>) -> Option<FrameShift> {
+        self.0.shift_to(&thumbnail).map(|s| FrameShift {
+            dx: s.dx,
+            dy: s.dy,
+            peak: s.peak,
+        })
+    }
+}
+
 struct Cached {
     script_pack: String,
     translate: bool,
@@ -301,6 +352,7 @@ struct Cached {
 pub struct Engine {
     store: ModelStore,
     cached: Mutex<Option<Cached>>,
+    live_precision: Mutex<Precision>,
     #[cfg(feature = "download")]
     downloading: Mutex<()>,
 }
@@ -313,6 +365,7 @@ impl Engine {
         Ok(Arc::new(Self {
             store: ModelStore::new(manifest, PathBuf::from(models_dir)),
             cached: Mutex::new(None),
+            live_precision: Mutex::new(Precision::Fp16),
             #[cfg(feature = "download")]
             downloading: Mutex::new(()),
         }))
@@ -493,6 +546,9 @@ impl Engine {
             .iter()
             .map(Region::to_core)
             .collect::<Result<Vec<_>, _>>()?;
+        if frame.skipped {
+            return Ok(frame);
+        }
         let Some(pipeline) = self.cached_pipeline(src) else {
             return Ok(frame);
         };
@@ -501,6 +557,7 @@ impl Engine {
                 regions,
                 translation_error: None,
                 timings: Default::default(),
+                skipped: false,
             },
             src,
             tgt,
@@ -513,6 +570,20 @@ impl Engine {
         result.timings.translate_ms = out.timings.translate_ms;
         result.timings.reused = out.timings.reused;
         Ok(result)
+    }
+
+    /// Sets the precision `ocr_frame` reads at, `fp16` (the default) or `fp32`; `fp32` reuses the
+    /// photo models rather than loading a second set.
+    pub fn set_live_precision(&self, precision: String) -> Result<(), FfiError> {
+        let precision: Precision = precision.parse()?;
+        *self
+            .live_precision
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = precision;
+        if let Some(c) = self.lock_cached().as_ref() {
+            c.pipeline.set_live_precision(precision);
+        }
+        Ok(())
     }
 
     /// Frees loaded models (e.g. when the app is backgrounded). Calls still running keep the
@@ -566,6 +637,12 @@ impl Engine {
         if !reusable {
             drop_cached(&mut cached);
             let pipeline = load_pipeline(&self.store, src, translate, None)?;
+            pipeline.set_live_precision(
+                *self
+                    .live_precision
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
+            );
             *cached = Some(Cached {
                 script_pack: src.script_pack.clone().unwrap_or_default(),
                 translate,
@@ -685,6 +762,7 @@ mod tests {
                 bg_rgb: [1, 2, 3],
                 fg_rgb: [4, 5, 6],
                 angle: 0.5,
+                line_height: 7.0,
             }],
             translation_error: None,
             timings: translatte_core::pipeline::StageTimings {
@@ -694,6 +772,7 @@ mod tests {
                 reused: 4,
                 ..Default::default()
             },
+            skipped: false,
         };
         let r = TranslationResult::from_output(out, 10, 20, "fr");
         assert_eq!(r.source, "fr");
@@ -711,6 +790,8 @@ mod tests {
         assert_eq!(region.background, Rgb { r: 1, g: 2, b: 3 });
         assert_eq!(region.foreground, Rgb { r: 4, g: 5, b: 6 });
         assert_eq!(region.translated_text.as_deref(), Some("Exit"));
+        assert_eq!(region.line_height, 7.0);
+        assert_eq!(region.to_core().unwrap().line_height, 7.0);
         assert_eq!(
             r.timings,
             StageTimings {
@@ -767,6 +848,7 @@ mod tests {
         assert!(read.timings.detect_ms + read.timings.recognize_ms > 0);
         assert_eq!(read.timings.translate_ms, 0);
         assert_eq!(read.source, "fr");
+        assert!(!read.skipped);
         let frame = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(frame.regions, photo.regions);
         assert_eq!(frame.timings.reused, 0);
@@ -780,6 +862,14 @@ mod tests {
         let turned = engine.translate_regions(read.clone()).unwrap();
         assert_eq!(turned.regions, photo.regions);
         assert_eq!(turned.timings.reused as usize, turned.regions.len());
+
+        let blurry = image::imageops::blur(&rgba, 6.0);
+        let skipped = engine
+            .ocr_frame(blurry.into_raw(), w, h, 0, "fr".into())
+            .unwrap();
+        assert!(skipped.skipped);
+        assert!(skipped.regions.is_empty());
+        assert!(engine.translate_regions(skipped).unwrap().skipped);
 
         engine.unload();
         let unloaded = engine.translate_regions(read).unwrap();
@@ -798,6 +888,7 @@ mod tests {
                 background: Rgb { r: 0, g: 0, b: 0 },
                 foreground: Rgb { r: 0, g: 0, b: 0 },
                 angle: 0.0,
+                line_height: 0.0,
             }],
             translation_error: None,
             timings: StageTimings {
@@ -808,6 +899,7 @@ mod tests {
                 reused: 0,
             },
             source: "fr".into(),
+            skipped: false,
         }
     }
 
