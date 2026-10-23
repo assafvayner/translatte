@@ -30,11 +30,6 @@ pub struct Line {
 
 pub trait TextDetector {
     fn detect(&mut self, img: &RgbImage) -> Result<Vec<Quad>>;
-
-    /// Detects text in a live camera frame.
-    fn detect_frame(&mut self, img: &RgbImage) -> Result<Vec<Quad>> {
-        self.detect(img)
-    }
 }
 
 pub trait TextRecognizer {

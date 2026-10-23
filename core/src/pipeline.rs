@@ -87,16 +87,11 @@ impl<D: TextDetector, R: TextRecognizer> Ocr<D, R> {
     fn read(
         &mut self,
         img: &RgbImage,
-        live: bool,
         on_stage: &mut dyn FnMut(Stage),
     ) -> Result<(Vec<Line>, StageTimings)> {
         on_stage(Stage::Detecting);
         let start = Instant::now();
-        let quads = if live {
-            self.detector.detect_frame(img)?
-        } else {
-            self.detector.detect(img)?
-        };
+        let quads = self.detector.detect(img)?;
         let detected = Instant::now();
         let total = quads.len();
         let mut lines = self.recognizer.recognize_all(img, &quads, &mut |done| {
@@ -246,7 +241,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
             .as_ref()
             .filter(|_| live && !self.live_on_photo_ocr.load(Ordering::Relaxed))
         else {
-            return lock(&self.ocr).read(img, live, on_stage);
+            return lock(&self.ocr).read(img, on_stage);
         };
         let mut ocr = lock(&live_ocr.ocr);
         if ocr.is_none() {
@@ -260,9 +255,7 @@ impl<D: TextDetector, R: TextRecognizer, T: Translator> Pipeline<D, R, T> {
                 precision: live_ocr.precision,
             });
         }
-        ocr.as_mut()
-            .expect("loaded above")
-            .read(img, live, on_stage)
+        ocr.as_mut().expect("loaded above").read(img, on_stage)
     }
 
     /// Prepares the translator for `src` to `tgt` (e.g. when the user picks the languages), so the
@@ -583,29 +576,6 @@ mod tests {
         assert_eq!(out.regions[0].translated_text.as_deref(), Some("ENTRÉE"));
         frame(&p, &img);
         assert_eq!(loads.load(Ordering::Relaxed), 1);
-    }
-
-    /// Finds text at the top of photos and further down in live frames.
-    struct FrameDet;
-    impl TextDetector for FrameDet {
-        fn detect(&mut self, _img: &RgbImage) -> Result<Vec<Quad>> {
-            Ok(vec![quad(10.0)])
-        }
-
-        fn detect_frame(&mut self, _img: &RgbImage) -> Result<Vec<Quad>> {
-            Ok(vec![quad(200.0)])
-        }
-    }
-
-    #[test]
-    fn live_frames_detect_as_frames() {
-        let img = page();
-        let p: Pipeline<_, _, Upper> =
-            Pipeline::new(FrameDet, FakeRec(vec![("sortie", 0.9); 2], 0), None);
-        let photo = p.run(&img, &lang(), &lang(), &mut |_| {}).unwrap();
-        assert_eq!(photo.regions[0].quad, quad(10.0));
-        let live = p.read_frame(&img, &lang()).unwrap();
-        assert_eq!(live.regions[0].quad, quad(200.0));
     }
 
     #[test]
